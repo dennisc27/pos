@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Bell, Calculator, MoonStar, Search, Store, SunMedium, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ export function TopBar() {
   const [accumulator, setAccumulator] = useState<number | null>(null);
   const [pendingOperator, setPendingOperator] = useState<"add" | "subtract" | "multiply" | "divide" | null>(null);
   const [overwriteDisplay, setOverwriteDisplay] = useState(true);
+  const [isClient, setIsClient] = useState(false);
 
   const closeCalculator = useCallback(() => {
     setIsCalculatorOpen(false);
@@ -242,6 +244,10 @@ export function TopBar() {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
@@ -318,56 +324,59 @@ export function TopBar() {
           <span className="font-medium">Maria P.</span>
         </div>
       </div>
-      {isCalculatorOpen ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 bg-slate-950/60 backdrop-blur"
-          onClick={closeCalculator}
-        >
-          <div
-            className="w-full max-w-sm rounded-3xl border border-slate-200/70 bg-white p-5 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-100">Quick calculator</span>
-              <button
-                type="button"
-                onClick={closeCalculator}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/70 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
-                aria-label="Close calculator"
+      {isClient && isCalculatorOpen
+        ? createPortal(
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="fixed inset-0 z-[1000] flex items-center justify-center px-4 py-6 bg-slate-950/60 backdrop-blur"
+              onClick={closeCalculator}
+            >
+              <div
+                className="w-full max-w-sm rounded-3xl border border-slate-200/70 bg-white p-5 shadow-2xl outline-none dark:border-slate-800/80 dark:bg-slate-900"
+                onClick={(event) => event.stopPropagation()}
               >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="mb-4 rounded-2xl border border-slate-200/70 bg-slate-50 px-4 py-3 text-right text-2xl font-semibold tracking-tight text-slate-900 shadow-inner dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
-              {displayValue}
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {calculatorButtons.map((button) => (
-                <button
-                  key={button.label}
-                  type="button"
-                  onClick={button.action}
-                  className={cn(
-                    "flex h-12 items-center justify-center rounded-xl border text-base font-medium transition",
-                    button.span === 2 ? "col-span-2" : undefined,
-                    button.variant === "primary"
-                      ? "border-sky-500 bg-sky-500 text-white shadow hover:bg-sky-600"
-                      : button.variant === "accent"
-                        ? "border-slate-200 bg-slate-100 text-slate-700 hover:border-slate-300 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-slate-600"
-                        : button.variant === "muted"
-                          ? "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-700"
-                  )}
-                >
-                  {button.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
+                <div className="mb-4 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-100">Quick calculator</span>
+                  <button
+                    type="button"
+                    onClick={closeCalculator}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/70 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                    aria-label="Close calculator"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="mb-4 rounded-2xl border border-slate-200/70 bg-slate-50 px-4 py-3 text-right text-2xl font-semibold tracking-tight text-slate-900 shadow-inner dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
+                  {displayValue}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {calculatorButtons.map((button) => (
+                    <button
+                      key={button.label}
+                      type="button"
+                      onClick={button.action}
+                      className={cn(
+                        "flex h-12 items-center justify-center rounded-xl border text-base font-medium transition",
+                        button.span === 2 ? "col-span-2" : undefined,
+                        button.variant === "primary"
+                          ? "border-sky-500 bg-sky-500 text-white shadow hover:bg-sky-600"
+                          : button.variant === "accent"
+                            ? "border-slate-200 bg-slate-100 text-slate-700 hover:border-slate-300 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-slate-600"
+                            : button.variant === "muted"
+                              ? "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-700"
+                      )}
+                    >
+                      {button.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </header>
   );
 }
