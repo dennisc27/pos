@@ -16,9 +16,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className="flex min-h-screen bg-slate-950 text-slate-100">
+      <body className="flex h-screen overflow-hidden bg-slate-950 text-slate-100">
         <Sidebar />
-        <div className="flex flex-1 flex-col">
+        <div className="flex flex-1 flex-col overflow-hidden">
           <TopBar />
           <main className="flex-1 overflow-y-auto px-6 py-8 scrollbar-thin">
             {children}
