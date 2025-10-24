@@ -322,11 +322,11 @@ export function TopBar() {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 bg-slate-950/60 backdrop-blur"
           onClick={closeCalculator}
         >
           <div
-            className="w-[20rem] rounded-3xl border border-slate-200/70 bg-white p-5 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            className="w-full max-w-sm rounded-3xl border border-slate-200/70 bg-white p-5 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">

@@ -106,12 +106,14 @@ export function OrderPanel({
           </div>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-200 dark:hover:border-slate-700"
               onClick={onChangeCustomer}
             >
               Change
             </button>
             <button
+              type="button"
               className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-200 dark:hover:border-slate-700"
               onClick={onAddCustomer}
             >

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { AppWindow, Camera, Headphones, Laptop, Shirt, Smartphone, Watch } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
+import { AppWindow, Camera, Headphones, Laptop, Shirt, Smartphone, Watch, X } from "lucide-react";
 
 import { ProductGallery } from "@/components/pos/product-gallery";
 import { OrderPanel } from "@/components/pos/order-panel";
@@ -203,6 +204,8 @@ export default function PosPage() {
   const [cartLines, setCartLines] = useState<CartLine[]>(initialCartLines);
   const [tenderBreakdown, setTenderBreakdown] = useState<TenderBreakdown[]>(initialTenderBreakdown);
   const [customerName, setCustomerName] = useState("Walk-in customer");
+  const [customerDialogMode, setCustomerDialogMode] = useState<"change" | "add" | null>(null);
+  const [customerInput, setCustomerInput] = useState("");
 
   const filteredProducts = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -327,41 +330,58 @@ export default function PosPage() {
     setTenderBreakdown((previous) => previous.filter((item) => item.id !== tenderId));
   }, []);
 
+  const closeCustomerDialog = useCallback(() => {
+    setCustomerDialogMode(null);
+    setCustomerInput("");
+  }, []);
+
+  useEffect(() => {
+    if (!customerDialogMode) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCustomerDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [customerDialogMode, closeCustomerDialog]);
+
+  const openCustomerDialog = useCallback(
+    (mode: "change" | "add") => {
+      setCustomerDialogMode(mode);
+      setCustomerInput(mode === "change" ? customerName : "");
+    },
+    [customerName]
+  );
+
+  const handleSubmitCustomer = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const trimmed = customerInput.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      setCustomerName(trimmed);
+      closeCustomerDialog();
+    },
+    [closeCustomerDialog, customerInput]
+  );
+
   const handleChangeCustomer = useCallback(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const next = window.prompt("Change customer", customerName);
-    if (!next) {
-      return;
-    }
-
-    const trimmed = next.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    setCustomerName(trimmed);
-  }, [customerName]);
+    openCustomerDialog("change");
+  }, [openCustomerDialog]);
 
   const handleAddCustomer = useCallback(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const next = window.prompt("Add customer name");
-    if (!next) {
-      return;
-    }
-
-    const trimmed = next.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    setCustomerName(trimmed);
-  }, []);
+    openCustomerDialog("add");
+  }, [openCustomerDialog]);
 
   const tenderOptions = useMemo(
     () =>
@@ -373,6 +393,8 @@ export default function PosPage() {
   );
 
   const selectedProductIds = useMemo(() => cartLines.map((line) => line.id), [cartLines]);
+
+  const isCustomerDialogOpen = customerDialogMode !== null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -405,6 +427,66 @@ export default function PosPage() {
           defaultTenderAmount={saleSummary.balanceDue}
         />
       </div>
+      {isCustomerDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 bg-slate-950/60 backdrop-blur"
+          onClick={closeCustomerDialog}
+        >
+          <form
+            className="w-full max-w-md space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={handleSubmitCustomer}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                  {customerDialogMode === "change" ? "Change customer" : "Add customer"}
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Search or enter the customer that should be linked to this sale.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeCustomerDialog}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close customer dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Customer name
+              </label>
+              <input
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200"
+                placeholder="Search CRM or type a name"
+                value={customerInput}
+                onChange={(event) => setCustomerInput(event.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeCustomerDialog}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+              >
+                {customerDialogMode === "change" ? "Update" : "Add customer"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }
