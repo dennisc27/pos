@@ -19,6 +19,8 @@ export type SaleSummary = {
   tax: number;
   total: number;
   balanceDue: number;
+  cashDue: number;
+  nonCashTendered: number;
 };
 
 export type TenderBreakdown = {

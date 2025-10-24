@@ -68,6 +68,12 @@ export function ReceiptPreview({
           </div>
         </div>
         <div className="space-y-1 pt-2">
+          {summary.cashDue > 0 ? (
+            <div className="flex items-center justify-between text-slate-700 dark:text-slate-200">
+              <span>Cash drawer</span>
+              <span>{formatCurrency(summary.cashDue)}</span>
+            </div>
+          ) : null}
           {tenders.map((tender) => (
             <div key={tender.id} className="flex items-center justify-between text-slate-700 dark:text-slate-200">
               <span>{tender.label}</span>

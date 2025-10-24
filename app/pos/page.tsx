@@ -10,6 +10,7 @@ import type { CartLine, SaleSummary, TenderBreakdown, Product, ProductCategory }
 
 const TENDER_METHODS = ["cash", "card", "transfer", "store_credit", "gift"] as const;
 type TenderMethod = (typeof TENDER_METHODS)[number];
+type NonCashTenderMethod = Exclude<TenderMethod, "cash">;
 
 const TENDER_LABELS: Record<TenderMethod, string> = {
   cash: "Cash drawer",
@@ -142,16 +143,9 @@ const initialCartLines: CartLine[] = [
 const initialTenderBreakdown: TenderBreakdown[] = [
   {
     id: "tender-1",
-    method: "cash",
-    label: TENDER_LABELS.cash,
-    amount: 5000,
-    status: "captured"
-  },
-  {
-    id: "tender-2",
     method: "card",
     label: TENDER_LABELS.card,
-    amount: 46850,
+    amount: 15000,
     reference: "AUTH-783202",
     status: "pending"
   }
@@ -174,15 +168,18 @@ function buildSummary(items: CartLine[], tenders: TenderBreakdown[]): SaleSummar
     return sum + (lineTotal - base);
   }, 0);
   const total = Math.max(subtotal - discounts, 0);
-  const tendered = tenders.reduce((sum, tender) => sum + tender.amount, 0);
-  const balanceDue = Math.max(total - tendered, 0);
+  const nonCashTendered = tenders.reduce((sum, tender) => sum + tender.amount, 0);
+  const cappedNonCash = Math.min(nonCashTendered, total);
+  const cashDue = Math.max(total - cappedNonCash, 0);
 
   return {
     subtotal,
     discounts,
     tax,
     total,
-    balanceDue
+    balanceDue: cashDue,
+    cashDue,
+    nonCashTendered: cappedNonCash
   };
 }
 
@@ -405,10 +402,12 @@ export default function PosPage() {
 
   const tenderOptions = useMemo(
     () =>
-      (TENDER_METHODS as readonly TenderBreakdown["method"][]).map((method) => ({
-        value: method,
-        label: TENDER_LABELS[method]
-      })),
+      TENDER_METHODS.filter((method): method is NonCashTenderMethod => method !== "cash").map(
+        (method) => ({
+          value: method,
+          label: TENDER_LABELS[method]
+        })
+      ),
     []
   );
 
@@ -417,13 +416,14 @@ export default function PosPage() {
   const isCustomerDialogOpen = customerDialogMode !== null;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-6 xl:grid-cols-[2fr_1.15fr]">
-        <ProductGallery
-          categories={productCategories}
-          products={filteredProducts}
-          activeCategoryId={activeCategoryId}
-          searchTerm={searchTerm}
+    <>
+      <div className="flex flex-col gap-6 pb-32">
+        <div className="grid gap-6 xl:grid-cols-[2fr_1.15fr]">
+          <ProductGallery
+            categories={productCategories}
+            products={filteredProducts}
+            activeCategoryId={activeCategoryId}
+            searchTerm={searchTerm}
           onSearchTermChange={setSearchTerm}
           onCategorySelect={setActiveCategoryId}
           selectedProductIds={selectedProductIds}
@@ -445,8 +445,31 @@ export default function PosPage() {
           onChangeCustomer={handleChangeCustomer}
           onAddCustomer={handleAddCustomer}
           tenderOptions={tenderOptions}
-          defaultTenderAmount={saleSummary.balanceDue}
+          defaultTenderAmount={saleSummary.cashDue}
+          cashTenderAmount={saleSummary.cashDue}
         />
+        </div>
+      </div>
+      <div className="sticky bottom-0 z-30 -mx-6 mt-6 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/90">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Quick actions
+          </div>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <button className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
+              Hold
+            </button>
+            <button className="rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-500/70 hover:text-rose-500 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:border-rose-400/70 dark:hover:text-rose-200">
+              Void
+            </button>
+            <button className="rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white">
+              Payment
+            </button>
+            <button className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
+              Bank transaction
+            </button>
+          </div>
+        </div>
       </div>
       {isCustomerDialogOpen ? (
         <div
@@ -508,6 +531,6 @@ export default function PosPage() {
           </form>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { CreditCard, Minus, MoreHorizontal, Plus, Trash2, UserCircle2 } from "lucide-react";
+import { CreditCard, HandCoins, Minus, MoreHorizontal, Plus, Trash2, UserCircle2 } from "lucide-react";
 import { PosCard } from "./pos-card";
 import { formatCurrency } from "./utils";
 import type { CartLine, SaleSummary, TenderBreakdown } from "./types";
@@ -42,7 +42,8 @@ export function OrderPanel({
   onAddCustomer,
   onPriceChange,
   tenderOptions,
-  defaultTenderAmount
+  defaultTenderAmount,
+  cashTenderAmount
 }: {
   items: CartLine[];
   summary: SaleSummary;
@@ -60,10 +61,11 @@ export function OrderPanel({
   onPriceChange: (lineId: string, price: number) => void;
   tenderOptions: { value: TenderBreakdown["method"]; label: string }[];
   defaultTenderAmount: number;
+  cashTenderAmount: number;
 }) {
   const [isAddingTender, setIsAddingTender] = useState(false);
   const firstOption = useMemo(
-    () => tenderOptions[0]?.value ?? ("cash" as TenderBreakdown["method"]),
+    () => tenderOptions[0]?.value ?? ("card" as TenderBreakdown["method"]),
     [tenderOptions]
   );
   const [selectedMethod, setSelectedMethod] = useState<TenderBreakdown["method"]>(firstOption);
@@ -88,7 +90,7 @@ export function OrderPanel({
     });
   }, [items]);
 
-  const formattedDefaultAmount = useMemo(() => {
+  const tenderPlaceholder = useMemo(() => {
     if (defaultTenderAmount <= 0) {
       return "0.00";
     }
@@ -99,13 +101,16 @@ export function OrderPanel({
     event.preventDefault();
     const trimmedAmount = amountInput.trim();
     const amountValue = trimmedAmount ? Number(trimmedAmount.replace(/[^0-9.-]/g, "")) : defaultTenderAmount;
-    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+    const remaining = defaultTenderAmount;
+    const parsedAmount = Number.isFinite(amountValue) ? amountValue : 0;
+    const nextAmount = Math.min(Math.max(parsedAmount, 0), remaining);
+    if (!Number.isFinite(nextAmount) || nextAmount <= 0) {
       return;
     }
 
     onAddTender({
       method: selectedMethod,
-      amount: amountValue,
+      amount: nextAmount,
       reference: referenceInput.trim() ? referenceInput.trim() : undefined
     });
 
@@ -115,11 +120,26 @@ export function OrderPanel({
   };
 
   const handleStartAddingTender = () => {
+    if (defaultTenderAmount <= 0 || tenderOptions.length === 0) {
+      return;
+    }
     setIsAddingTender(true);
-    setSelectedMethod(tenderOptions[0]?.value ?? ("cash" as TenderBreakdown["method"]));
+    setSelectedMethod(tenderOptions[0]?.value ?? ("card" as TenderBreakdown["method"]));
     setAmountInput(defaultTenderAmount > 0 ? defaultTenderAmount.toFixed(2) : "");
     setReferenceInput("");
   };
+
+  useEffect(() => {
+    if (!isAddingTender) {
+      return;
+    }
+    if (defaultTenderAmount <= 0) {
+      setIsAddingTender(false);
+      setAmountInput("");
+      return;
+    }
+    setAmountInput(defaultTenderAmount.toFixed(2));
+  }, [defaultTenderAmount, isAddingTender]);
 
   const focusPriceAtIndex = (index: number) => {
     if (index < 0 || index >= items.length) {
@@ -252,59 +272,57 @@ export function OrderPanel({
             const taxAmount = lineSaleTotal - baseAmount;
             const priceInputValue = editingPrices[item.id] ?? item.price.toFixed(2);
             const hasDiscount = lineDiscount > 0;
+            const variantLines = item.variant ? item.variant.split("·").map((part) => part.trim()) : [];
             return (
               <div
                 key={item.id}
-                className="rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200"
+                className="rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200"
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex-1 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-slate-900 dark:text-white">{item.name}</span>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+                  <div className="flex-1 space-y-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{item.name}</p>
+                      <div className="space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        {variantLines.map((line) => (
+                          <p key={line}>{line}</p>
+                        ))}
+                        {item.note ? <p>{item.note}</p> : null}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 dark:border-slate-700/80 dark:bg-slate-950/60">
                         {item.sku}
                       </span>
                       {item.status ? (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                        <span className="rounded-full border border-amber-300/70 bg-amber-50 px-2 py-0.5 text-amber-600 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
                           {item.status}
                         </span>
                       ) : null}
                     </div>
-                    {item.variant ? (
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{item.variant}</p>
-                    ) : null}
-                    {item.note ? (
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{item.note}</p>
-                    ) : null}
                   </div>
-                  <div className="flex flex-col items-end gap-2 sm:min-w-[220px]">
-                    <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      Precio actual
-                    </span>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm font-semibold text-slate-700 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-100">
-                        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                          RD$
-                        </span>
-                        <input
-                          ref={(element) => {
-                            if (element) {
-                              priceInputRefs.current[item.id] = element;
-                            } else {
-                              delete priceInputRefs.current[item.id];
-                            }
-                          }}
-                          aria-label={`Price for ${item.name}`}
-                          className="w-24 bg-transparent text-right text-sm font-semibold text-slate-700 focus:outline-none dark:text-slate-100"
-                          inputMode="decimal"
-                          value={priceInputValue}
-                          onChange={(event) => handlePriceInputChange(item.id, event.target.value)}
-                          onBlur={() => commitPrice(item.id)}
-                          onFocus={(event) => event.currentTarget.select()}
-                          onKeyDown={(event) => handlePriceKeyDown(event, item.id, index)}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-300">
+                  <div className="flex flex-col items-end gap-3 sm:min-w-[220px]">
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-100">
+                      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">RD$</span>
+                      <input
+                        ref={(element) => {
+                          if (element) {
+                            priceInputRefs.current[item.id] = element;
+                          } else {
+                            delete priceInputRefs.current[item.id];
+                          }
+                        }}
+                        aria-label={`Price for ${item.name}`}
+                        className="w-24 bg-transparent text-right text-sm font-semibold text-slate-700 focus:outline-none dark:text-slate-100"
+                        inputMode="decimal"
+                        value={priceInputValue}
+                        onChange={(event) => handlePriceInputChange(item.id, event.target.value)}
+                        onBlur={() => commitPrice(item.id)}
+                        onFocus={(event) => event.currentTarget.select()}
+                        onKeyDown={(event) => handlePriceKeyDown(event, item.id, index)}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                      <div className="flex items-center gap-1 rounded-xl border border-slate-300 bg-white px-2 py-1 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900">
                         <button
                           aria-label={`Decrease quantity for ${item.name}`}
                           className="rounded border border-transparent p-0.5 hover:border-slate-300 hover:text-slate-900 dark:hover:border-slate-700"
@@ -334,9 +352,6 @@ export function OrderPanel({
                         </button>
                       </div>
                     </div>
-                    <span className="text-right text-sm font-semibold text-slate-900 dark:text-white">
-                      {formatCurrency(lineSaleTotal)}
-                    </span>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
@@ -383,8 +398,8 @@ export function OrderPanel({
             <span>{formatCurrency(summary.total)}</span>
           </div>
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-            <span>Balance due</span>
-            <span className="text-sm font-medium text-emerald-600 dark:text-emerald-300">{formatCurrency(summary.balanceDue)}</span>
+            <span>Cash drawer</span>
+            <span className="text-sm font-medium text-emerald-600 dark:text-emerald-300">{formatCurrency(cashTenderAmount)}</span>
           </div>
         </div>
         <div className="space-y-3">
@@ -392,7 +407,8 @@ export function OrderPanel({
             <span>Payment method</span>
             {isAddingTender ? null : (
               <button
-                className="text-sky-600 transition hover:text-sky-500 dark:text-sky-300 dark:hover:text-sky-200"
+                className="text-sky-600 transition hover:text-sky-500 disabled:pointer-events-none disabled:text-slate-400 dark:text-sky-300 dark:hover:text-sky-200 dark:disabled:text-slate-600"
+                disabled={defaultTenderAmount <= 0 || tenderOptions.length === 0}
                 onClick={handleStartAddingTender}
               >
                 Add method
@@ -422,7 +438,7 @@ export function OrderPanel({
                 <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Amount</label>
                 <input
                   className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 focus:border-slate-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200"
-                  placeholder={formattedDefaultAmount}
+                  placeholder={tenderPlaceholder}
                   value={amountInput}
                   onChange={(event) => setAmountInput(event.target.value)}
                 />
@@ -456,6 +472,16 @@ export function OrderPanel({
             </form>
           ) : null}
           <div className="space-y-2">
+            <div className="flex items-center justify-between rounded-xl border border-dashed border-slate-300 bg-slate-100/80 px-3 py-3 text-sm text-slate-500 dark:border-slate-700/80 dark:bg-slate-900/60 dark:text-slate-400">
+              <div className="flex items-center gap-3">
+                <HandCoins className="h-4 w-4" />
+                <div className="leading-tight">
+                  <p className="font-medium text-slate-600 dark:text-slate-200">Cash drawer</p>
+                  <p className="text-xs">Automatic remainder</p>
+                </div>
+              </div>
+              <span className="text-sm font-semibold text-slate-600 dark:text-slate-100">{formatCurrency(cashTenderAmount)}</span>
+            </div>
             {tenders.map((tender) => (
               <div
                 key={tender.id}
@@ -495,17 +521,6 @@ export function OrderPanel({
               </div>
             ))}
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <button className="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/80 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
-            Hold
-          </button>
-          <button className="flex-1 rounded-lg border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-500/70 hover:text-rose-500 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:border-rose-400/70 dark:hover:text-rose-200">
-            Void
-          </button>
-          <button className="flex-1 rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white">
-            Payment
-          </button>
         </div>
       </div>
     </PosCard>
