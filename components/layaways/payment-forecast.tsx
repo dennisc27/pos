@@ -1,0 +1,76 @@
+import type { PaymentScheduleItem } from "./types";
+import { LayawaysCard } from "./layaways-card";
+import { channelPillColor, formatCurrency, formatPercent } from "./utils";
+
+export function PaymentForecast({
+  items,
+  autopayPenetration
+}: {
+  items: PaymentScheduleItem[];
+  autopayPenetration: number;
+}) {
+  return (
+    <LayawaysCard
+      title="Cobros programados"
+      subtitle="Próximas cuotas y modalidad de cobro"
+      action={
+        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+          <span className="rounded-full border border-slate-300 px-2 py-0.5 uppercase tracking-wide dark:border-slate-700">
+            {formatPercent(autopayPenetration)} AutoCobro
+          </span>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className="flex flex-col gap-2 rounded-xl border border-slate-200/70 bg-gradient-to-br from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/70 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col">
+                <span className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-500">
+                  {item.dueDate}
+                </span>
+                <span className="text-base font-semibold text-slate-900 dark:text-white">
+                  {formatCurrency(item.amount)}
+                </span>
+              </div>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${channelPillColor(item.channel)}`}
+              >
+                {item.channel === "auto" ? "AutoCobro" : item.channel}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+              <div>
+                <span className="font-medium text-slate-900 dark:text-white">{item.customer}</span>
+                <span className="ml-2 rounded-full bg-slate-200/70 px-2 py-0.5 text-[11px] uppercase tracking-wide text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+                  {item.planNumber}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] uppercase tracking-wide ${
+                    item.status === "completed"
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                      : item.status === "processing"
+                        ? "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
+                        : item.status === "overdue"
+                          ? "bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                          : "bg-slate-200 text-slate-700 dark:bg-slate-500/10 dark:text-slate-200"
+                  }`}
+                >
+                  {item.status}
+                </span>
+                {item.notes ? (
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{item.notes}</span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </LayawaysCard>
+  );
+}
