@@ -7,22 +7,30 @@ import { formatCurrency } from "./utils";
 const statusLabel: Record<DrawerStatus["status"], string> = {
   ok: "En balance",
   attention: "Atención",
-  review: "Revisión urgente"
+  review: "Revisión urgente",
 };
 
 const statusIcon: Record<DrawerStatus["status"], LucideIcon> = {
   ok: Shield,
   attention: AlertTriangle,
-  review: AlertTriangle
+  review: AlertTriangle,
 };
 
 const statusColor: Record<DrawerStatus["status"], string> = {
   ok: "text-emerald-600 dark:text-emerald-300",
   attention: "text-amber-600 dark:text-amber-300",
-  review: "text-rose-600 dark:text-rose-300"
+  review: "text-rose-600 dark:text-rose-300",
 };
 
-export function DrawerHealth({ drawers }: { drawers: DrawerStatus[] }) {
+export function DrawerHealth({
+  drawers,
+  onInvestigate,
+  onRecount,
+}: {
+  drawers: DrawerStatus[];
+  onInvestigate?: (id: string) => void;
+  onRecount?: (id: string) => void;
+}) {
   return (
     <CashCard
       title="Salud de gavetas"
@@ -69,9 +77,12 @@ export function DrawerHealth({ drawers }: { drawers: DrawerStatus[] }) {
                 </div>
                 <div className="space-y-1">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Declarado</p>
-                  <p className="text-base font-semibold text-slate-900 dark:text-white">
+                  <button
+                    className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+                    onClick={() => onRecount?.(drawer.id)}
+                  >
                     {formatCurrency(drawer.counted)}
-                  </p>
+                  </button>
                 </div>
                 <div className="space-y-1">
                   <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Variación</p>
@@ -83,11 +94,22 @@ export function DrawerHealth({ drawers }: { drawers: DrawerStatus[] }) {
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>Último conteo: {drawer.lastCount}</span>
-                {drawer.status !== "ok" ? (
-                  <button className="rounded-full border border-transparent bg-rose-500/10 px-3 py-1 font-medium text-rose-600 transition-colors hover:bg-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300">
-                    Abrir investigación
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-full border border-slate-300 px-3 py-1 text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+                    onClick={() => onRecount?.(drawer.id)}
+                  >
+                    Solicitar reconteo
                   </button>
-                ) : null}
+                  {drawer.status !== "ok" ? (
+                    <button
+                      className="rounded-full border border-transparent bg-rose-500/10 px-3 py-1 font-medium text-rose-600 transition-colors hover:bg-rose-500/20 dark:bg-rose-500/10 dark:text-rose-300"
+                      onClick={() => onInvestigate?.(drawer.id)}
+                    >
+                      Abrir investigación
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </div>
           );

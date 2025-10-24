@@ -4,22 +4,26 @@ import { formatPoints } from "./utils";
 const impactStyles: Record<EngagementPlay["impact"], string> = {
   high: "text-emerald-600 dark:text-emerald-300",
   medium: "text-amber-600 dark:text-amber-300",
-  low: "text-slate-500 dark:text-slate-400"
+  low: "text-slate-500 dark:text-slate-400",
 };
 
 const channelLabels: Record<EngagementPlay["channel"], string> = {
   sms: "SMS",
   whatsapp: "WhatsApp",
   email: "Email",
-  call: "Llamada"
+  call: "Llamada",
 };
 
 export function LoyaltyLedger({
   ledger,
-  plays
+  plays,
+  onRedeem,
+  onSchedulePlay,
 }: {
   ledger: LoyaltyLedgerEntry[];
   plays: EngagementPlay[];
+  onRedeem?: (id: string) => void;
+  onSchedulePlay?: (id: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-5">
@@ -41,12 +45,18 @@ export function LoyaltyLedger({
                 <p className="text-sm font-medium text-slate-900 dark:text-white">{entry.description}</p>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">Origen: {entry.source}</span>
               </div>
-              <div className="text-right">
+              <div className="flex items-center gap-3 text-right">
                 <div className={`text-sm font-semibold ${entry.points >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-500 dark:text-rose-300"}`}>
                   {entry.points >= 0 ? "+" : ""}
                   {formatPoints(entry.points)} pts
                 </div>
                 <div className="text-[11px] text-slate-400 dark:text-slate-500">Balance: {formatPoints(entry.balance)}</div>
+                <button
+                  className="rounded-full border border-slate-300 px-3 py-1 text-[11px] text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+                  onClick={() => onRedeem?.(entry.id)}
+                >
+                  Redimir
+                </button>
               </div>
             </div>
           ))}
@@ -78,6 +88,12 @@ export function LoyaltyLedger({
                 </span>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800/70">Due: {play.due}</span>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800/70">Responsable: {play.owner}</span>
+                <button
+                  className="rounded-full border border-slate-300 px-2.5 py-0.5 text-[10px] text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+                  onClick={() => onSchedulePlay?.(play.id)}
+                >
+                  Programar
+                </button>
               </div>
             </div>
           ))}

@@ -1,3 +1,7 @@
+"use client";
+
+import { useMemo, useState } from "react";
+
 import { MarketingSummary } from "@/components/marketing/marketing-summary";
 import { MarketingCard } from "@/components/marketing/marketing-card";
 import { CampaignPipeline } from "@/components/marketing/campaign-pipeline";
@@ -11,37 +15,37 @@ import type {
   MarketingSummaryMetric,
   ReviewRecord,
   SegmentRecord,
-  TemplateRecord
+  TemplateRecord,
 } from "@/components/marketing/types";
 import { formatCurrency } from "@/components/marketing/utils";
 
-const summaryMetrics: MarketingSummaryMetric[] = [
+const SUMMARY_BASE: MarketingSummaryMetric[] = [
   {
     label: "Campañas activas",
     value: "8 en marcha",
     accent: "text-sky-600 dark:text-sky-300",
-    change: { direction: "up", label: "+2 vs. semana pasada" }
+    change: { direction: "up", label: "+2 vs. semana pasada" },
   },
   {
     label: "Mensajes enviados hoy",
     value: "18,450",
-    change: { direction: "up", label: "+14% engagement" }
+    change: { direction: "up", label: "+14% engagement" },
   },
   {
     label: "Ingresos atribuidos 30d",
     value: formatCurrency(3_280_000),
     accent: "text-emerald-600 dark:text-emerald-300",
-    change: { direction: "up", label: "+RD$420K" }
+    change: { direction: "up", label: "+RD$420K" },
   },
   {
     label: "NPS promedio",
     value: "4.7 ⭐️",
     accent: "text-amber-600 dark:text-amber-300",
-    change: { direction: "flat", label: "Sin cambio" }
-  }
+    change: { direction: "flat", label: "Sin cambio" },
+  },
 ];
 
-const campaigns: CampaignRecord[] = [
+const INITIAL_CAMPAIGNS: CampaignRecord[] = [
   {
     id: "camp-1",
     name: "Recordatorio préstamos vence hoy",
@@ -55,8 +59,8 @@ const campaigns: CampaignRecord[] = [
       delivered: 1214,
       openRate: 0.92,
       replyRate: 0.34,
-      revenue: 420_500
-    }
+      revenue: 420_500,
+    },
   },
   {
     id: "camp-2",
@@ -71,8 +75,8 @@ const campaigns: CampaignRecord[] = [
       delivered: 1772,
       openRate: 0.68,
       clickRate: 0.41,
-      revenue: 1_280_000
-    }
+      revenue: 1_280_000,
+    },
   },
   {
     id: "camp-3",
@@ -85,12 +89,12 @@ const campaigns: CampaignRecord[] = [
     metrics: {
       sent: 620,
       delivered: 612,
-      replyRate: 0.22
-    }
-  }
+      replyRate: 0.22,
+    },
+  },
 ];
 
-const templates: TemplateRecord[] = [
+const INITIAL_TEMPLATES: TemplateRecord[] = [
   {
     id: "tpl-1",
     name: "Renovación préstamo sin filas",
@@ -99,7 +103,7 @@ const templates: TemplateRecord[] = [
     lastEdited: "hace 2 h",
     usageCount: 186,
     status: "approved",
-    tags: ["renovaciones", "autopay"]
+    tags: ["renovaciones", "autopay"],
   },
   {
     id: "tpl-2",
@@ -109,7 +113,7 @@ const templates: TemplateRecord[] = [
     lastEdited: "ayer",
     usageCount: 92,
     status: "pending",
-    tags: ["promoción"]
+    tags: ["promoción"],
   },
   {
     id: "tpl-3",
@@ -119,7 +123,7 @@ const templates: TemplateRecord[] = [
     lastEdited: "hace 3 días",
     usageCount: 248,
     status: "approved",
-    tags: ["nps", "post-venta"]
+    tags: ["nps", "post-venta"],
   },
   {
     id: "tpl-4",
@@ -129,18 +133,18 @@ const templates: TemplateRecord[] = [
     lastEdited: "hace 5 días",
     usageCount: 12,
     status: "draft",
-    tags: ["planificado"]
-  }
+    tags: ["planificado"],
+  },
 ];
 
-const segments: SegmentRecord[] = [
+const INITIAL_SEGMENTS: SegmentRecord[] = [
   {
     id: "seg-1",
     name: "VIP Alta Joyería",
     size: 428,
     growth: { direction: "up", label: "+38 este mes" },
     traits: ["Ticket > RD$80K", "Renovaciones puntuales", "Prefiere WhatsApp"],
-    lastSync: "hoy 09:15"
+    lastSync: "hoy 09:15",
   },
   {
     id: "seg-2",
@@ -148,7 +152,7 @@ const segments: SegmentRecord[] = [
     size: 1_820,
     growth: { direction: "down", label: "-64 reactivados" },
     traits: ["Sin visitas 3 meses", "Historial layaway", "SMS opt-in"],
-    lastSync: "hoy 08:40"
+    lastSync: "hoy 08:40",
   },
   {
     id: "seg-3",
@@ -156,11 +160,11 @@ const segments: SegmentRecord[] = [
     size: 612,
     growth: { direction: "flat", label: "Estable" },
     traits: ["Loan vence < 3d", "Monto > RD$15K", "Autopay"],
-    lastSync: "ayer 19:20"
-  }
+    lastSync: "ayer 19:20",
+  },
 ];
 
-const automations: AutomationPlay[] = [
+const INITIAL_AUTOMATIONS: AutomationPlay[] = [
   {
     id: "auto-1",
     trigger: "Loan vence en 72h",
@@ -169,7 +173,7 @@ const automations: AutomationPlay[] = [
     status: "active",
     lastRun: "hoy 08:55",
     nextRun: "en 30 min",
-    audience: "712 contactos"
+    audience: "712 contactos",
   },
   {
     id: "auto-2",
@@ -179,7 +183,7 @@ const automations: AutomationPlay[] = [
     status: "testing",
     lastRun: "ayer 17:10",
     nextRun: "mañana 09:00",
-    audience: "Nuevo layaway"
+    audience: "Nuevo layaway",
   },
   {
     id: "auto-3",
@@ -189,11 +193,11 @@ const automations: AutomationPlay[] = [
     status: "paused",
     lastRun: "06 jun · 6:20 p. m.",
     nextRun: "Esperando reactivación",
-    audience: "Todos POS"
-  }
+    audience: "Todos POS",
+  },
 ];
 
-const reviews: ReviewRecord[] = [
+const INITIAL_REVIEWS: ReviewRecord[] = [
   {
     id: "rev-1",
     source: "google",
@@ -202,7 +206,7 @@ const reviews: ReviewRecord[] = [
     snippet: "Excelente atención y seguimiento, renové mi préstamo en minutos.",
     receivedAt: "Hoy · 9:12 a. m.",
     status: "responded",
-    channel: "whatsapp"
+    channel: "whatsapp",
   },
   {
     id: "rev-2",
@@ -212,7 +216,7 @@ const reviews: ReviewRecord[] = [
     snippet: "El recordatorio de layaway llegó a tiempo, solo mejoraría tiempos de cola.",
     receivedAt: "Ayer · 7:45 p. m.",
     status: "new",
-    channel: "email"
+    channel: "email",
   },
   {
     id: "rev-3",
@@ -222,11 +226,142 @@ const reviews: ReviewRecord[] = [
     snippet: "Buen trato, pero el mensaje automático no resolvió mi caso, tuve que llamar.",
     receivedAt: "Ayer · 11:05 a. m.",
     status: "flagged",
-    channel: "sms"
-  }
+    channel: "sms",
+  },
 ];
 
 export default function MarketingPage() {
+  const [campaigns, setCampaigns] = useState(INITIAL_CAMPAIGNS);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | undefined>(INITIAL_CAMPAIGNS[0]?.id);
+  const [templates, setTemplates] = useState(INITIAL_TEMPLATES);
+  const [segments, setSegments] = useState(INITIAL_SEGMENTS);
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string | undefined>();
+  const [automations, setAutomations] = useState(INITIAL_AUTOMATIONS);
+  const [reviews, setReviews] = useState(INITIAL_REVIEWS);
+  const [activityLog, setActivityLog] = useState<string[]>([]);
+
+  const logAction = (message: string) => {
+    setActivityLog((entries) => [message, ...entries].slice(0, 6));
+  };
+
+  const summaryMetrics = useMemo(() => {
+    const activeCampaigns = campaigns.filter((campaign) => campaign.status === "sending" || campaign.status === "scheduled").length;
+    const flaggedReviews = reviews.filter((review) => review.status === "flagged").length;
+    return [
+      { ...SUMMARY_BASE[0], value: `${activeCampaigns} en marcha` },
+      SUMMARY_BASE[1],
+      SUMMARY_BASE[2],
+      { ...SUMMARY_BASE[3], value: `4.7 ⭐️ · ${flaggedReviews} alertas` },
+    ];
+  }, [campaigns, reviews]);
+
+  const handleSelectCampaign = (id: string) => {
+    setSelectedCampaignId(id);
+    logAction(`Campaña ${id} seleccionada`);
+  };
+
+  const handleAdvanceCampaign = (id: string, next: CampaignRecord["status"] | null) => {
+    if (!next) return;
+    setCampaigns((current) =>
+      current.map((campaign) =>
+        campaign.id === id
+          ? {
+              ...campaign,
+              status: next,
+              schedule: next === "sending" ? "Enviando · ahora" : campaign.schedule,
+            }
+          : campaign,
+      ),
+    );
+    logAction(`Campaña ${id} pasó a estado ${next}`);
+  };
+
+  const handleDuplicateCampaign = (id: string) => {
+    const original = campaigns.find((campaign) => campaign.id === id);
+    if (!original) return;
+    const clone: CampaignRecord = {
+      ...original,
+      id: `${id}-copy-${Date.now()}`,
+      name: `${original.name} (copia)`,
+      status: "draft",
+      schedule: "Sin programar",
+    };
+    setCampaigns((current) => [clone, ...current]);
+    logAction(`Campaña ${original.name} duplicada`);
+  };
+
+  const handleApproveTemplate = (id: string) => {
+    setTemplates((current) =>
+      current.map((template) =>
+        template.id === id
+          ? { ...template, status: "approved", lastEdited: "hoy" }
+          : template,
+      ),
+    );
+    logAction(`Plantilla ${id} aprobada`);
+  };
+
+  const handleEditTemplate = (id: string) => {
+    logAction(`Plantilla ${id} enviada a edición`);
+  };
+
+  const handleSelectSegment = (id: string) => {
+    setSelectedSegmentId(id);
+    logAction(`Segmento ${id} abierto`);
+  };
+
+  const handleSyncSegment = (id: string) => {
+    setSegments((current) =>
+      current.map((segment) =>
+        segment.id === id
+          ? { ...segment, lastSync: "Ahora", growth: { ...segment.growth, label: segment.growth.label } }
+          : segment,
+      ),
+    );
+    logAction(`Segmento ${id} sincronizado`);
+  };
+
+  const handleToggleAutomation = (id: string, next: AutomationPlay["status"]) => {
+    setAutomations((current) =>
+      current.map((automation) =>
+        automation.id === id
+          ? {
+              ...automation,
+              status: next,
+              nextRun: next === "active" ? "en 15 min" : "Pausado",
+            }
+          : automation,
+      ),
+    );
+    logAction(`Automatización ${id} marcada como ${next}`);
+  };
+
+  const handleEditAutomation = (id: string) => {
+    logAction(`Automatización ${id} abierta para edición`);
+  };
+
+  const handleRespondReview = (id: string) => {
+    setReviews((current) =>
+      current.map((review) =>
+        review.id === id
+          ? { ...review, status: "responded" }
+          : review,
+      ),
+    );
+    logAction(`Se respondió reseña ${id}`);
+  };
+
+  const handleFlagReview = (id: string) => {
+    setReviews((current) =>
+      current.map((review) =>
+        review.id === id
+          ? { ...review, status: "flagged" }
+          : review,
+      ),
+    );
+    logAction(`Reseña ${id} marcada para revisión`);
+  };
+
   return (
     <div className="space-y-8">
       <div className="space-y-2">
@@ -245,7 +380,13 @@ export default function MarketingPage() {
           action="Ver historial"
           className="xl:col-span-2"
         >
-          <CampaignPipeline campaigns={campaigns} />
+          <CampaignPipeline
+            campaigns={campaigns}
+            selectedId={selectedCampaignId}
+            onSelect={handleSelectCampaign}
+            onAdvance={handleAdvanceCampaign}
+            onDuplicate={handleDuplicateCampaign}
+          />
         </MarketingCard>
 
         <MarketingCard
@@ -253,7 +394,7 @@ export default function MarketingPage() {
           subtitle="Mensajes aprobados por canal"
           action="Gestionar plantillas"
         >
-          <TemplateLibrary templates={templates} />
+          <TemplateLibrary templates={templates} onEdit={handleEditTemplate} onApprove={handleApproveTemplate} />
         </MarketingCard>
       </div>
 
@@ -263,7 +404,7 @@ export default function MarketingPage() {
           subtitle="Audiencias inteligentes para activar campañas"
           action="Construir segmento"
         >
-          <SegmentWorkbench segments={segments} />
+          <SegmentWorkbench segments={segments} selectedId={selectedSegmentId} onSelect={handleSelectSegment} onSync={handleSyncSegment} />
         </MarketingCard>
 
         <MarketingCard
@@ -272,7 +413,7 @@ export default function MarketingPage() {
           action="Ver recorridos"
           className="xl:col-span-2"
         >
-          <AutomationCenter automations={automations} />
+          <AutomationCenter automations={automations} onToggle={handleToggleAutomation} onEdit={handleEditAutomation} />
         </MarketingCard>
       </div>
 
@@ -281,8 +422,21 @@ export default function MarketingPage() {
         subtitle="Seguimiento a reputación y respuestas"
         action="Abrir panel NPS"
       >
-        <ReviewTracker reviews={reviews} />
+        <ReviewTracker reviews={reviews} onRespond={handleRespondReview} onFlag={handleFlagReview} />
       </MarketingCard>
+
+      {activityLog.length ? (
+        <MarketingCard title="Bitácora de acciones" subtitle="Últimos ajustes realizados">
+          <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
+            {activityLog.map((entry, index) => (
+              <li key={`${entry}-${index}`} className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-300" />
+                <span>{entry}</span>
+              </li>
+            ))}
+          </ul>
+        </MarketingCard>
+      ) : null}
     </div>
   );
 }

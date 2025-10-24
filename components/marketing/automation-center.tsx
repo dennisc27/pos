@@ -5,26 +5,40 @@ import type { AutomationPlay } from "./types";
 const statusTokens: Record<AutomationPlay["status"], { label: string; className: string }> = {
   active: {
     label: "Activo",
-    className: "text-emerald-600 dark:text-emerald-300"
+    className: "text-emerald-600 dark:text-emerald-300",
   },
   paused: {
     label: "Pausado",
-    className: "text-amber-600 dark:text-amber-300"
+    className: "text-amber-600 dark:text-amber-300",
   },
   testing: {
     label: "Testing",
-    className: "text-sky-600 dark:text-sky-300"
-  }
+    className: "text-sky-600 dark:text-sky-300",
+  },
 };
 
 const channelTokens: Record<AutomationPlay["channel"], { icon: JSX.Element; label: string }> = {
   sms: { icon: <AlarmClock className="h-4 w-4" />, label: "SMS" },
   email: { icon: <Rocket className="h-4 w-4" />, label: "Email" },
   whatsapp: { icon: <Workflow className="h-4 w-4" />, label: "WhatsApp" },
-  push: { icon: <Rocket className="h-4 w-4" />, label: "Push" }
+  push: { icon: <Rocket className="h-4 w-4" />, label: "Push" },
 };
 
-export function AutomationCenter({ automations }: { automations: AutomationPlay[] }) {
+const nextStatus: Record<AutomationPlay["status"], AutomationPlay["status"]> = {
+  active: "paused",
+  paused: "active",
+  testing: "active",
+};
+
+export function AutomationCenter({
+  automations,
+  onToggle,
+  onEdit,
+}: {
+  automations: AutomationPlay[];
+  onToggle?: (id: string, next: AutomationPlay["status"]) => void;
+  onEdit?: (id: string) => void;
+}) {
   return (
     <div className="space-y-4">
       {automations.map((automation) => (
@@ -48,9 +62,25 @@ export function AutomationCenter({ automations }: { automations: AutomationPlay[
             </span>
           </header>
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{automation.description}</p>
-          <footer className="mt-3 flex flex-wrap gap-4 text-xs text-slate-500 dark:text-slate-400">
-            <span>Último envío {automation.lastRun}</span>
-            <span>Canal {channelTokens[automation.channel].label}</span>
+          <footer className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-3">
+              <span>Último envío {automation.lastRun}</span>
+              <span>Canal {channelTokens[automation.channel].label}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className="rounded-full border border-slate-300 px-3 py-1 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:hover:border-slate-600"
+                onClick={() => onEdit?.(automation.id)}
+              >
+                Editar
+              </button>
+              <button
+                className="rounded-full border border-sky-400/70 px-3 py-1 text-sky-600 transition hover:border-sky-500/70 hover:text-sky-700 dark:border-sky-500/60 dark:text-sky-300"
+                onClick={() => onToggle?.(automation.id, nextStatus[automation.status])}
+              >
+                {automation.status === "active" ? "Pausar" : "Activar"}
+              </button>
+            </div>
           </footer>
         </article>
       ))}

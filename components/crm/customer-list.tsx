@@ -5,23 +5,30 @@ const statusColors: Record<CustomerRecord["status"], string> = {
   vip: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200",
   standard: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-200",
   watch: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200",
-  restricted: "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200"
+  restricted: "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200",
 };
 
 export function CustomerList({
   customers,
-  selectedId
+  selectedId,
+  onSelect,
+  toolbar,
 }: {
   customers: CustomerRecord[];
   selectedId: string;
+  onSelect?: (id: string) => void;
+  toolbar?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <span>{customers.length} clientes</span>
-        <button className="rounded-full border border-slate-300/70 px-3 py-1 text-[11px] font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-800 dark:border-slate-600/70 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-white">
-          Nuevo cliente
-        </button>
+        <div className="flex items-center gap-2">
+          {toolbar}
+          <button className="rounded-full border border-slate-300/70 px-3 py-1 text-[11px] font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-800 dark:border-slate-600/70 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:text-white">
+            Nuevo cliente
+          </button>
+        </div>
       </div>
       <div className="flex flex-col gap-2">
         {customers.map((customer) => {
@@ -29,6 +36,7 @@ export function CustomerList({
           return (
             <button
               key={customer.id}
+              onClick={() => onSelect?.(customer.id)}
               className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
                 isActive
                   ? "border-sky-500 bg-sky-50 shadow-sm dark:border-sky-400/80 dark:bg-sky-500/10"
@@ -49,10 +57,10 @@ export function CustomerList({
                         {customer.status === "vip"
                           ? "VIP"
                           : customer.status === "standard"
-                          ? "Cliente"
-                          : customer.status === "watch"
-                          ? "Observación"
-                          : "Restringido"}
+                            ? "Cliente"
+                            : customer.status === "watch"
+                              ? "Observación"
+                              : "Restringido"}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">

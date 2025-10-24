@@ -4,15 +4,23 @@ import type { Conversation, MessageThread } from "./types";
 const channelIcons = {
   whatsapp: Smartphone,
   sms: MessageCircle,
-  email: Voicemail
+  email: Voicemail,
 };
 
 export function MessagesCenter({
   threads,
-  conversation
+  conversation,
+  draft,
+  onSelectThread,
+  onDraftChange,
+  onSend,
 }: {
   threads: MessageThread[];
   conversation: Conversation;
+  draft: string;
+  onSelectThread?: (id: string) => void;
+  onDraftChange?: (value: string) => void;
+  onSend?: (message: string) => void;
 }) {
   const ActiveIcon = channelIcons[conversation.thread.channel];
 
@@ -27,6 +35,7 @@ export function MessagesCenter({
             return (
               <button
                 key={thread.id}
+                onClick={() => onSelectThread?.(thread.id)}
                 className={`flex flex-col gap-1 rounded-2xl border px-3 py-2 text-left text-xs transition ${
                   isActive
                     ? "border-sky-500 bg-sky-50 text-slate-900 shadow-sm dark:border-sky-400/80 dark:bg-sky-500/10 dark:text-slate-100"
@@ -41,7 +50,7 @@ export function MessagesCenter({
                 </div>
                 <p className="line-clamp-2 text-[11px]">{thread.preview}</p>
                 {thread.unread ? (
-                  <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-300">{thread.unread ? "Nuevo" : ""}</span>
+                  <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-300">Nuevo</span>
                 ) : null}
               </button>
             );
@@ -71,8 +80,8 @@ export function MessagesCenter({
                 message.author === "agent"
                   ? "self-end border-sky-200 bg-sky-50 text-slate-700 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-slate-100"
                   : message.author === "customer"
-                  ? "self-start border-slate-200/70 bg-white text-slate-700 dark:border-slate-800/70 dark:bg-slate-900/50 dark:text-slate-200"
-                  : "self-center border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
+                    ? "self-start border-slate-200/70 bg-white text-slate-700 dark:border-slate-800/70 dark:bg-slate-900/50 dark:text-slate-200"
+                    : "self-center border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
               }`}
             >
               <div className="flex items-center justify-between gap-3">
@@ -80,8 +89,8 @@ export function MessagesCenter({
                   {message.author === "agent"
                     ? conversation.thread.agent ?? "Agente"
                     : message.author === "customer"
-                    ? "Cliente"
-                    : "Sistema"}
+                      ? "Cliente"
+                      : "Sistema"}
                 </span>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500">{message.timestamp}</span>
               </div>
@@ -104,12 +113,21 @@ export function MessagesCenter({
             </article>
           ))}
         </div>
-        <form className="mt-2 flex items-center gap-2 rounded-full border border-slate-200/70 bg-slate-50 px-3 py-2 text-xs text-slate-600 shadow-sm transition focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-200 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 dark:focus-within:border-sky-500/70 dark:focus-within:ring-sky-500/30">
+        <form
+          className="mt-2 flex items-center gap-2 rounded-full border border-slate-200/70 bg-slate-50 px-3 py-2 text-xs text-slate-600 shadow-sm transition focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-200 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 dark:focus-within:border-sky-500/70 dark:focus-within:ring-sky-500/30"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!draft.trim()) return;
+            onSend?.(draft.trim());
+          }}
+        >
           <input
             className="flex-1 bg-transparent text-xs outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
             placeholder="Escribe una respuesta y presiona Enter"
+            value={draft}
+            onChange={(event) => onDraftChange?.(event.target.value)}
           />
-          <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500 text-white shadow hover:bg-sky-600">
+          <button type="submit" className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500 text-white shadow hover:bg-sky-600">
             <Send className="h-3.5 w-3.5" />
           </button>
         </form>

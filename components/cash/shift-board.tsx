@@ -6,16 +6,26 @@ import { formatCurrency } from "./utils";
 const statusStyles: Record<ShiftSnapshot["status"], string> = {
   open: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
   closing: "bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",
-  balanced: "bg-slate-200 text-slate-700 dark:bg-slate-500/10 dark:text-slate-200"
+  balanced: "bg-slate-200 text-slate-700 dark:bg-slate-500/10 dark:text-slate-200",
 };
 
 const statusLabel: Record<ShiftSnapshot["status"], string> = {
   open: "En curso",
   closing: "Cierre en progreso",
-  balanced: "Cuadrado"
+  balanced: "Cuadrado",
 };
 
-export function ShiftBoard({ shifts }: { shifts: ShiftSnapshot[] }) {
+export function ShiftBoard({
+  shifts,
+  onToggleTask,
+  onCaptureCount,
+  onCloseShift,
+}: {
+  shifts: ShiftSnapshot[];
+  onToggleTask?: (shiftId: string, taskLabel: string) => void;
+  onCaptureCount?: (shiftId: string) => void;
+  onCloseShift?: (shiftId: string) => void;
+}) {
   return (
     <CashCard
       title="Turnos de caja"
@@ -68,9 +78,12 @@ export function ShiftBoard({ shifts }: { shifts: ShiftSnapshot[] }) {
                       <span className="block text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         Conteo parcial
                       </span>
-                      <span className="font-semibold text-slate-900 dark:text-white">
+                      <button
+                        className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+                        onClick={() => onCaptureCount?.(shift.id)}
+                      >
                         {formatCurrency(shift.counted)}
-                      </span>
+                      </button>
                     </div>
                   ) : null}
                   <div className="space-y-1">
@@ -85,19 +98,27 @@ export function ShiftBoard({ shifts }: { shifts: ShiftSnapshot[] }) {
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {shift.tasks.map((task) => (
-                  <div
+                  <button
+                    type="button"
                     key={task.label}
-                    className="flex items-center gap-2 rounded-lg border border-slate-200/70 bg-gradient-to-r from-white via-white to-slate-50 px-3 py-2 text-xs text-slate-600 transition-colors dark:border-slate-800/70 dark:from-slate-950/50 dark:via-slate-950/40 dark:to-slate-900/60 dark:text-slate-300"
+                    onClick={() => onToggleTask?.(shift.id, task.label)}
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                      task.completed
+                        ? "border-emerald-400/60 bg-emerald-500/5 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                        : shift.status === "closing"
+                          ? "border-sky-400/60 bg-sky-500/5 text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200"
+                          : "border-slate-200/70 bg-gradient-to-r from-white via-white to-slate-50 text-slate-600 dark:border-slate-800/70 dark:from-slate-950/50 dark:via-slate-950/40 dark:to-slate-900/60 dark:text-slate-300"
+                    }`}
                   >
                     {task.completed ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      <CheckCircle2 className="h-4 w-4" />
                     ) : shift.status === "closing" ? (
-                      <Clock className="h-4 w-4 text-sky-500" />
+                      <Clock className="h-4 w-4" />
                     ) : (
-                      <AlertTriangle className="h-4 w-4 text-amber-500" />
+                      <AlertTriangle className="h-4 w-4" />
                     )}
                     <span className="leading-snug">{task.label}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
               {shift.nextAction ? (
@@ -107,6 +128,20 @@ export function ShiftBoard({ shifts }: { shifts: ShiftSnapshot[] }) {
                   <span>{shift.nextAction}</span>
                 </div>
               ) : null}
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <button
+                  className="rounded-full border border-slate-300 px-3 py-1 text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+                  onClick={() => onCaptureCount?.(shift.id)}
+                >
+                  Registrar conteo
+                </button>
+                <button
+                  className="rounded-full border border-emerald-400/70 px-3 py-1 text-emerald-600 transition hover:border-emerald-500/70 hover:text-emerald-700 dark:border-emerald-500/60 dark:text-emerald-300"
+                  onClick={() => onCloseShift?.(shift.id)}
+                >
+                  Cerrar turno
+                </button>
+              </div>
             </div>
           );
         })}

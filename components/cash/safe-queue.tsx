@@ -8,24 +8,37 @@ const statusLabel: Record<SafeDropItem["status"], string> = {
   queued: "Esperando drop",
   sealed: "Sellado",
   in_transit: "En traslado",
-  received: "Recibido"
+  received: "Recibido",
 };
 
 const statusTone: Record<SafeDropItem["status"], string> = {
   queued: "bg-amber-500/10 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300",
   sealed: "bg-sky-500/10 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300",
   in_transit: "bg-purple-500/10 text-purple-600 dark:bg-purple-500/10 dark:text-purple-300",
-  received: "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300"
+  received: "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300",
 };
 
 const statusIcon: Record<SafeDropItem["status"], LucideIcon> = {
   queued: Clock,
   sealed: Lock,
   in_transit: Truck,
-  received: ShieldCheck
+  received: ShieldCheck,
 };
 
-export function SafeQueue({ drops }: { drops: SafeDropItem[] }) {
+const nextStatus: Record<SafeDropItem["status"], SafeDropItem["status"] | null> = {
+  queued: "sealed",
+  sealed: "in_transit",
+  in_transit: "received",
+  received: null,
+};
+
+export function SafeQueue({
+  drops,
+  onAdvance,
+}: {
+  drops: SafeDropItem[];
+  onAdvance?: (id: string, next: SafeDropItem["status"] | null) => void;
+}) {
   return (
     <CashCard
       title="Bóveda y depósitos"
@@ -35,6 +48,7 @@ export function SafeQueue({ drops }: { drops: SafeDropItem[] }) {
       <div className="space-y-4">
         {drops.map((drop) => {
           const Icon = statusIcon[drop.status];
+          const next = nextStatus[drop.status];
 
           return (
             <div
@@ -71,7 +85,16 @@ export function SafeQueue({ drops }: { drops: SafeDropItem[] }) {
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                 <span>Escolta asignada: {drop.escort}</span>
-                {drop.notes ? <span className="text-slate-600 dark:text-slate-300">Nota: {drop.notes}</span> : null}
+                <div className="flex items-center gap-2">
+                  {drop.notes ? <span className="text-slate-600 dark:text-slate-300">Nota: {drop.notes}</span> : null}
+                  <button
+                    className="rounded-full border border-slate-300 px-3 py-1 text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-300"
+                    onClick={() => onAdvance?.(drop.id, next)}
+                    disabled={!next}
+                  >
+                    {next ? `Marcar ${statusLabel[next].toLowerCase()}` : "Completo"}
+                  </button>
+                </div>
               </div>
             </div>
           );

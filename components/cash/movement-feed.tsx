@@ -5,7 +5,7 @@ import {
   CircleDollarSign,
   HandCoins,
   Landmark,
-  RefreshCcw
+  RefreshCcw,
 } from "lucide-react";
 import { CashCard } from "./cash-card";
 import type { CashMovement } from "./types";
@@ -16,43 +16,58 @@ const typeConfig: Record<
   { label: string; tone: string; icon: LucideIcon }
 > = {
   sale_cash: {
-    label: "Venta", 
+    label: "Venta",
     tone: "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300",
-    icon: CircleDollarSign
+    icon: CircleDollarSign,
   },
   refund_cash: {
     label: "Reembolso",
     tone: "bg-rose-500/10 text-rose-600 dark:bg-rose-500/10 dark:text-rose-300",
-    icon: RefreshCcw
+    icon: RefreshCcw,
   },
   drop: {
     label: "Drop a bóveda",
     tone: "bg-sky-500/10 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300",
-    icon: ArrowDownCircle
+    icon: ArrowDownCircle,
   },
   paid_in: {
     label: "Paid-in",
     tone: "bg-amber-500/10 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300",
-    icon: Landmark
+    icon: Landmark,
   },
   paid_out: {
     label: "Paid-out",
     tone: "bg-purple-500/10 text-purple-600 dark:bg-purple-500/10 dark:text-purple-300",
-    icon: ArrowUpCircle
+    icon: ArrowUpCircle,
   },
   adjustment: {
     label: "Ajuste",
     tone: "bg-slate-500/10 text-slate-600 dark:bg-slate-500/10 dark:text-slate-300",
-    icon: HandCoins
-  }
+    icon: HandCoins,
+  },
 };
 
-export function MovementFeed({ movements }: { movements: CashMovement[] }) {
+export function MovementFeed({
+  movements,
+  onCreate,
+  onFlag,
+}: {
+  movements: CashMovement[];
+  onCreate?: () => void;
+  onFlag?: (id: string) => void;
+}) {
   return (
     <CashCard
       title="Movimientos de efectivo"
       subtitle="Registro en tiempo real de ventas, drops y ajustes"
-      action={<span>{movements.length} hoy</span>}
+      action={
+        <button
+          className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+          onClick={onCreate}
+        >
+          Registrar movimiento
+        </button>
+      }
     >
       <div className="space-y-4">
         {movements.map((movement) => {
@@ -83,7 +98,15 @@ export function MovementFeed({ movements }: { movements: CashMovement[] }) {
               <p className="text-sm text-slate-600 dark:text-slate-300">{movement.description}</p>
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>Registrado por {movement.user}</span>
-                {movement.reference ? <span>Ref: {movement.reference}</span> : null}
+                <div className="flex items-center gap-2">
+                  {movement.reference ? <span>Ref: {movement.reference}</span> : null}
+                  <button
+                    className="rounded-full border border-slate-300 px-2.5 py-1 text-[11px] text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+                    onClick={() => onFlag?.(movement.id)}
+                  >
+                    Revisar
+                  </button>
+                </div>
               </div>
             </div>
           );

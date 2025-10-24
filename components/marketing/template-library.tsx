@@ -5,25 +5,33 @@ import type { TemplateRecord } from "./types";
 const statusLabels: Record<TemplateRecord["status"], { label: string; className: string }> = {
   approved: {
     label: "Aprobada",
-    className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200"
+    className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200",
   },
   pending: {
     label: "En revisión",
-    className: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200"
+    className: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200",
   },
   draft: {
     label: "Borrador",
-    className: "bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300"
-  }
+    className: "bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300",
+  },
 };
 
 const channelIcons: Record<TemplateRecord["channel"], JSX.Element> = {
   email: <FileText className="h-4 w-4" />,
   sms: <MessageSquareDashed className="h-4 w-4" />,
-  whatsapp: <MessageCircleHeart className="h-4 w-4" />
+  whatsapp: <MessageCircleHeart className="h-4 w-4" />,
 };
 
-export function TemplateLibrary({ templates }: { templates: TemplateRecord[] }) {
+export function TemplateLibrary({
+  templates,
+  onEdit,
+  onApprove,
+}: {
+  templates: TemplateRecord[];
+  onEdit?: (id: string) => void;
+  onApprove?: (id: string) => void;
+}) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {templates.map((template) => (
@@ -48,18 +56,36 @@ export function TemplateLibrary({ templates }: { templates: TemplateRecord[] }) 
             </div>
             <span className="text-[11px] text-slate-500 dark:text-slate-400">Editado {template.lastEdited}</span>
           </header>
-          <footer className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-              {template.usageCount} usos 30d
-            </span>
-            {template.tags?.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500 dark:bg-slate-900/60 dark:text-slate-400"
-              >
-                #{tag}
+          <footer className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+                {template.usageCount} usos 30d
               </span>
-            ))}
+              {template.tags?.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-500 dark:bg-slate-900/60 dark:text-slate-400"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className="rounded-full border border-slate-300 px-3 py-1 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:hover:border-slate-600"
+                onClick={() => onEdit?.(template.id)}
+              >
+                Editar
+              </button>
+              {template.status !== "approved" ? (
+                <button
+                  className="rounded-full border border-emerald-400/70 px-3 py-1 text-emerald-600 transition hover:border-emerald-500/70 hover:text-emerald-700 dark:border-emerald-500/60 dark:text-emerald-300"
+                  onClick={() => onApprove?.(template.id)}
+                >
+                  Aprobar
+                </button>
+              ) : null}
+            </div>
           </footer>
         </article>
       ))}

@@ -1,7 +1,15 @@
 import { InventoryCard } from "./inventory-card";
 import type { QuarantineItem } from "./types";
 
-export function QuarantineQueue({ items }: { items: QuarantineItem[] }) {
+export function QuarantineQueue({
+  items,
+  onResolve,
+  onEscalate,
+}: {
+  items: QuarantineItem[];
+  onResolve?: (id: string) => void;
+  onEscalate?: (id: string) => void;
+}) {
   return (
     <InventoryCard
       title="Quarantine & verification"
@@ -40,6 +48,20 @@ export function QuarantineQueue({ items }: { items: QuarantineItem[] }) {
                 <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-200/70">Next action</p>
                 <p>{item.nextAction}</p>
               </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-rose-600 dark:text-rose-300">
+              <button
+                className="rounded-full border border-white/40 bg-white/40 px-3 py-1 text-xs font-medium text-rose-700 transition hover:bg-white/60 dark:border-rose-500/40 dark:bg-rose-500/20 dark:text-rose-200"
+                onClick={() => onResolve?.(item.id)}
+              >
+                Liberar hold
+              </button>
+              <button
+                className="rounded-full border border-white/40 bg-white/40 px-3 py-1 text-xs font-medium text-rose-700 transition hover:bg-white/60 dark:border-rose-500/40 dark:bg-rose-500/20 dark:text-rose-200"
+                onClick={() => onEscalate?.(item.id)}
+              >
+                Escalar revisión
+              </button>
             </div>
           </div>
         ))}
