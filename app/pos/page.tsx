@@ -223,16 +223,11 @@ export default function PosPage() {
 
   const saleSummary = useMemo(() => buildSummary(cartLines, tenderBreakdown), [cartLines, tenderBreakdown]);
 
-  const handleAddProduct = useCallback((product: Product) => {
+  const handleToggleProduct = useCallback((product: Product) => {
     setCartLines((previous) => {
       const existing = previous.find((line) => line.id === product.id);
       if (existing) {
-        const updatedLine: CartLine = {
-          ...existing,
-          qty: existing.qty + 1
-        };
-        const others = previous.filter((line) => line.id !== product.id);
-        return [updatedLine, ...others];
+        return previous.filter((line) => line.id !== product.id);
       }
 
       return [
@@ -377,6 +372,8 @@ export default function PosPage() {
     []
   );
 
+  const selectedProductIds = useMemo(() => cartLines.map((line) => line.id), [cartLines]);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="grid gap-6 xl:grid-cols-[2fr_1.15fr]">
@@ -387,7 +384,8 @@ export default function PosPage() {
           searchTerm={searchTerm}
           onSearchTermChange={setSearchTerm}
           onCategorySelect={setActiveCategoryId}
-          onAddProduct={handleAddProduct}
+          selectedProductIds={selectedProductIds}
+          onToggleProduct={handleToggleProduct}
         />
         <OrderPanel
           items={cartLines}
