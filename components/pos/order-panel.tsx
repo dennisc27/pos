@@ -290,9 +290,6 @@ export function OrderPanel({
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 dark:border-slate-700/80 dark:bg-slate-950/60">
-                        {item.sku}
-                      </span>
                       <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium normal-case text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-200">
                         <button
                           aria-label={`Decrease quantity for ${item.name}`}
@@ -322,13 +319,18 @@ export function OrderPanel({
                           <Plus className="h-3 w-3" />
                         </button>
                       </div>
-                      <div className="ml-auto flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                      <div className="flex items-center gap-1">
                         <button
                           className="rounded-lg border border-slate-300 p-1 transition hover:border-rose-400 hover:text-rose-500 dark:border-slate-800/80 dark:hover:border-rose-500/60 dark:hover:text-rose-300"
                           onClick={() => onRemoveItem(item.id)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
+                      </div>
+                      <div className="ml-auto flex items-center gap-2">
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 dark:border-slate-700/80 dark:bg-slate-950/60">
+                          {item.sku}
+                        </span>
                         <button className="rounded-lg border border-slate-300 p-1 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:hover:border-slate-700 dark:hover:text-white">
                           <MoreHorizontal className="h-3.5 w-3.5" />
                         </button>
