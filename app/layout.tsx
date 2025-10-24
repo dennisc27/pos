@@ -1,0 +1,30 @@
+import "./globals.css";
+import type { Metadata } from "next";
+import { Sidebar } from "@/components/sidebar";
+import { TopBar } from "@/components/top-bar";
+
+export const metadata: Metadata = {
+  title: "Pawn & POS Command Center",
+  description:
+    "Operational dashboard for pawn, retail, repairs, and compliance in one workspace."
+};
+
+export default function RootLayout({
+  children
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" className="dark">
+      <body className="flex min-h-screen bg-slate-950 text-slate-100">
+        <Sidebar />
+        <div className="flex flex-1 flex-col">
+          <TopBar />
+          <main className="flex-1 overflow-y-auto px-6 py-8 scrollbar-thin">
+            {children}
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}
