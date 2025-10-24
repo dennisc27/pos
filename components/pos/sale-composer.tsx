@@ -17,9 +17,14 @@ export function SaleComposer({
       title="New sale"
       subtitle="Scan or search inventory, build the cart, and collect tender without leaving the keyboard"
       action={
-        <button className="rounded-lg border border-slate-800/80 bg-slate-900 px-3 py-1 font-medium text-xs text-slate-200 hover:border-slate-700">
-          Hold sale
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300 transition hover:border-emerald-400/60 hover:text-emerald-200">
+            Start layaway
+          </button>
+          <button className="rounded-lg border border-slate-800/80 bg-slate-900 px-3 py-1 text-xs font-medium text-slate-200 transition hover:border-slate-700">
+            Hold sale
+          </button>
+        </div>
       }
     >
       <div className="flex flex-col gap-5">
