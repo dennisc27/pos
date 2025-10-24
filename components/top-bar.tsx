@@ -278,17 +278,6 @@ export function TopBar() {
           <Store className="h-4 w-4 text-sky-500 dark:text-sky-400" />
           <span>Santo Domingo - Main</span>
         </div>
-        <div className="hidden items-center gap-3 text-xs text-slate-500 dark:text-slate-400 md:flex">
-          <span>
-            Shift: <span className="font-medium text-slate-700 dark:text-slate-200">Morning A</span>
-          </span>
-          <span>
-            Drawer: <span className="font-medium text-emerald-500 dark:text-emerald-400">Balanced</span>
-          </span>
-          <span>
-            Till Float: <span className="font-medium text-slate-700 dark:text-slate-200">RD$15,000</span>
-          </span>
-        </div>
       </div>
       <div className="flex items-center gap-3">
         <div className="hidden items-center gap-2 rounded-lg border border-slate-200/70 bg-white px-3 py-1.5 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 lg:flex">

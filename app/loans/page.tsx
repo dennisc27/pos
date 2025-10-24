@@ -325,19 +325,19 @@ export default function LoansPage() {
 
   const summaryMetrics: LoanSummaryMetric[] = [
     {
-      label: "Activos",
+      label: "Nuevos hoy",
       value: `${summaryBaselines.active + dueLoans.length + pastDueLoans.length - (INITIAL_DUE_LOANS.length + INITIAL_PAST_DUE_LOANS.length)} préstamos`,
       accent: "text-emerald-600 dark:text-emerald-300",
       change: { direction: "up", label: "+3.1% vs. mes pasado" },
     },
     {
-      label: "Principal vigente",
+      label: "Monto hoy",
       value: formatCurrency(summaryBaselines.principal + dueLoans.reduce((sum, loan) => sum + loan.principal, 0) + pastDueLoans.reduce((sum, loan) => sum + loan.principal, 0) -
         (INITIAL_DUE_LOANS.reduce((sum, loan) => sum + loan.principal, 0) + INITIAL_PAST_DUE_LOANS.reduce((sum, loan) => sum + loan.principal, 0))),
       change: { direction: "up", label: "+RD$182K" },
     },
     {
-      label: "Vencen hoy",
+      label: "Renovaciones hoy",
       value: `${filteredDue.length} tickets`,
       accent: "text-amber-600 dark:text-amber-300",
     },
