@@ -244,21 +244,23 @@ export function OrderPanel({
         <div className="space-y-3">
           {items.map((item, index) => {
             const rate = item.taxRate ?? DEFAULT_TAX_RATE;
-            const lineSubtotal = item.qty * item.price;
-            const discount = Math.min(item.discount ?? 0, lineSubtotal);
-            const lineTotal = Math.max(lineSubtotal - discount, 0);
-            const baseAmount = lineTotal / (1 + rate);
-            const taxAmount = lineTotal - baseAmount;
+            const listUnit = item.listPrice ?? item.price;
+            const lineSaleTotal = Math.max(item.price, 0) * item.qty;
+            const listTotal = listUnit * item.qty;
+            const lineDiscount = Math.max(0, listTotal - lineSaleTotal);
+            const baseAmount = lineSaleTotal / (1 + rate);
+            const taxAmount = lineSaleTotal - baseAmount;
             const priceInputValue = editingPrices[item.id] ?? item.price.toFixed(2);
+            const hasDiscount = lineDiscount > 0;
             return (
               <div
                 key={item.id}
-                className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 px-4 py-3 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200"
+                className="rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200"
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-slate-900 dark:text-white">{item.name}</span>
+                      <span className="font-semibold text-slate-900 dark:text-white">{item.name}</span>
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
                         {item.sku}
                       </span>
@@ -268,14 +270,22 @@ export function OrderPanel({
                         </span>
                       ) : null}
                     </div>
-                    {item.variant ? <p className="text-xs text-slate-500 dark:text-slate-400">{item.variant}</p> : null}
-                    {item.note ? <p className="text-xs text-slate-500 dark:text-slate-400">{item.note}</p> : null}
+                    {item.variant ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{item.variant}</p>
+                    ) : null}
+                    {item.note ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{item.note}</p>
+                    ) : null}
                   </div>
-                  <div className="flex flex-col items-end gap-3 text-right">
-                    <span className="text-sm font-semibold text-slate-900 dark:text-white">{formatCurrency(lineTotal)}</span>
-                    <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">
-                      <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-200">
-                        <span>Precio</span>
+                  <div className="flex flex-col items-end gap-2 sm:min-w-[220px]">
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Precio actual
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm font-semibold text-slate-700 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-100">
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          RD$
+                        </span>
                         <input
                           ref={(element) => {
                             if (element) {
@@ -285,7 +295,7 @@ export function OrderPanel({
                             }
                           }}
                           aria-label={`Price for ${item.name}`}
-                          className="w-20 bg-transparent text-right text-sm font-semibold text-slate-700 focus:outline-none dark:text-slate-100"
+                          className="w-24 bg-transparent text-right text-sm font-semibold text-slate-700 focus:outline-none dark:text-slate-100"
                           inputMode="decimal"
                           value={priceInputValue}
                           onChange={(event) => handlePriceInputChange(item.id, event.target.value)}
@@ -294,7 +304,7 @@ export function OrderPanel({
                           onKeyDown={(event) => handlePriceKeyDown(event, item.id, index)}
                         />
                       </div>
-                      <div className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-300">
+                      <div className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-300">
                         <button
                           aria-label={`Decrease quantity for ${item.name}`}
                           className="rounded border border-transparent p-0.5 hover:border-slate-300 hover:text-slate-900 dark:hover:border-slate-700"
@@ -304,7 +314,7 @@ export function OrderPanel({
                         </button>
                         <input
                           aria-label={`Quantity for ${item.name}`}
-                          className="w-9 bg-transparent text-center text-[11px] font-semibold text-slate-700 focus:outline-none dark:text-slate-200"
+                          className="w-10 bg-transparent text-center text-[11px] font-semibold text-slate-700 focus:outline-none dark:text-slate-200"
                           inputMode="numeric"
                           min={1}
                           value={item.qty}
@@ -324,17 +334,20 @@ export function OrderPanel({
                         </button>
                       </div>
                     </div>
+                    <span className="text-right text-sm font-semibold text-slate-900 dark:text-white">
+                      {formatCurrency(lineSaleTotal)}
+                    </span>
                   </div>
                 </div>
-                <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
                   <div className="flex flex-wrap items-center gap-3">
-                    {discount > 0 ? (
-                      <span className="text-rose-500 dark:text-rose-400">Disc {formatCurrency(discount)}</span>
+                    {hasDiscount ? (
+                      <span className="text-rose-500 dark:text-rose-400">Disc {formatCurrency(lineDiscount)}</span>
                     ) : null}
                     {taxAmount > 0 ? (
                       <span className="text-sky-600 dark:text-sky-300">ITBIS {formatCurrency(taxAmount)}</span>
                     ) : null}
-                    <span className="text-slate-500 dark:text-slate-400">Sub {formatCurrency(baseAmount)}</span>
+                    <span>Sub {formatCurrency(baseAmount)}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <button

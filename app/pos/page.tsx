@@ -113,7 +113,7 @@ const initialCartLines: CartLine[] = [
     variant: "128GB · Dual SIM · Azul",
     qty: 1,
     price: 18500,
-    discount: 500,
+    listPrice: 19000,
     taxRate: DEFAULT_TAX_RATE
   },
   {
@@ -123,6 +123,7 @@ const initialCartLines: CartLine[] = [
     variant: "Sapphire glass · Leather band",
     qty: 1,
     price: 14500,
+    listPrice: 15200,
     taxRate: DEFAULT_TAX_RATE
   },
   {
@@ -132,7 +133,7 @@ const initialCartLines: CartLine[] = [
     status: "bundle",
     qty: 1,
     price: 9200,
-    discount: 700,
+    listPrice: 9900,
     taxRate: DEFAULT_TAX_RATE,
     note: "Bundle with mic stand for RD$9,900"
   }
@@ -157,15 +158,20 @@ const initialTenderBreakdown: TenderBreakdown[] = [
 ];
 
 function buildSummary(items: CartLine[], tenders: TenderBreakdown[]): SaleSummary {
-  const subtotal = items.reduce((sum, item) => sum + item.qty * item.price, 0);
-  const discounts = items.reduce((sum, item) => sum + (item.discount ?? 0), 0);
+  const subtotal = items.reduce(
+    (sum, item) => sum + (item.listPrice ?? item.price) * item.qty,
+    0
+  );
+  const discounts = items.reduce((sum, item) => {
+    const listUnit = item.listPrice ?? item.price;
+    const unitDiscount = Math.max(0, listUnit - item.price);
+    return sum + unitDiscount * item.qty;
+  }, 0);
   const tax = items.reduce((sum, item) => {
-    const lineSubtotal = item.qty * item.price;
-    const discount = Math.min(item.discount ?? 0, lineSubtotal);
+    const lineTotal = Math.max(item.price, 0) * item.qty;
     const rate = item.taxRate ?? DEFAULT_TAX_RATE;
-    const net = Math.max(lineSubtotal - discount, 0);
-    const base = net / (1 + rate);
-    return sum + (net - base);
+    const base = lineTotal / (1 + rate);
+    return sum + (lineTotal - base);
   }, 0);
   const total = Math.max(subtotal - discounts, 0);
   const tendered = tenders.reduce((sum, tender) => sum + tender.amount, 0);
@@ -244,6 +250,7 @@ export default function PosPage() {
           sku: product.sku,
           qty: 1,
           price: product.price,
+          listPrice: product.price,
           taxRate: DEFAULT_TAX_RATE,
           variant: product.variant,
           status: product.highlight ? "featured" : undefined

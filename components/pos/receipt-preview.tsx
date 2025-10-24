@@ -29,19 +29,25 @@ export function ReceiptPreview({
           <span>Branch: Santo Domingo</span>
         </div>
         <div className="space-y-2">
-          {items.map((item) => (
-            <div key={item.id} className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <p className="text-slate-700 dark:text-slate-200">{item.name}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-500">
-                  {item.qty} x {formatCurrency(item.price)} {item.discount ? `(-${formatCurrency(item.discount)})` : ""}
-                </p>
+          {items.map((item) => {
+            const listUnit = item.listPrice ?? item.price;
+            const lineSaleTotal = Math.max(item.price, 0) * item.qty;
+            const listTotal = listUnit * item.qty;
+            const discount = Math.max(0, listTotal - lineSaleTotal);
+            return (
+              <div key={item.id} className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <p className="text-slate-700 dark:text-slate-200">{item.name}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-500">
+                    {item.qty} x {formatCurrency(item.price)} {discount ? `(-${formatCurrency(discount)})` : ""}
+                  </p>
+                </div>
+                <span className="font-medium text-slate-900 dark:text-slate-100">
+                  {formatCurrency(lineSaleTotal)}
+                </span>
               </div>
-              <span className="font-medium text-slate-900 dark:text-slate-100">
-                {formatCurrency(item.qty * item.price - (item.discount ?? 0))}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className="space-y-1 pt-2">
           <div className="flex items-center justify-between">

@@ -55,11 +55,14 @@ export function SaleComposer({
         </div>
         <ul className="flex flex-col gap-3">
           {items.map((item) => {
-            const lineSubtotal = item.qty * item.price;
-            const discount = item.discount ?? 0;
+            const listUnit = item.listPrice ?? item.price;
+            const lineSaleTotal = Math.max(item.price, 0) * item.qty;
+            const listTotal = listUnit * item.qty;
+            const discount = Math.max(0, listTotal - lineSaleTotal);
             const taxRate = item.taxRate ?? 0;
-            const taxAmount = (lineSubtotal - discount) * taxRate;
-            const lineTotal = lineSubtotal - discount + taxAmount;
+            const baseAmount = lineSaleTotal / (1 + taxRate);
+            const taxAmount = lineSaleTotal - baseAmount;
+            const lineTotal = lineSaleTotal;
             return (
               <li
                 key={item.id}
@@ -89,6 +92,7 @@ export function SaleComposer({
                       {taxAmount > 0 ? (
                         <span className="text-sky-600 dark:text-sky-300">ITBIS {formatCurrency(taxAmount)}</span>
                       ) : null}
+                      <span>Sub {formatCurrency(baseAmount)}</span>
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2">

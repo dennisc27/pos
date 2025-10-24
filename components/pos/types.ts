@@ -8,7 +8,7 @@ export type CartLine = {
   variant?: string;
   qty: number;
   price: number;
-  discount?: number;
+  listPrice?: number;
   taxRate?: number;
   note?: string;
 };
