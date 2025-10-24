@@ -3,10 +3,16 @@ import { LayawaysCard } from "./layaways-card";
 
 export function EngagementCenter({
   reminders,
-  insights
+  insights,
+  onUpdateReminderStatus,
+  onCancelReminder,
+  onApplyInsight
 }: {
   reminders: EngagementReminder[];
   insights: UpsellInsight[];
+  onUpdateReminderStatus?: (id: string, status: EngagementReminder["status"]) => void;
+  onCancelReminder?: (id: string) => void;
+  onApplyInsight?: (insight: UpsellInsight) => void;
 }) {
   return (
     <LayawaysCard
@@ -51,6 +57,29 @@ export function EngagementCenter({
                 >
                   {reminder.status}
                 </span>
+                <div className="mt-2 flex flex-col items-end gap-2 text-[11px]">
+                  {onUpdateReminderStatus ? (
+                    <button
+                      onClick={() =>
+                        onUpdateReminderStatus(
+                          reminder.id,
+                          reminder.status === "scheduled" ? "queued" : "sent"
+                        )
+                      }
+                      className="rounded-full border border-slate-300 px-2 py-0.5 font-semibold text-sky-600 transition hover:border-sky-400 hover:text-sky-700 dark:border-slate-700 dark:text-sky-300"
+                    >
+                      {reminder.status === "sent" ? "Marcar leído" : "Marcar enviado"}
+                    </button>
+                  ) : null}
+                  {onCancelReminder && reminder.status !== "sent" ? (
+                    <button
+                      onClick={() => onCancelReminder(reminder.id)}
+                      className="rounded-full border border-slate-300 px-2 py-0.5 font-semibold text-rose-600 transition hover:border-rose-400 hover:text-rose-700 dark:border-slate-700 dark:text-rose-300"
+                    >
+                      Cancelar
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ))}
           </div>
@@ -78,6 +107,14 @@ export function EngagementCenter({
                   </span>
                 </div>
                 <p className="mt-2 text-sm leading-5 text-slate-600 dark:text-slate-300">{insight.description}</p>
+                {onApplyInsight ? (
+                  <button
+                    onClick={() => onApplyInsight(insight)}
+                    className="mt-3 rounded-full border border-slate-300 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+                  >
+                    Crear campaña
+                  </button>
+                ) : null}
               </div>
             ))}
           </div>

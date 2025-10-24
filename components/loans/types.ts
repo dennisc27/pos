@@ -21,6 +21,10 @@ export type LoanQueueItem = {
   risk: "low" | "medium" | "high";
   contactPreference: "SMS" | "WhatsApp" | "Call";
   status: "due_today" | "past_due";
+  lastContactAt?: string;
+  lastContactChannel?: "SMS" | "WhatsApp" | "Call";
+  contactNotes?: string;
+  promiseToPay?: string;
 };
 
 export type RenewalCandidate = {

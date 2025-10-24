@@ -25,6 +25,9 @@ export type LayawayPlan = {
   contactPreference: "SMS" | "WhatsApp" | "Call" | "Email";
   risk: "low" | "medium" | "high";
   promiseToPay?: string;
+  lastContactAt?: string;
+  lastContactChannel?: "SMS" | "WhatsApp" | "Call" | "Email";
+  contactNotes?: string;
 };
 
 export type PaymentScheduleItem = {
@@ -36,6 +39,7 @@ export type PaymentScheduleItem = {
   channel: "cash" | "card" | "transfer" | "auto";
   status: "scheduled" | "processing" | "completed" | "overdue";
   notes?: string;
+  reminderQueued?: boolean;
 };
 
 export type EngagementReminder = {
