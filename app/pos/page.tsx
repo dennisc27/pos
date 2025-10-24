@@ -2,7 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { AppWindow, Camera, Headphones, Laptop, Shirt, Smartphone, Watch, X } from "lucide-react";
+import {
+  AppWindow,
+  Camera,
+  CreditCard,
+  Headphones,
+  Laptop,
+  Landmark,
+  PauseCircle,
+  ShieldX,
+  Shirt,
+  Smartphone,
+  Watch,
+  X
+} from "lucide-react";
 
 import { ProductGallery } from "@/components/pos/product-gallery";
 import { OrderPanel } from "@/components/pos/order-panel";
@@ -450,22 +463,23 @@ export default function PosPage() {
         />
         </div>
       </div>
-      <div className="sticky bottom-0 z-30 -mx-6 mt-6 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/90">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Quick actions
-          </div>
-          <div className="grid gap-3 sm:grid-cols-4">
-            <button className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
+      <div className="sticky bottom-0 z-30 -mx-6 -mb-8 mt-6 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/90">
+        <div className="flex justify-center">
+          <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4">
+            <button className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
+              <PauseCircle className="h-4 w-4" />
               Hold
             </button>
-            <button className="rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-500/70 hover:text-rose-500 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:border-rose-400/70 dark:hover:text-rose-200">
+            <button className="flex items-center justify-center gap-2 rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-500/70 hover:text-rose-500 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:border-rose-400/70 dark:hover:text-rose-200">
+              <ShieldX className="h-4 w-4" />
               Void
             </button>
-            <button className="rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white">
+            <button className="flex items-center justify-center gap-2 rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white">
+              <CreditCard className="h-4 w-4" />
               Payment
             </button>
-            <button className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
+            <button className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
+              <Landmark className="h-4 w-4" />
               Bank transaction
             </button>
           </div>
