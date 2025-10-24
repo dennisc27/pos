@@ -7,11 +7,19 @@ import type { Product, ProductCategory } from "./types";
 export function ProductGallery({
   categories,
   products,
-  activeCategoryId
+  activeCategoryId,
+  searchTerm,
+  onSearchTermChange,
+  onCategorySelect,
+  onAddProduct
 }: {
   categories: ProductCategory[];
   products: Product[];
   activeCategoryId: string;
+  searchTerm: string;
+  onSearchTermChange: (value: string) => void;
+  onCategorySelect: (categoryId: string) => void;
+  onAddProduct: (product: Product) => void;
 }) {
   return (
     <PosCard
@@ -31,6 +39,8 @@ export function ProductGallery({
             <input
               className="flex-1 bg-transparent text-slate-700 placeholder:text-slate-400 focus:outline-none dark:text-slate-200 dark:placeholder:text-slate-500"
               placeholder="Search SKU, item, or description"
+              value={searchTerm}
+              onChange={(event) => onSearchTermChange(event.target.value)}
             />
           </label>
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -46,6 +56,7 @@ export function ProductGallery({
                       ? "border-sky-500/70 bg-sky-500/10 text-sky-600 shadow-sm dark:text-sky-200"
                       : "border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-700 dark:border-slate-800/70 dark:bg-slate-900/70 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200"
                   )}
+                  onClick={() => onCategorySelect(category.id)}
                 >
                   <Icon className="h-3.5 w-3.5" />
                   <span className="whitespace-nowrap">{category.label}</span>
@@ -55,6 +66,14 @@ export function ProductGallery({
           </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-3">
+          {products.length === 0 ? (
+            <div className="col-span-full flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 dark:border-slate-800/60 dark:bg-slate-950/60 dark:text-slate-400">
+              <p className="font-medium text-slate-600 dark:text-slate-200">No products found</p>
+              <p className="max-w-xs text-xs text-slate-500 dark:text-slate-400">
+                Try adjusting the category filter or updating your search term to find the right item.
+              </p>
+            </div>
+          ) : null}
           {products.map((product) => (
             <article
               key={product.id}
@@ -86,7 +105,10 @@ export function ProductGallery({
                     </span>
                   ) : null}
                 </div>
-                <button className="mt-auto flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-sky-500/60 dark:hover:text-sky-200">
+                <button
+                  className="mt-auto flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-sky-500/60 dark:hover:text-sky-200"
+                  onClick={() => onAddProduct(product)}
+                >
                   Add to cart
                 </button>
               </div>

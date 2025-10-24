@@ -63,7 +63,7 @@ export function ReceiptPreview({
         </div>
         <div className="space-y-1 pt-2">
           {tenders.map((tender) => (
-            <div key={tender.method} className="flex items-center justify-between text-slate-700 dark:text-slate-200">
+            <div key={tender.id} className="flex items-center justify-between text-slate-700 dark:text-slate-200">
               <span>{tender.label}</span>
               <span>{formatCurrency(tender.amount)}</span>
             </div>

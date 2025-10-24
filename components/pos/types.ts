@@ -22,6 +22,7 @@ export type SaleSummary = {
 };
 
 export type TenderBreakdown = {
+  id: string;
   method: "cash" | "card" | "transfer" | "store_credit" | "gift";
   label: string;
   amount: number;

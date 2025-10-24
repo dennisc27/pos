@@ -1,4 +1,4 @@
-import { CalendarClock, CreditCard, MoreHorizontal, Trash2, UserCircle2 } from "lucide-react";
+import { CalendarClock, CreditCard, Minus, MoreHorizontal, Plus, Trash2, UserCircle2 } from "lucide-react";
 import { PosCard } from "./pos-card";
 import { formatCurrency } from "./utils";
 import type { CartLine, SaleSummary, TenderBreakdown } from "./types";
@@ -8,13 +8,23 @@ export function OrderPanel({
   summary,
   tenders,
   customerName,
-  ticketId
+  ticketId,
+  onRemoveItem,
+  onQuantityChange,
+  onAddTender,
+  onAdjustTender,
+  onRemoveTender
 }: {
   items: CartLine[];
   summary: SaleSummary;
   tenders: TenderBreakdown[];
   customerName: string;
   ticketId: string;
+  onRemoveItem: (lineId: string) => void;
+  onQuantityChange: (lineId: string, quantity: number) => void;
+  onAddTender: () => void;
+  onAdjustTender: (tenderId: string) => void;
+  onRemoveTender: (tenderId: string) => void;
 }) {
   return (
     <PosCard
@@ -74,8 +84,36 @@ export function OrderPanel({
                   </div>
                   <div className="flex flex-col items-end gap-2 text-right">
                     <span className="text-sm font-semibold text-slate-900 dark:text-white">{formatCurrency(lineTotal)}</span>
-                    <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">
-                      <span>Qty {item.qty}</span>
+                    <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">
+                      <div className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-300">
+                        <button
+                          aria-label={`Decrease quantity for ${item.name}`}
+                          className="rounded border border-transparent p-0.5 hover:border-slate-300 hover:text-slate-900 dark:hover:border-slate-700"
+                          onClick={() => onQuantityChange(item.id, Math.max(1, item.qty - 1))}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <input
+                          aria-label={`Quantity for ${item.name}`}
+                          className="w-9 bg-transparent text-center text-[11px] font-semibold text-slate-700 focus:outline-none dark:text-slate-200"
+                          inputMode="numeric"
+                          min={1}
+                          value={item.qty}
+                          onChange={(event) => {
+                            const next = Number(event.target.value.replace(/[^0-9]/g, ""));
+                            if (!Number.isNaN(next) && next > 0) {
+                              onQuantityChange(item.id, next);
+                            }
+                          }}
+                        />
+                        <button
+                          aria-label={`Increase quantity for ${item.name}`}
+                          className="rounded border border-transparent p-0.5 hover:border-slate-300 hover:text-slate-900 dark:hover:border-slate-700"
+                          onClick={() => onQuantityChange(item.id, item.qty + 1)}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
                       <span>Unit {formatCurrency(item.price)}</span>
                     </div>
                   </div>
@@ -91,7 +129,10 @@ export function OrderPanel({
                     <span className="text-slate-500 dark:text-slate-400">Balance {formatCurrency(lineTotal)}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button className="rounded-lg border border-slate-300 px-2 py-1 transition hover:border-rose-400 hover:text-rose-500 dark:border-slate-800/80 dark:hover:border-rose-500/60 dark:hover:text-rose-300">
+                    <button
+                      className="rounded-lg border border-slate-300 px-2 py-1 transition hover:border-rose-400 hover:text-rose-500 dark:border-slate-800/80 dark:hover:border-rose-500/60 dark:hover:text-rose-300"
+                      onClick={() => onRemoveItem(item.id)}
+                    >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                     <button className="rounded-lg border border-slate-300 px-2 py-1 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:hover:border-slate-700 dark:hover:text-white">
@@ -128,12 +169,17 @@ export function OrderPanel({
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-500">
             <span>Payment method</span>
-            <button className="text-sky-600 transition hover:text-sky-500 dark:text-sky-300 dark:hover:text-sky-200">Add method</button>
+            <button
+              className="text-sky-600 transition hover:text-sky-500 dark:text-sky-300 dark:hover:text-sky-200"
+              onClick={onAddTender}
+            >
+              Add method
+            </button>
           </div>
           <div className="space-y-2">
             {tenders.map((tender) => (
               <div
-                key={tender.method}
+                key={tender.id}
                 className="flex items-center justify-between rounded-xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 px-3 py-3 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200"
               >
                 <div className="flex items-center gap-3">
@@ -150,7 +196,23 @@ export function OrderPanel({
                     </p>
                   </div>
                 </div>
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">{formatCurrency(tender.amount)}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-slate-900 dark:text-white">{formatCurrency(tender.amount)}</span>
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <button
+                      className="rounded-lg border border-slate-300 px-2 py-1 transition hover:border-sky-400 hover:text-sky-600 dark:border-slate-800/80 dark:hover:border-sky-500/60 dark:hover:text-sky-200"
+                      onClick={() => onAdjustTender(tender.id)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="rounded-lg border border-slate-300 px-2 py-1 transition hover:border-rose-400 hover:text-rose-500 dark:border-slate-800/80 dark:hover:border-rose-500/60 dark:hover:text-rose-300"
+                      onClick={() => onRemoveTender(tender.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>

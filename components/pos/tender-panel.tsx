@@ -53,7 +53,7 @@ export function TenderPanel({
             const Icon = tenderIcons[tender.method];
             return (
               <div
-                key={tender.method + tender.reference}
+                key={tender.id}
                 className="flex flex-col gap-2 rounded-xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-4 text-xs text-slate-600 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-300"
               >
                 <div className="flex items-center justify-between">
