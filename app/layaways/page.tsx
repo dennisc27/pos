@@ -17,9 +17,9 @@ import { formatContactTimestamp, formatCurrency, formatPercent } from "@/compone
 
 const summaryBaselines = {
   activePlans: 326,
-  committedInventory: 14_280_000,
-  overdueInstallments: 182_450,
-  completedThisMonth: 28,
+  overduePlans: 42,
+  settledToday: 18,
+  paymentsToday: 184_500,
 };
 
 const INITIAL_ACTIVE_PLANS: LayawayPlan[] = [
@@ -199,6 +199,12 @@ const INITIAL_SCHEDULE: PaymentScheduleItem[] = [
   },
 ];
 
+const INITIAL_COMPLETED_COUNT = INITIAL_SCHEDULE.filter((item) => item.status === "completed").length;
+const INITIAL_COMPLETED_AMOUNT = INITIAL_SCHEDULE.filter((item) => item.status === "completed").reduce(
+  (sum, item) => sum + item.amount,
+  0,
+);
+
 const INITIAL_REMINDERS: EngagementReminder[] = [
   {
     id: "rem-1",
@@ -345,8 +351,17 @@ export default function LayawaysPage() {
     [overduePlans, overdueFilters],
   );
 
-  const committedInventory = activePlans.reduce((sum, plan) => sum + plan.balance + plan.deposit, 0);
-  const overdueBalance = overduePlans.reduce((sum, plan) => sum + plan.nextPaymentAmount, 0);
+  const completedToday = useMemo(
+    () => schedule.filter((item) => item.status === "completed").length,
+    [schedule],
+  );
+  const completedAmount = useMemo(
+    () =>
+      schedule
+        .filter((item) => item.status === "completed")
+        .reduce((sum, item) => sum + item.amount, 0),
+    [schedule],
+  );
 
   const summaryMetrics: LayawaySummaryMetric[] = [
     {
@@ -356,23 +371,24 @@ export default function LayawaysPage() {
       change: { direction: "up", label: "+12 vs. semana pasada" },
     },
     {
-      label: "Inventario comprometido",
-      value: formatCurrency(summaryBaselines.committedInventory + committedInventory -
-        INITIAL_ACTIVE_PLANS.reduce((sum, plan) => sum + plan.balance + plan.deposit, 0)),
-      change: { direction: "up", label: "+RD$420K" },
-    },
-    {
-      label: "Cuotas vencidas",
-      value: formatCurrency(summaryBaselines.overdueInstallments + overdueBalance -
-        INITIAL_OVERDUE_PLANS.reduce((sum, plan) => sum + plan.nextPaymentAmount, 0)),
+      label: "Vencidos (cantidad)",
+      value: `${summaryBaselines.overduePlans + overduePlans.length - INITIAL_OVERDUE_PLANS.length} planes`,
       accent: "text-amber-600 dark:text-amber-300",
-      change: { direction: "down", label: "-6% mora" },
+      change: { direction: "down", label: "-3 vs. semana pasada" },
     },
     {
-      label: "Planes completados",
-      value: `${summaryBaselines.completedThisMonth} este mes`,
+      label: "Saldados hoy",
+      value: `${summaryBaselines.settledToday + completedToday - INITIAL_COMPLETED_COUNT} planes`,
       accent: "text-sky-600 dark:text-sky-300",
-      change: { direction: "up", label: "+18% vs. mayo" },
+      change: { direction: "up", label: "+3 vs. ayer" },
+    },
+    {
+      label: "Abonos hoy",
+      value: formatCurrency(
+        summaryBaselines.paymentsToday + completedAmount - INITIAL_COMPLETED_AMOUNT,
+      ),
+      accent: "text-emerald-600 dark:text-emerald-300",
+      change: { direction: "up", label: "+RD$85K" },
     },
   ];
 
