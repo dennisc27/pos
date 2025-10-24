@@ -276,10 +276,10 @@ export function OrderPanel({
             return (
               <div
                 key={item.id}
-                className="rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200"
+                className="rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-3 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200 sm:p-4"
               >
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex-1 space-y-3">
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                  <div className="space-y-2">
                     <div className="space-y-1">
                       <p className="text-sm font-semibold text-slate-900 dark:text-white">{item.name}</p>
                       <div className="space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -293,36 +293,7 @@ export function OrderPanel({
                       <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 dark:border-slate-700/80 dark:bg-slate-950/60">
                         {item.sku}
                       </span>
-                      {item.status ? (
-                        <span className="rounded-full border border-amber-300/70 bg-amber-50 px-2 py-0.5 text-amber-600 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
-                          {item.status}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-3 sm:min-w-[220px]">
-                    <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-100">
-                      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">RD$</span>
-                      <input
-                        ref={(element) => {
-                          if (element) {
-                            priceInputRefs.current[item.id] = element;
-                          } else {
-                            delete priceInputRefs.current[item.id];
-                          }
-                        }}
-                        aria-label={`Price for ${item.name}`}
-                        className="w-24 bg-transparent text-right text-sm font-semibold text-slate-700 focus:outline-none dark:text-slate-100"
-                        inputMode="decimal"
-                        value={priceInputValue}
-                        onChange={(event) => handlePriceInputChange(item.id, event.target.value)}
-                        onBlur={() => commitPrice(item.id)}
-                        onFocus={(event) => event.currentTarget.select()}
-                        onKeyDown={(event) => handlePriceKeyDown(event, item.id, index)}
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                      <div className="flex items-center gap-1 rounded-xl border border-slate-300 bg-white px-2 py-1 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900">
+                      <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium normal-case text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-200">
                         <button
                           aria-label={`Decrease quantity for ${item.name}`}
                           className="rounded border border-transparent p-0.5 hover:border-slate-300 hover:text-slate-900 dark:hover:border-slate-700"
@@ -351,30 +322,50 @@ export function OrderPanel({
                           <Plus className="h-3 w-3" />
                         </button>
                       </div>
+                      <div className="ml-auto flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                        <button
+                          className="rounded-lg border border-slate-300 p-1 transition hover:border-rose-400 hover:text-rose-500 dark:border-slate-800/80 dark:hover:border-rose-500/60 dark:hover:text-rose-300"
+                          onClick={() => onRemoveItem(item.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button className="rounded-lg border border-slate-300 p-1 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:hover:border-slate-700 dark:hover:text-white">
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-2 sm:min-w-[180px]">
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-100">
+                      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">RD$</span>
+                      <input
+                        ref={(element) => {
+                          if (element) {
+                            priceInputRefs.current[item.id] = element;
+                          } else {
+                            delete priceInputRefs.current[item.id];
+                          }
+                        }}
+                        aria-label={`Price for ${item.name}`}
+                        className="w-24 bg-transparent text-right text-sm font-semibold text-slate-700 focus:outline-none dark:text-slate-100"
+                        inputMode="decimal"
+                        value={priceInputValue}
+                        onChange={(event) => handlePriceInputChange(item.id, event.target.value)}
+                        onBlur={() => commitPrice(item.id)}
+                        onFocus={(event) => event.currentTarget.select()}
+                        onKeyDown={(event) => handlePriceKeyDown(event, item.id, index)}
+                      />
                     </div>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
-                  <div className="flex flex-wrap items-center gap-3">
-                    {hasDiscount ? (
-                      <span className="text-rose-500 dark:text-rose-400">Disc {formatCurrency(lineDiscount)}</span>
-                    ) : null}
-                    {taxAmount > 0 ? (
-                      <span className="text-sky-600 dark:text-sky-300">ITBIS {formatCurrency(taxAmount)}</span>
-                    ) : null}
-                    <span>Sub {formatCurrency(baseAmount)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="rounded-lg border border-slate-300 px-2 py-1 transition hover:border-rose-400 hover:text-rose-500 dark:border-slate-800/80 dark:hover:border-rose-500/60 dark:hover:text-rose-300"
-                      onClick={() => onRemoveItem(item.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                    <button className="rounded-lg border border-slate-300 px-2 py-1 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:hover:border-slate-700 dark:hover:text-white">
-                      <MoreHorizontal className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                  {hasDiscount ? (
+                    <span className="text-rose-500 dark:text-rose-400">Disc {formatCurrency(lineDiscount)}</span>
+                  ) : null}
+                  {taxAmount > 0 ? (
+                    <span className="text-sky-600 dark:text-sky-300">ITBIS {formatCurrency(taxAmount)}</span>
+                  ) : null}
+                  <span>Sub {formatCurrency(baseAmount)}</span>
                 </div>
               </div>
             );
