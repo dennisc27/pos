@@ -45,7 +45,7 @@ export function ReceiptPreview({
         </div>
         <div className="space-y-1 pt-2">
           <div className="flex items-center justify-between">
-            <span>Subtotal</span>
+            <span>Subtotal (incl. ITBIS)</span>
             <span>{formatCurrency(summary.subtotal)}</span>
           </div>
           <div className="flex items-center justify-between text-rose-500 dark:text-rose-300">
@@ -53,7 +53,7 @@ export function ReceiptPreview({
             <span>-{formatCurrency(summary.discounts)}</span>
           </div>
           <div className="flex items-center justify-between text-sky-600 dark:text-sky-300">
-            <span>ITBIS</span>
+            <span>ITBIS included</span>
             <span>{formatCurrency(summary.tax)}</span>
           </div>
           <div className="flex items-center justify-between pt-1 text-sm font-semibold text-slate-900 dark:text-white">

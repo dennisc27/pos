@@ -270,8 +270,9 @@ export function TopBar() {
       { label: "2", action: () => handleDigit("2"), variant: "default" as const },
       { label: "3", action: () => handleDigit("3"), variant: "default" as const },
       { label: "=", action: handleEquals, variant: "primary" as const },
-      { label: "0", action: () => handleDigit("0"), variant: "default" as const, span: 2 },
+      { label: "0", action: () => handleDigit("0"), variant: "default" as const },
       { label: ".", action: handleDecimal, variant: "default" as const },
+      { label: ",", action: handleDecimal, variant: "default" as const },
       { label: "±", action: handleToggleSign, variant: "muted" as const }
     ],
     [handleBackspace, handleClear, handleDecimal, handleDigit, handleEquals, handleOperator, handleToggleSign]

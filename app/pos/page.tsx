@@ -27,6 +27,8 @@ const TENDER_DEFAULT_STATUS: Record<TenderMethod, TenderBreakdown["status"]> = {
   gift: "pending"
 };
 
+const DEFAULT_TAX_RATE = 0.18;
+
 const productCategories: ProductCategory[] = [
   { id: "all", label: "All categories", icon: AppWindow },
   { id: "phones", label: "Mobiles", icon: Smartphone },
@@ -112,7 +114,7 @@ const initialCartLines: CartLine[] = [
     qty: 1,
     price: 18500,
     discount: 500,
-    taxRate: 0.18
+    taxRate: DEFAULT_TAX_RATE
   },
   {
     id: "prod-2",
@@ -121,7 +123,7 @@ const initialCartLines: CartLine[] = [
     variant: "Sapphire glass · Leather band",
     qty: 1,
     price: 14500,
-    taxRate: 0.18
+    taxRate: DEFAULT_TAX_RATE
   },
   {
     id: "prod-3",
@@ -131,7 +133,7 @@ const initialCartLines: CartLine[] = [
     qty: 1,
     price: 9200,
     discount: 700,
-    taxRate: 0.18,
+    taxRate: DEFAULT_TAX_RATE,
     note: "Bundle with mic stand for RD$9,900"
   }
 ];
@@ -159,11 +161,13 @@ function buildSummary(items: CartLine[], tenders: TenderBreakdown[]): SaleSummar
   const discounts = items.reduce((sum, item) => sum + (item.discount ?? 0), 0);
   const tax = items.reduce((sum, item) => {
     const lineSubtotal = item.qty * item.price;
-    const discount = item.discount ?? 0;
-    const rate = item.taxRate ?? 0;
-    return sum + (lineSubtotal - discount) * rate;
+    const discount = Math.min(item.discount ?? 0, lineSubtotal);
+    const rate = item.taxRate ?? DEFAULT_TAX_RATE;
+    const net = Math.max(lineSubtotal - discount, 0);
+    const base = net / (1 + rate);
+    return sum + (net - base);
   }, 0);
-  const total = subtotal - discounts + tax;
+  const total = Math.max(subtotal - discounts, 0);
   const tendered = tenders.reduce((sum, tender) => sum + tender.amount, 0);
   const balanceDue = Math.max(total - tendered, 0);
 
@@ -240,7 +244,7 @@ export default function PosPage() {
           sku: product.sku,
           qty: 1,
           price: product.price,
-          taxRate: 0.18,
+          taxRate: DEFAULT_TAX_RATE,
           variant: product.variant,
           status: product.highlight ? "featured" : undefined
         },
@@ -256,6 +260,15 @@ export default function PosPage() {
   const handleQuantityChange = useCallback((lineId: string, quantity: number) => {
     setCartLines((previous) =>
       previous.map((line) => (line.id === lineId ? { ...line, qty: Math.max(1, quantity) } : line))
+    );
+  }, []);
+
+  const handlePriceChange = useCallback((lineId: string, price: number) => {
+    if (!Number.isFinite(price) || price <= 0) {
+      return;
+    }
+    setCartLines((previous) =>
+      previous.map((line) => (line.id === lineId ? { ...line, price } : line))
     );
   }, []);
 
@@ -418,6 +431,7 @@ export default function PosPage() {
           ticketId="R-20451"
           onRemoveItem={handleRemoveLine}
           onQuantityChange={handleQuantityChange}
+          onPriceChange={handlePriceChange}
           onAddTender={handleAddTender}
           onAdjustTender={handleAdjustTender}
           onRemoveTender={handleRemoveTender}

@@ -1,9 +1,30 @@
-import { useMemo, useState } from "react";
-import type { FormEvent } from "react";
-import { CalendarClock, CreditCard, Minus, MoreHorizontal, Plus, Trash2, UserCircle2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
+import { CreditCard, Minus, MoreHorizontal, Plus, Trash2, UserCircle2 } from "lucide-react";
 import { PosCard } from "./pos-card";
 import { formatCurrency } from "./utils";
 import type { CartLine, SaleSummary, TenderBreakdown } from "./types";
+
+const DEFAULT_TAX_RATE = 0.18;
+
+function parsePriceInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.replace(/[^0-9,.-]/g, "");
+  if (!normalized) {
+    return null;
+  }
+
+  const candidate = normalized.includes(",") && !normalized.includes(".")
+    ? normalized.replace(/,/g, ".")
+    : normalized.replace(/,/g, "");
+
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export function OrderPanel({
   items,
@@ -19,6 +40,7 @@ export function OrderPanel({
   onRemoveTender,
   onChangeCustomer,
   onAddCustomer,
+  onPriceChange,
   tenderOptions,
   defaultTenderAmount
 }: {
@@ -35,6 +57,7 @@ export function OrderPanel({
   onRemoveTender: (tenderId: string) => void;
   onChangeCustomer: () => void;
   onAddCustomer: () => void;
+  onPriceChange: (lineId: string, price: number) => void;
   tenderOptions: { value: TenderBreakdown["method"]; label: string }[];
   defaultTenderAmount: number;
 }) {
@@ -46,6 +69,24 @@ export function OrderPanel({
   const [selectedMethod, setSelectedMethod] = useState<TenderBreakdown["method"]>(firstOption);
   const [amountInput, setAmountInput] = useState("");
   const [referenceInput, setReferenceInput] = useState("");
+  const [editingPrices, setEditingPrices] = useState<Record<string, string>>({});
+  const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  useEffect(() => {
+    const validIds = new Set(items.map((item) => item.id));
+    setEditingPrices((previous) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(previous)) {
+        if (validIds.has(key)) {
+          next[key] = value;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [items]);
 
   const formattedDefaultAmount = useMemo(() => {
     if (defaultTenderAmount <= 0) {
@@ -80,18 +121,97 @@ export function OrderPanel({
     setReferenceInput("");
   };
 
+  const focusPriceAtIndex = (index: number) => {
+    if (index < 0 || index >= items.length) {
+      return;
+    }
+    const target = items[index];
+    const input = priceInputRefs.current[target.id];
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  };
+
+  const commitPrice = (lineId: string) => {
+    const line = items.find((item) => item.id === lineId);
+    if (!line) {
+      setEditingPrices((previous) => {
+        if (!(lineId in previous)) {
+          return previous;
+        }
+        const next = { ...previous };
+        delete next[lineId];
+        return next;
+      });
+      return;
+    }
+
+    const rawValue = editingPrices[lineId];
+    if (rawValue !== undefined) {
+      const parsed = parsePriceInput(rawValue);
+      if (parsed !== null && parsed > 0 && parsed !== line.price) {
+        onPriceChange(lineId, parsed);
+      }
+      setEditingPrices((previous) => {
+        if (!(lineId in previous)) {
+          return previous;
+        }
+        const next = { ...previous };
+        delete next[lineId];
+        return next;
+      });
+    }
+  };
+
+  const handlePriceInputChange = (lineId: string, value: string) => {
+    const sanitized = value.replace(/[^0-9,.-]/g, "");
+    setEditingPrices((previous) => ({
+      ...previous,
+      [lineId]: sanitized
+    }));
+  };
+
+  const handlePriceKeyDown = (
+    event: KeyboardEvent<HTMLInputElement>,
+    lineId: string,
+    index: number
+  ) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitPrice(lineId);
+      if (index + 1 < items.length) {
+        focusPriceAtIndex(index + 1);
+      } else {
+        const current = priceInputRefs.current[lineId];
+        current?.blur();
+      }
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      commitPrice(lineId);
+      focusPriceAtIndex(index + 1);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      commitPrice(lineId);
+      focusPriceAtIndex(index - 1);
+    }
+  };
+
   return (
     <PosCard
       title="New order"
-      subtitle="Review products in the cart, apply payments, and complete the sale"
       className="h-full"
       action={
         <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
             Ticket {ticketId}
           </span>
-          <CalendarClock className="h-4 w-4 text-sky-600 dark:text-sky-300" />
-          <span>15 min to cutoff</span>
         </div>
       }
     >
@@ -122,12 +242,14 @@ export function OrderPanel({
           </div>
         </div>
         <div className="space-y-3">
-          {items.map((item) => {
+          {items.map((item, index) => {
+            const rate = item.taxRate ?? DEFAULT_TAX_RATE;
             const lineSubtotal = item.qty * item.price;
-            const discount = item.discount ?? 0;
-            const taxRate = item.taxRate ?? 0;
-            const taxAmount = (lineSubtotal - discount) * taxRate;
-            const lineTotal = lineSubtotal - discount + taxAmount;
+            const discount = Math.min(item.discount ?? 0, lineSubtotal);
+            const lineTotal = Math.max(lineSubtotal - discount, 0);
+            const baseAmount = lineTotal / (1 + rate);
+            const taxAmount = lineTotal - baseAmount;
+            const priceInputValue = editingPrices[item.id] ?? item.price.toFixed(2);
             return (
               <div
                 key={item.id}
@@ -149,9 +271,29 @@ export function OrderPanel({
                     {item.variant ? <p className="text-xs text-slate-500 dark:text-slate-400">{item.variant}</p> : null}
                     {item.note ? <p className="text-xs text-slate-500 dark:text-slate-400">{item.note}</p> : null}
                   </div>
-                  <div className="flex flex-col items-end gap-2 text-right">
+                  <div className="flex flex-col items-end gap-3 text-right">
                     <span className="text-sm font-semibold text-slate-900 dark:text-white">{formatCurrency(lineTotal)}</span>
                     <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">
+                      <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-200">
+                        <span>Precio</span>
+                        <input
+                          ref={(element) => {
+                            if (element) {
+                              priceInputRefs.current[item.id] = element;
+                            } else {
+                              delete priceInputRefs.current[item.id];
+                            }
+                          }}
+                          aria-label={`Price for ${item.name}`}
+                          className="w-20 bg-transparent text-right text-sm font-semibold text-slate-700 focus:outline-none dark:text-slate-100"
+                          inputMode="decimal"
+                          value={priceInputValue}
+                          onChange={(event) => handlePriceInputChange(item.id, event.target.value)}
+                          onBlur={() => commitPrice(item.id)}
+                          onFocus={(event) => event.currentTarget.select()}
+                          onKeyDown={(event) => handlePriceKeyDown(event, item.id, index)}
+                        />
+                      </div>
                       <div className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 shadow-sm transition dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-300">
                         <button
                           aria-label={`Decrease quantity for ${item.name}`}
@@ -181,19 +323,18 @@ export function OrderPanel({
                           <Plus className="h-3 w-3" />
                         </button>
                       </div>
-                      <span>Unit {formatCurrency(item.price)}</span>
                     </div>
                   </div>
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     {discount > 0 ? (
                       <span className="text-rose-500 dark:text-rose-400">Disc {formatCurrency(discount)}</span>
                     ) : null}
                     {taxAmount > 0 ? (
                       <span className="text-sky-600 dark:text-sky-300">ITBIS {formatCurrency(taxAmount)}</span>
                     ) : null}
-                    <span className="text-slate-500 dark:text-slate-400">Balance {formatCurrency(lineTotal)}</span>
+                    <span className="text-slate-500 dark:text-slate-400">Sub {formatCurrency(baseAmount)}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -213,7 +354,7 @@ export function OrderPanel({
         </div>
         <div className="space-y-3 rounded-xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/60 dark:to-slate-950/80 dark:text-slate-200">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-            <span>Subtotal</span>
+            <span>Subtotal (incl. ITBIS)</span>
             <span>{formatCurrency(summary.subtotal)}</span>
           </div>
           <div className="flex items-center justify-between text-xs text-rose-500 dark:text-rose-400">
@@ -221,7 +362,7 @@ export function OrderPanel({
             <span>-{formatCurrency(summary.discounts)}</span>
           </div>
           <div className="flex items-center justify-between text-xs text-sky-600 dark:text-sky-300">
-            <span>ITBIS</span>
+            <span>ITBIS included</span>
             <span>{formatCurrency(summary.tax)}</span>
           </div>
           <div className="flex items-center justify-between pt-2 text-base font-semibold text-slate-900 dark:text-white">
