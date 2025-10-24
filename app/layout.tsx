@@ -16,7 +16,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className="flex h-screen overflow-hidden bg-slate-950 text-slate-100">
+      <body className="flex h-screen overflow-hidden bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100">
         <Sidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <TopBar />
