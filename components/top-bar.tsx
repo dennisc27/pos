@@ -20,7 +20,7 @@ function applyTheme(theme: Theme) {
 }
 
 export function TopBar() {
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -32,7 +32,7 @@ export function TopBar() {
       applyTheme(stored);
       return;
     }
-    applyTheme("dark");
+    applyTheme("light");
   }, []);
 
   useEffect(() => {
