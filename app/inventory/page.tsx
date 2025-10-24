@@ -260,27 +260,27 @@ const summaryTiles = [
   {
     label: "Retail value",
     value: formatCurrency(valuationMetrics[0].amount),
-    accent: "text-emerald-300"
+    accent: "text-emerald-600 dark:text-emerald-300"
   },
   {
     label: "Weighted cost",
     value: formatCurrency(valuationMetrics[1].amount),
-    accent: "text-slate-200"
+    accent: "text-slate-700 dark:text-slate-200"
   },
   {
     label: "Active SKUs",
     value: inventoryItems.length.toString(),
-    accent: "text-sky-300"
+    accent: "text-sky-600 dark:text-sky-300"
   },
   {
     label: "Units on hand",
     value: formatQuantity(inventoryItems.reduce((sum, item) => sum + item.qty, 0)),
-    accent: "text-slate-200"
+    accent: "text-slate-700 dark:text-slate-200"
   },
   {
     label: "Quarantine",
     value: `${quarantineItems.length} items`,
-    accent: "text-rose-300"
+    accent: "text-rose-500 dark:text-rose-300"
   }
 ];
 
@@ -291,10 +291,10 @@ export default function InventoryPage() {
         {summaryTiles.map((tile) => (
           <div
             key={tile.label}
-            className="flex flex-col gap-1 rounded-2xl border border-slate-800/70 bg-slate-950/80 px-4 py-3 text-xs text-slate-400"
+            className="flex flex-col gap-1 rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 px-4 py-3 text-xs text-slate-600 shadow-sm dark:border-slate-800/70 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-300"
           >
-            <span className="uppercase tracking-wide text-[10px] text-slate-500">{tile.label}</span>
-            <span className={`text-sm font-semibold ${tile.accent}`}>{tile.value}</span>
+            <span className="uppercase tracking-wide text-[10px] text-slate-500 dark:text-slate-500">{tile.label}</span>
+            <span className={`text-sm font-semibold text-slate-900 dark:text-white ${tile.accent}`}>{tile.value}</span>
           </div>
         ))}
       </section>

@@ -20,7 +20,7 @@ export function formatPercent(value: number) {
 }
 
 export function trendColor(trend: "up" | "down" | "flat") {
-  if (trend === "up") return "text-emerald-400";
-  if (trend === "down") return "text-rose-400";
-  return "text-slate-400";
+  if (trend === "up") return "text-emerald-600 dark:text-emerald-300";
+  if (trend === "down") return "text-rose-500 dark:text-rose-300";
+  return "text-slate-600 dark:text-slate-400";
 }

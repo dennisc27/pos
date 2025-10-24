@@ -17,7 +17,7 @@ const summaryMetrics: LoanSummaryMetric[] = [
   {
     label: "Activos",
     value: "1,248 préstamos",
-    accent: "text-emerald-300",
+    accent: "text-emerald-600 dark:text-emerald-300",
     change: { direction: "up", label: "+3.1% vs. mes pasado" }
   },
   {
@@ -28,12 +28,12 @@ const summaryMetrics: LoanSummaryMetric[] = [
   {
     label: "Vencen hoy",
     value: "32 tickets",
-    accent: "text-amber-300"
+    accent: "text-amber-600 dark:text-amber-300"
   },
   {
     label: "En mora",
     value: "18 clientes",
-    accent: "text-rose-300",
+    accent: "text-rose-500 dark:text-rose-300",
     change: { direction: "down", label: "-2 casos" }
   }
 ];
