@@ -1,3 +1,5 @@
+import { useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import { CalendarClock, CreditCard, Minus, MoreHorizontal, Plus, Trash2, UserCircle2 } from "lucide-react";
 import { PosCard } from "./pos-card";
 import { formatCurrency } from "./utils";
@@ -8,24 +10,76 @@ export function OrderPanel({
   summary,
   tenders,
   customerName,
+  customerDescriptor,
   ticketId,
   onRemoveItem,
   onQuantityChange,
   onAddTender,
   onAdjustTender,
-  onRemoveTender
+  onRemoveTender,
+  onChangeCustomer,
+  onAddCustomer,
+  tenderOptions,
+  defaultTenderAmount
 }: {
   items: CartLine[];
   summary: SaleSummary;
   tenders: TenderBreakdown[];
   customerName: string;
+  customerDescriptor?: string;
   ticketId: string;
   onRemoveItem: (lineId: string) => void;
   onQuantityChange: (lineId: string, quantity: number) => void;
-  onAddTender: () => void;
+  onAddTender: (payload: { method: TenderBreakdown["method"]; amount: number; reference?: string }) => void;
   onAdjustTender: (tenderId: string) => void;
   onRemoveTender: (tenderId: string) => void;
+  onChangeCustomer: () => void;
+  onAddCustomer: () => void;
+  tenderOptions: { value: TenderBreakdown["method"]; label: string }[];
+  defaultTenderAmount: number;
 }) {
+  const [isAddingTender, setIsAddingTender] = useState(false);
+  const firstOption = useMemo(
+    () => tenderOptions[0]?.value ?? ("cash" as TenderBreakdown["method"]),
+    [tenderOptions]
+  );
+  const [selectedMethod, setSelectedMethod] = useState<TenderBreakdown["method"]>(firstOption);
+  const [amountInput, setAmountInput] = useState("");
+  const [referenceInput, setReferenceInput] = useState("");
+
+  const formattedDefaultAmount = useMemo(() => {
+    if (defaultTenderAmount <= 0) {
+      return "0.00";
+    }
+    return defaultTenderAmount.toFixed(2);
+  }, [defaultTenderAmount]);
+
+  const handleSubmitTender = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedAmount = amountInput.trim();
+    const amountValue = trimmedAmount ? Number(trimmedAmount.replace(/[^0-9.-]/g, "")) : defaultTenderAmount;
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      return;
+    }
+
+    onAddTender({
+      method: selectedMethod,
+      amount: amountValue,
+      reference: referenceInput.trim() ? referenceInput.trim() : undefined
+    });
+
+    setAmountInput("");
+    setReferenceInput("");
+    setIsAddingTender(false);
+  };
+
+  const handleStartAddingTender = () => {
+    setIsAddingTender(true);
+    setSelectedMethod(tenderOptions[0]?.value ?? ("cash" as TenderBreakdown["method"]));
+    setAmountInput(defaultTenderAmount > 0 ? defaultTenderAmount.toFixed(2) : "");
+    setReferenceInput("");
+  };
+
   return (
     <PosCard
       title="New order"
@@ -47,12 +101,23 @@ export function OrderPanel({
             <UserCircle2 className="h-5 w-5 text-slate-400 dark:text-slate-500" />
             <div className="leading-tight">
               <p className="font-medium text-slate-900 dark:text-white">{customerName}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Walk-in customer</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{customerDescriptor ?? "Guest"}</p>
             </div>
           </div>
-          <button className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-200 dark:hover:border-slate-700">
-            Change
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-200 dark:hover:border-slate-700"
+              onClick={onChangeCustomer}
+            >
+              Change
+            </button>
+            <button
+              className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-200 dark:hover:border-slate-700"
+              onClick={onAddCustomer}
+            >
+              Add
+            </button>
+          </div>
         </div>
         <div className="space-y-3">
           {items.map((item) => {
@@ -169,13 +234,71 @@ export function OrderPanel({
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-500">
             <span>Payment method</span>
-            <button
-              className="text-sky-600 transition hover:text-sky-500 dark:text-sky-300 dark:hover:text-sky-200"
-              onClick={onAddTender}
-            >
-              Add method
-            </button>
+            {isAddingTender ? null : (
+              <button
+                className="text-sky-600 transition hover:text-sky-500 dark:text-sky-300 dark:hover:text-sky-200"
+                onClick={handleStartAddingTender}
+              >
+                Add method
+              </button>
+            )}
           </div>
+          {isAddingTender ? (
+            <form
+              className="space-y-2 rounded-xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 p-3 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-200"
+              onSubmit={handleSubmitTender}
+            >
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Method</label>
+                <select
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm font-medium text-slate-700 focus:border-slate-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200"
+                  value={selectedMethod}
+                  onChange={(event) => setSelectedMethod(event.target.value as TenderBreakdown["method"])}
+                >
+                  {tenderOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Amount</label>
+                <input
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 focus:border-slate-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200"
+                  placeholder={formattedDefaultAmount}
+                  value={amountInput}
+                  onChange={(event) => setAmountInput(event.target.value)}
+                />
+              </div>
+              {(selectedMethod === "card" || selectedMethod === "transfer") && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Reference</label>
+                  <input
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 focus:border-slate-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200"
+                    value={referenceInput}
+                    onChange={(event) => setReferenceInput(event.target.value)}
+                    placeholder="AUTH-000000"
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-end gap-2 text-xs">
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-300 px-3 py-1 font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+                  onClick={() => setIsAddingTender(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-3 py-1 font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+                >
+                  Save method
+                </button>
+              </div>
+            </form>
+          ) : null}
           <div className="space-y-2">
             {tenders.map((tender) => (
               <div

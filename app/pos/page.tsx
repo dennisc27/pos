@@ -5,17 +5,7 @@ import { AppWindow, Camera, Headphones, Laptop, Shirt, Smartphone, Watch } from 
 
 import { ProductGallery } from "@/components/pos/product-gallery";
 import { OrderPanel } from "@/components/pos/order-panel";
-import { RegisterFeed } from "@/components/pos/register-feed";
-import { OfflineQueue } from "@/components/pos/offline-queue";
-import type {
-  CartLine,
-  RegisterEvent,
-  SaleSummary,
-  TenderBreakdown,
-  QueuedSale,
-  Product,
-  ProductCategory
-} from "@/components/pos/types";
+import type { CartLine, SaleSummary, TenderBreakdown, Product, ProductCategory } from "@/components/pos/types";
 
 const TENDER_METHODS = ["cash", "card", "transfer", "store_credit", "gift"] as const;
 type TenderMethod = (typeof TENDER_METHODS)[number];
@@ -111,60 +101,6 @@ const catalogProducts: Product[] = [
   }
 ];
 
-const registerEvents: RegisterEvent[] = [
-  {
-    id: "evt-1",
-    time: "10:42",
-    type: "sale",
-    description: "RD$56,850 ticket R-20450 closed via cash + card",
-    amount: 56850,
-    clerk: "Maria P."
-  },
-  {
-    id: "evt-2",
-    time: "10:15",
-    type: "drop",
-    description: "Cash drop to safe recorded for afternoon deposit",
-    amount: 15000,
-    clerk: "Supervisor"
-  },
-  {
-    id: "evt-3",
-    time: "09:55",
-    type: "paid_out",
-    description: "Paid-out RD$4,500 for repair vendor invoice #RF-118",
-    amount: 4500,
-    clerk: "Maria P."
-  },
-  {
-    id: "evt-4",
-    time: "09:20",
-    type: "paid_in",
-    description: "Opening float counted and confirmed",
-    amount: 15000,
-    clerk: "Supervisor"
-  }
-];
-
-const offlineQueue: QueuedSale[] = [
-  {
-    id: "queue-1",
-    receipt: "R-20432",
-    customer: "Walk-in customer",
-    amount: 4350,
-    reason: "Network timeout while posting to Supabase",
-    status: "retrying"
-  },
-  {
-    id: "queue-2",
-    receipt: "R-20428",
-    customer: "Pedro S.",
-    amount: 7200,
-    reason: "Awaiting card settlement confirmation",
-    status: "waiting"
-  }
-];
-
 const initialCartLines: CartLine[] = [
   {
     id: "prod-1",
@@ -239,10 +175,6 @@ function buildSummary(items: CartLine[], tenders: TenderBreakdown[]): SaleSummar
   };
 }
 
-function isTenderMethod(value: string): value is TenderMethod {
-  return (TENDER_METHODS as readonly string[]).includes(value);
-}
-
 function parseAmount(input: string): number | null {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -270,6 +202,7 @@ export default function PosPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [cartLines, setCartLines] = useState<CartLine[]>(initialCartLines);
   const [tenderBreakdown, setTenderBreakdown] = useState<TenderBreakdown[]>(initialTenderBreakdown);
+  const [customerName, setCustomerName] = useState("Walk-in customer");
 
   const filteredProducts = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -294,18 +227,15 @@ export default function PosPage() {
     setCartLines((previous) => {
       const existing = previous.find((line) => line.id === product.id);
       if (existing) {
-        return previous.map((line) =>
-          line.id === product.id
-            ? {
-                ...line,
-                qty: line.qty + 1
-              }
-            : line
-        );
+        const updatedLine: CartLine = {
+          ...existing,
+          qty: existing.qty + 1
+        };
+        const others = previous.filter((line) => line.id !== product.id);
+        return [updatedLine, ...others];
       }
 
       return [
-        ...previous,
         {
           id: product.id,
           name: product.name,
@@ -315,7 +245,8 @@ export default function PosPage() {
           taxRate: 0.18,
           variant: product.variant,
           status: product.highlight ? "featured" : undefined
-        }
+        },
+        ...previous
       ];
     });
   }, []);
@@ -330,62 +261,22 @@ export default function PosPage() {
     );
   }, []);
 
-  const handleAddTender = useCallback(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const methodInput = window.prompt(
-      "Enter payment method (cash, card, transfer, store_credit, gift)",
-      "cash"
-    );
-
-    if (!methodInput) {
-      return;
-    }
-
-    const normalized = methodInput.trim().toLowerCase();
-    if (!isTenderMethod(normalized)) {
-      return;
-    }
-
-    const amountInput = window.prompt(
-      "Enter amount to capture",
-      saleSummary.balanceDue > 0 ? saleSummary.balanceDue.toFixed(2) : "0"
-    );
-
-    if (!amountInput) {
-      return;
-    }
-
-    const amount = parseAmount(amountInput);
-    if (amount === null) {
-      return;
-    }
-
-    let reference: string | undefined;
-    if (normalized === "card" || normalized === "transfer") {
-      const referenceInput = window.prompt("Enter authorization/reference (optional)", "");
-      if (referenceInput) {
-        const trimmed = referenceInput.trim();
-        if (trimmed) {
-          reference = trimmed;
+  const handleAddTender = useCallback(
+    ({ method, amount, reference }: { method: TenderBreakdown["method"]; amount: number; reference?: string }) => {
+      setTenderBreakdown((previous) => [
+        ...previous,
+        {
+          id: `tender-${Date.now()}`,
+          method,
+          label: TENDER_LABELS[method],
+          amount,
+          reference,
+          status: TENDER_DEFAULT_STATUS[method]
         }
-      }
-    }
-
-    setTenderBreakdown((previous) => [
-      ...previous,
-      {
-        id: `tender-${Date.now()}`,
-        method: normalized,
-        label: TENDER_LABELS[normalized],
-        amount,
-        reference,
-        status: TENDER_DEFAULT_STATUS[normalized]
-      }
-    ]);
-  }, [saleSummary.balanceDue]);
+      ]);
+    },
+    []
+  );
 
   const handleAdjustTender = useCallback((tenderId: string) => {
     if (typeof window === "undefined") {
@@ -441,6 +332,51 @@ export default function PosPage() {
     setTenderBreakdown((previous) => previous.filter((item) => item.id !== tenderId));
   }, []);
 
+  const handleChangeCustomer = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const next = window.prompt("Change customer", customerName);
+    if (!next) {
+      return;
+    }
+
+    const trimmed = next.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setCustomerName(trimmed);
+  }, [customerName]);
+
+  const handleAddCustomer = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const next = window.prompt("Add customer name");
+    if (!next) {
+      return;
+    }
+
+    const trimmed = next.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setCustomerName(trimmed);
+  }, []);
+
+  const tenderOptions = useMemo(
+    () =>
+      (TENDER_METHODS as readonly TenderBreakdown["method"][]).map((method) => ({
+        value: method,
+        label: TENDER_LABELS[method]
+      })),
+    []
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <div className="grid gap-6 xl:grid-cols-[2fr_1.15fr]">
@@ -457,18 +393,19 @@ export default function PosPage() {
           items={cartLines}
           summary={saleSummary}
           tenders={tenderBreakdown}
-          customerName="Wesley Adrian"
+          customerName={customerName}
+          customerDescriptor={customerName === "Walk-in customer" ? "Default walk-in profile" : "CRM customer"}
           ticketId="R-20451"
           onRemoveItem={handleRemoveLine}
           onQuantityChange={handleQuantityChange}
           onAddTender={handleAddTender}
           onAdjustTender={handleAdjustTender}
           onRemoveTender={handleRemoveTender}
+          onChangeCustomer={handleChangeCustomer}
+          onAddCustomer={handleAddCustomer}
+          tenderOptions={tenderOptions}
+          defaultTenderAmount={saleSummary.balanceDue}
         />
-      </div>
-      <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
-        <RegisterFeed events={registerEvents} />
-        <OfflineQueue queue={offlineQueue} />
       </div>
     </div>
   );
