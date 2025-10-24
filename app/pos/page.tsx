@@ -12,7 +12,6 @@ import type {
   Product,
   ProductCategory
 } from "@/components/pos/types";
-import { formatCurrency } from "@/components/pos/utils";
 
 const cartLines: CartLine[] = [
   {
@@ -217,27 +216,9 @@ const products: Product[] = [
   }
 ];
 
-const statusPills = [
-  { label: "Shift", value: "Morning A", accent: "text-emerald-400" },
-  { label: "Till", value: "Front Counter 01", accent: "text-sky-300" },
-  { label: "Expected cash", value: formatCurrency(18250), accent: "text-amber-300" },
-  { label: "Queue", value: `${offlineQueue.length} offline`, accent: "text-rose-300" }
-];
-
 export default function PosPage() {
   return (
     <div className="flex flex-col gap-6">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {statusPills.map((pill) => (
-          <div
-            key={pill.label}
-            className="flex flex-col gap-1 rounded-2xl border border-slate-800/70 bg-slate-950/80 px-4 py-3 text-xs text-slate-400"
-          >
-            <span className="uppercase tracking-wide text-[10px] text-slate-500">{pill.label}</span>
-            <span className={`text-sm font-semibold ${pill.accent}`}>{pill.value}</span>
-          </div>
-        ))}
-      </section>
       <div className="grid gap-6 xl:grid-cols-[2fr_1.15fr]">
         <ProductGallery
           categories={productCategories}
