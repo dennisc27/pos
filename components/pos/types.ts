@@ -1,3 +1,5 @@
+import type { LucideIcon } from "lucide-react";
+
 export type CartLine = {
   id: string;
   name: string;
@@ -43,4 +45,22 @@ export type QueuedSale = {
   amount: number;
   reason: string;
   status: "waiting" | "retrying" | "synced";
+};
+
+export type ProductCategory = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+export type Product = {
+  id: string;
+  name: string;
+  sku: string;
+  categoryId: string;
+  price: number;
+  stock: number;
+  highlight?: string;
+  previewLabel?: string;
+  variant?: string;
 };

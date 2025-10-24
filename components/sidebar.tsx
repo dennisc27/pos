@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   BadgeDollarSign,
@@ -31,6 +34,8 @@ const links = [
 ];
 
 export function Sidebar() {
+  const pathname = usePathname();
+
   return (
     <aside className="hidden w-64 shrink-0 border-r border-slate-800 bg-slate-950/80 px-4 py-6 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col">
       <div className="flex items-center gap-2 px-2 text-sm font-semibold tracking-wide text-slate-200">
@@ -40,7 +45,9 @@ export function Sidebar() {
       <nav className="mt-8 flex-1 space-y-1 overflow-y-auto pr-1">
         {links.map((link) => {
           const Icon = link.icon;
-          const isActive = link.href === "/"; // Placeholder until routes exist
+          const isActive =
+            pathname === link.href ||
+            (link.href !== "/" && pathname?.startsWith(link.href));
           return (
             <Link
               key={link.name}

@@ -1,48 +1,50 @@
-import { SaleComposer } from "@/components/pos/sale-composer";
-import { TenderPanel } from "@/components/pos/tender-panel";
+import { AppWindow, Camera, Headphones, Laptop, Shirt, Smartphone, Watch } from "lucide-react";
+import { ProductGallery } from "@/components/pos/product-gallery";
+import { OrderPanel } from "@/components/pos/order-panel";
 import { RegisterFeed } from "@/components/pos/register-feed";
-import { ReceiptPreview } from "@/components/pos/receipt-preview";
 import { OfflineQueue } from "@/components/pos/offline-queue";
 import type {
   CartLine,
   RegisterEvent,
   SaleSummary,
   TenderBreakdown,
-  QueuedSale
+  QueuedSale,
+  Product,
+  ProductCategory
 } from "@/components/pos/types";
 import { formatCurrency } from "@/components/pos/utils";
 
 const cartLines: CartLine[] = [
   {
     id: "1",
-    name: "14K Gold Hoop Earrings",
-    sku: "JW-1021",
-    status: "consignment",
-    variant: "Pair · 2.5g · Yellow gold",
+    name: "Red Note Laser",
+    sku: "MB-2100",
+    status: "featured",
+    variant: "128GB · Dual SIM · Azul",
     qty: 1,
-    price: 8200,
-    discount: 300,
+    price: 18500,
+    discount: 500,
     taxRate: 0.18
   },
   {
     id: "2",
-    name: "Citizen Eco-Drive Watch",
+    name: "Times Track Silver",
     sku: "WT-4413",
-    variant: "Serial #CIT99871 · Sapphire glass",
+    variant: "Sapphire glass · Leather band",
     qty: 1,
     price: 14500,
     taxRate: 0.18
   },
   {
     id: "3",
-    name: "Ultrasonic Cleaner Solution",
-    sku: "SV-5501",
-    status: "add-on",
-    qty: 2,
-    price: 950,
-    discount: 100,
+    name: "Retro Wave Headphones",
+    sku: "HD-3019",
+    status: "bundle",
+    qty: 1,
+    price: 9200,
+    discount: 700,
     taxRate: 0.18,
-    note: "Promo: Buy 2 for RD$1,800"
+    note: "Bundle with mic stand for RD$9,900"
   }
 ];
 
@@ -51,8 +53,8 @@ const registerEvents: RegisterEvent[] = [
     id: "evt-1",
     time: "10:42",
     type: "sale",
-    description: "RD$28,500 sale (ticket R-20450) completed by card + cash split",
-    amount: 28500,
+    description: "RD$56,850 ticket R-20450 closed via cash + card",
+    amount: 56850,
     clerk: "Maria P."
   },
   {
@@ -132,13 +134,88 @@ const tenderBreakdown: TenderBreakdown[] = [
   {
     method: "card",
     label: "Card (Azul)",
-    amount: 14250,
+    amount: 46850,
     reference: "AUTH-783202",
     status: "pending"
   }
 ];
 
 const saleSummary = buildSummary(cartLines, tenderBreakdown);
+
+const productCategories: ProductCategory[] = [
+  { id: "all", label: "All categories", icon: AppWindow },
+  { id: "phones", label: "Mobiles", icon: Smartphone },
+  { id: "watches", label: "Watches", icon: Watch },
+  { id: "audio", label: "Headphones", icon: Headphones },
+  { id: "laptops", label: "Laptops", icon: Laptop },
+  { id: "cameras", label: "Cameras", icon: Camera },
+  { id: "fashion", label: "Accessories", icon: Shirt }
+];
+
+const products: Product[] = [
+  {
+    id: "prod-1",
+    name: "Red Note Laser",
+    sku: "MB-2100",
+    categoryId: "phones",
+    price: 18500,
+    stock: 6,
+    highlight: "Top seller",
+    previewLabel: "RN",
+    variant: "128GB · Dual SIM · Azul"
+  },
+  {
+    id: "prod-2",
+    name: "Times Track Silver",
+    sku: "WT-4413",
+    categoryId: "watches",
+    price: 14500,
+    stock: 3,
+    previewLabel: "TT",
+    variant: "Sapphire glass · Leather band"
+  },
+  {
+    id: "prod-3",
+    name: "Retro Wave Headphones",
+    sku: "HD-3019",
+    categoryId: "audio",
+    price: 9200,
+    stock: 9,
+    highlight: "Bundle price",
+    previewLabel: "RW",
+    variant: "Noise cancelling · Bluetooth"
+  },
+  {
+    id: "prod-4",
+    name: "Ultrabook Air 14",
+    sku: "LP-8801",
+    categoryId: "laptops",
+    price: 58900,
+    stock: 2,
+    previewLabel: "UA",
+    variant: "Core i7 · 16GB · 512GB SSD"
+  },
+  {
+    id: "prod-5",
+    name: "Mirrorless Cam Pro",
+    sku: "CM-7330",
+    categoryId: "cameras",
+    price: 46800,
+    stock: 4,
+    previewLabel: "MC",
+    variant: "24MP · Dual lens kit"
+  },
+  {
+    id: "prod-6",
+    name: "Neon Pulse Sneakers",
+    sku: "AC-9925",
+    categoryId: "fashion",
+    price: 7200,
+    stock: 12,
+    previewLabel: "NP",
+    variant: "Size run 37-43"
+  }
+];
 
 const statusPills = [
   { label: "Shift", value: "Morning A", accent: "text-emerald-400" },
@@ -161,16 +238,23 @@ export default function PosPage() {
           </div>
         ))}
       </section>
-      <div className="grid gap-6 xl:grid-cols-[1.7fr_1fr]">
-        <div className="flex flex-col gap-6">
-          <SaleComposer items={cartLines} summary={saleSummary} customerName="Walk-in customer" />
-          <RegisterFeed events={registerEvents} />
-        </div>
-        <div className="flex flex-col gap-6">
-          <TenderPanel summary={saleSummary} tenders={tenderBreakdown} />
-          <ReceiptPreview items={cartLines} summary={saleSummary} tenders={tenderBreakdown} />
-          <OfflineQueue queue={offlineQueue} />
-        </div>
+      <div className="grid gap-6 xl:grid-cols-[2fr_1.15fr]">
+        <ProductGallery
+          categories={productCategories}
+          products={products}
+          activeCategoryId={productCategories[0].id}
+        />
+        <OrderPanel
+          items={cartLines}
+          summary={saleSummary}
+          tenders={tenderBreakdown}
+          customerName="Wesley Adrian"
+          ticketId="R-20451"
+        />
+      </div>
+      <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+        <RegisterFeed events={registerEvents} />
+        <OfflineQueue queue={offlineQueue} />
       </div>
     </div>
   );
