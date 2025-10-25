@@ -10,12 +10,12 @@ The app has to folders backend an frontend.
 - AC = Acceptance Criteria
 
 ## 0) Common
-- [ ] FE: Add the missing routes on sidebar from `ui_tasks.md`.
-- [ ] FE: Make sure the money helpers are present (cents↔display) and ITBIS breakdown: `net = round(price*0.82,2); tax = price - net`.
+- [x] FE: Add the missing routes on sidebar from `ui_tasks.md`.
+- [x] FE: Make sure the money helpers are present (cents↔display) and ITBIS breakdown: `net = round(price*0.82,2); tax = price - net`.
 ## 1) POS
 ### 1.1 New Sale (/pos/sale)
 BE
-- [ ] Endpoint: `GET /api/products?q=` (search by name/sku/code)
+- [x] Endpoint: `GET /api/products?q=` (search by name/sku/code)
 - [ ] Endpoint: `POST /api/cart/price-override` (manager approval)
 - [ ] Endpoint: `POST /api/orders` → creates order + items
 - [ ] Endpoint: `POST /api/invoices` → totals + tax (server truth)

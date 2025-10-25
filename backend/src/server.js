@@ -3,7 +3,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
-import { connectDB, closeConnection, db } from './db/connection.js';
+import { connectDB, closeConnection } from './db/connection.js';
+import productsRouter from './routes/products.js';
 
 // Load environment variables
 dotenv.config();
@@ -32,15 +33,18 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.get('/api', (req, res) => {
-  res.json({ 
-    message: 'POS System API', 
+  res.json({
+    message: 'POS System API',
     version: '1.0.0',
     endpoints: {
       health: '/health',
-      api: '/api'
+      api: '/api',
+      products: '/api/products?q='
     }
   });
 });
+
+app.use('/api/products', productsRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
