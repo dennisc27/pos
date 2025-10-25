@@ -9,27 +9,33 @@ import {
   Building2,
   CircleDollarSign,
   Cog,
-  Gem,
+  FileBarChart,
+  Hammer,
   HandCoins,
   LayoutDashboard,
-  MessageCircle,
+  Megaphone,
   ShieldAlert,
   ShoppingBag,
-  UsersRound
+  ShoppingCart,
+  UsersRound,
+  Wrench
 } from "lucide-react";
 
 const links = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "POS2", href: "/pos2", icon: ShoppingBag },
+  { name: "POS", href: "/pos", icon: ShoppingBag },
   { name: "Loans", href: "/loans", icon: HandCoins },
   { name: "Layaways", href: "/layaways", icon: BadgeDollarSign },
   { name: "Inventory", href: "/inventory", icon: Boxes },
-  { name: "Repairs & Fab", href: "/repairs", icon: Gem },
+  { name: "Repairs", href: "/repairs", icon: Wrench },
+  { name: "Fabrication", href: "/fabrication", icon: Hammer },
   { name: "CRM", href: "/crm", icon: UsersRound },
   { name: "Cash", href: "/cash", icon: CircleDollarSign },
-  { name: "Marketing", href: "/marketing", icon: MessageCircle },
+  { name: "Marketing", href: "/marketing", icon: Megaphone },
   { name: "Compliance", href: "/compliance", icon: ShieldAlert },
-  { name: "Branches", href: "/branches", icon: Building2 },
+  { name: "E-Commerce", href: "/ecom", icon: ShoppingCart },
+  { name: "Reports", href: "/reports", icon: FileBarChart },
+  { name: "Admin", href: "/admin", icon: Building2 },
   { name: "Settings", href: "/settings", icon: Cog }
 ];
 
