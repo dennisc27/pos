@@ -5,63 +5,94 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type Currency = "DOP" | "USD";
+export type Currency = "DOP" | "USD";
 
-type MonetaryMetric = {
+export type MonetaryMetric = {
   amount: number;
   currency?: Currency;
+  locale?: string;
+  minimumFractionDigits?: number;
+  maximumFractionDigits?: number;
 };
 
+/**
+ * Format a monetary metric that is already expressed in display units.
+ */
 export function formatCurrency(metric: MonetaryMetric) {
-  const currency = metric.currency ?? "DOP";
-  return new Intl.NumberFormat("en-US", {
+  const {
+    amount,
+    currency = "DOP",
+    locale = "en-US",
+    minimumFractionDigits = 2,
+    maximumFractionDigits = 2
+  } = metric;
+
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
-    maximumFractionDigits: 0
-  }).format(metric.amount);
+    minimumFractionDigits,
+    maximumFractionDigits
+  }).format(amount);
 }
 
 /**
- * Convert cents to display format (divide by 100)
+ * Convert cents to display format (divide by 100) with two-decimal rounding.
  */
 export function centsToDisplay(cents: number): number {
   return Math.round(cents) / 100;
 }
 
 /**
- * Convert display format to cents (multiply by 100)
+ * Convert display format to cents (multiply by 100) with two-decimal rounding.
  */
 export function displayToCents(display: number): number {
   return Math.round(display * 100);
 }
 
+export type ITBISBreakdown = {
+  netCents: number;
+  taxCents: number;
+  totalCents: number;
+  netDisplay: number;
+  taxDisplay: number;
+  totalDisplay: number;
+};
+
 /**
- * Calculate ITBIS breakdown: net = round(price*0.82,2); tax = price - net
+ * Calculate the ITBIS breakdown using the DR 18% tax rate.
+ * Follows the spec: net = round(price * 0.82, 2); tax = price - net
  */
-export function calculateITBISBreakdown(priceInCents: number): {
-  net: number;
-  tax: number;
-  total: number;
-} {
-  const price = centsToDisplay(priceInCents);
-  const net = Math.round(price * 0.82 * 100) / 100; // Round to 2 decimal places
-  const tax = price - net;
-  
+export function calculateITBISBreakdown(totalInCents: number): ITBISBreakdown {
+  const totalDisplay = centsToDisplay(totalInCents);
+  const netDisplay = Math.round(totalDisplay * 0.82 * 100) / 100;
+  const taxDisplay = Math.round((totalDisplay - netDisplay) * 100) / 100;
+
+  const netCents = displayToCents(netDisplay);
+  const taxCents = totalInCents - netCents;
+
   return {
-    net: displayToCents(net),
-    tax: displayToCents(tax),
-    total: priceInCents
+    netCents,
+    taxCents,
+    totalCents: totalInCents,
+    netDisplay,
+    taxDisplay,
+    totalDisplay
   };
 }
 
 /**
- * Format currency from cents to display string
+ * Format a cent value into a localized currency string.
  */
-export function formatCurrencyFromCents(cents: number, currency: Currency = "DOP"): string {
+export function formatCurrencyFromCents(
+  cents: number,
+  currency: Currency = "DOP",
+  locale = "en-US"
+): string {
   const display = centsToDisplay(cents);
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(display);
 }
