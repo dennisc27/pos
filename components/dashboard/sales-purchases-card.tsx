@@ -1,6 +1,7 @@
 import { DashboardCard } from "@/components/dashboard/dashboard-card";
 import { MetricList } from "@/components/dashboard/metric";
-import { fetchSalesAndPurchases, formatCurrency } from "@/lib/actions";
+import { fetchSalesAndPurchases } from "@/lib/actions";
+import { formatCurrency } from "@/lib/utils";
 
 export async function SalesPurchasesCard() {
   const data = await fetchSalesAndPurchases();

@@ -110,11 +110,3 @@ export async function fetchEmployeeActivity() {
   };
 }
 
-export function formatCurrency(metric: MonetaryMetric) {
-  const currency = metric.currency ?? "DOP";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0
-  }).format(metric.amount);
-}

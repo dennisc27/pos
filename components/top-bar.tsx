@@ -7,6 +7,13 @@ import { cn } from "@/lib/utils";
 
 type Theme = "light" | "dark";
 
+type CalculatorButton = {
+  label: string;
+  action: () => void;
+  variant: "muted" | "accent" | "default" | "primary";
+  span?: number;
+};
+
 const THEME_STORAGE_KEY = "command-center-theme";
 
 function formatResult(value: number) {
@@ -253,7 +260,7 @@ export function TopBar() {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
 
-  const calculatorButtons = useMemo(
+  const calculatorButtons = useMemo<CalculatorButton[]>(
     () => [
       { label: "C", action: handleClear, variant: "muted" as const },
       { label: "⌫", action: handleBackspace, variant: "muted" as const },
@@ -271,7 +278,7 @@ export function TopBar() {
       { label: "2", action: () => handleDigit("2"), variant: "default" as const },
       { label: "3", action: () => handleDigit("3"), variant: "default" as const },
       { label: "=", action: handleEquals, variant: "primary" as const },
-      { label: "0", action: () => handleDigit("0"), variant: "default" as const },
+      { label: "0", action: () => handleDigit("0"), variant: "default" as const, span: 2 },
       { label: ".", action: handleDecimal, variant: "default" as const },
       { label: ",", action: handleDecimal, variant: "default" as const },
       { label: "±", action: handleToggleSign, variant: "muted" as const }
