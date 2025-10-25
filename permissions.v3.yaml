@@ -1,0 +1,307 @@
+# permissions.v3.yaml
+version: 3
+about: >
+  Role-based access control (RBAC) & data-access policy aligned with task_ui.v3.yaml and schema.sql.
+  Includes: route visibility, action permissions, data scopes (branch/global), field-level caps,
+  approval flows (PIN), RLS policy intents, and auditing requirements.
+
+principles:
+  - "Least privilege by role; explicit allowlists; deny by default."
+  - "Separation of duties: seller vs cashier vs manager/admin."
+  - "Branch scoping by default; admin can act globally."
+  - "High-risk actions require secondary approval (PIN / manager)."
+  - "All monetary, stock, and status-changing operations are audited."
+
+roles: [cashier, seller, manager, marketing, admin]
+
+scopes:
+  default_branch_scope: true
+  cross_branch_access:
+    cashier: false
+    seller: false
+    manager: true
+    marketing: read_only
+    admin: true
+
+route_access:
+  cashier:   ["/", "/pos/**", "/loans/**", "/layaway/**", "/purchases/**", "/repairs/**", "/inventory/**", "/crm/**", "/cash/**", "/reports/shift-end", "/ecom/orders", "/ecom/returns", "/ecom/products(read_only)"]
+  seller:    ["/", "/pos/sale", "/pos/refund", "/pos/buy", "/loans/new", "/loans", "/loans/:id(view_only)", "/loans/:id/forfeit(view_total_due)", "/loans/instapawn", "/loans/due", "/layaway/**(pay,complete view)", "/inventory/**(read_only)", "/crm/**", "/crm/marketing", "/ecom/orders(view_only)", "/ecom/products(read_only)"]
+  manager:   ["**"]   # full access except system secrets (see field_caps + settings)
+  marketing: ["/", "/crm/customers(read_only)", "/crm/marketing", "/inventory(read_only)", "/reports/loans-aging(read_only)", "/ecom/products(read_only)", "/ecom/orders(read_only)", "/ecom/returns(read_only)"]
+  admin:     ["**"]
+
+action_matrix:
+  pos:
+    sale:
+      add_line:            [cashier, seller, manager, admin]
+      apply_discount:      [manager]        # cashier needs manager PIN
+      select_tender:       [cashier, seller, manager, admin]
+      finalize_sale:       [cashier, seller, manager, admin]
+      print_receipt:       [cashier, seller, manager, admin]
+    refund:
+      create_refund:       [cashier, manager, admin]
+      set_condition:       [cashier, manager, admin]
+      restock:             [cashier, manager, admin] # auto-block if damaged
+      issue_credit_note:   [cashier, manager, admin]
+    buy_from_customer:
+      intake:              [cashier, manager, admin]
+      payout_cash:         [cashier, manager, admin] # requires open shift
+      print_receipt:       [cashier, manager, admin]
+    gift_card:
+      issue:               [cashier, manager, admin]
+      reload:              [cashier, manager, admin]
+      redeem:              [cashier, manager, admin]
+  loans:
+    new:
+      create_ticket:       [cashier, seller, manager, admin]
+      id_capture_upload:   [cashier, seller, manager, admin]
+    detail:
+      view:                [seller, cashier, manager, admin]
+      take_payment:        [cashier, manager, admin]
+      renew:               [cashier, manager, admin]
+      redeem:              [cashier, manager, admin]
+      extension:           [cashier, manager, admin]
+      rewrite:             [manager, admin]
+    forfeit:
+      view_total_due:      [seller, cashier, manager, admin]
+      create_product_code: [manager, admin]
+      post_to_inventory:   [manager, admin]
+    instapawn:
+      create_intake:       [seller, cashier, manager, admin]
+      send_message:        [seller, cashier, manager, admin]
+      convert_to_ticket:   [cashier, manager, admin]
+    past_due:
+      view_list:           [seller, cashier, manager, admin]
+      bulk_sms:            [seller, cashier, manager, admin]
+      bulk_whatsapp:       [seller, cashier, manager, admin]
+      print_list:          [seller, cashier, manager, admin]
+  layaway:
+    create:                [cashier, seller, manager, admin]
+    detail:
+      take_payment:        [seller, cashier, manager, admin]
+      cancel:              [cashier, manager, admin]
+      complete_release:    [seller, cashier, manager, admin]
+      pawn_unpaid_balance: [manager, admin]
+  inventory:
+    items:
+      read:                [cashier, manager, admin, marketing]
+      edit:                [manager, admin, cashier]
+      archive:             [manager, admin]
+      print_qr:            [seller, cashier, manager, admin]
+      split:               [manager, admin]
+      combine:             [manager, admin]
+      reclassify:          [manager, admin]
+    ops:
+      start_count:         [manager, admin]
+      add_scan:            [manager, admin]
+      recount:             [manager, admin]
+      post_adjustment:     [manager, admin]
+      transfer_create:     [manager, admin]
+      transfer_approve:    [manager, admin]
+      transfer_ship:       [manager, admin]
+      transfer_receive:    [manager, admin]
+      quarantine_queue:    [manager, admin]
+      quarantine_resolve:  [manager, admin]
+    barcode:
+      list_codes:          [seller, cashier, manager, admin]
+      print:               [seller, cashier, manager, admin]
+  purchases:
+    receive:               [cashier, manager, admin]
+    return:                [cashier, manager, admin]
+  repairs:
+    intake:                [cashier, seller, manager, admin]
+    board:
+      move_lane:           [cashier, manager, admin]
+      materials_issue:     [manager, admin]
+      materials_return:    [manager, admin]
+    detail:
+      approve:             [manager, admin]
+      deny:                [manager, admin]
+      pay:                 [cashier, manager, admin]
+      close:               [manager, admin]
+      warranty:            [manager, admin]
+      notify_client:       [cashier, manager, admin]
+  crm:
+    customers:
+      read:                [cashier, seller, manager, marketing, admin]
+      create:              [cashier, seller, manager, admin]
+      edit:                [cashier, seller, manager, admin]
+      blacklist_toggle:    [manager, admin]
+      message:             [cashier, seller, manager, admin]
+      comment:             [cashier, seller, manager, admin]
+    marketing:
+      template_crud:       [marketing, manager, admin]
+      segment_crud:        [marketing, manager, admin]
+      campaign_crud:       [marketing, manager, admin]
+      send_campaign:       [marketing, manager, admin]
+      view_results:        [cashier, seller, marketing, manager, admin]
+  cash:
+    shift:
+      open_with_pin:       [cashier, manager, admin]
+      close_with_pin:      [cashier, manager, admin]
+      suggest_drop:        [cashier, manager, admin]
+      record_paid_in_out:  [cashier, manager, admin]
+    movements:
+      post_movement:
+        kinds:
+          deposit:         [cashier, manager, admin]
+          cash_to_safe:    [manager, admin]
+          drop:            [cashier, manager, admin]
+          paid_in:         [cashier, manager, admin]
+          paid_out:        [cashier, manager, admin]
+          expense:         [manager, admin]
+          income:          [manager, admin]
+  reports:
+    shift_end:
+      view:                [cashier, manager, admin]
+      export_pdf:          [manager, admin]
+      send:                [manager, admin]
+    loans_aging:
+      view:                [manager, admin, marketing, cashier]
+      export:              [manager, admin]
+  ecom:
+    products:
+      read:                [cashier(read_only), marketing(read_only), manager, admin]
+      publish_unpublish:   [manager, admin]
+      bulk_edit:           [manager, admin]
+      attach_media:        [manager, admin]
+      edit_seo:            [manager, admin]
+      sync_now:            [manager, admin]
+    channels:
+      crud:                [manager, admin]
+      test_connection:     [manager, admin]
+      view_logs:           [manager, admin]
+    orders:
+      view:                [cashier, manager, admin, seller(view_only)]
+      assign_picker:       [cashier, manager, admin]
+      print_pick_list:     [cashier, manager, admin]
+      confirm_pick:        [cashier, manager, admin]
+      pack:                [cashier, manager, admin]
+      create_label:        [cashier, manager, admin]
+      mark_shipped:        [cashier, manager, admin]
+      split_shipment:      [manager, admin]
+      cancel_with_reason:  [manager, admin]
+    returns:
+      view:                [cashier(read_only), manager, admin]
+      approve:             [manager, admin]
+      receive_goods:       [manager, admin]
+      set_condition:       [manager, admin]
+      restock_allowed:     [manager, admin]
+      refund_or_credit:    [manager, admin]
+  settings:
+    system:
+      view:                [manager, admin]
+      update_config:       [manager, admin]
+      test_drawer_kick:    [manager, admin]
+      test_provider:       [manager, admin]
+      save_roles:          [admin]
+
+field_caps:
+  discount:
+    max_percent_by_role:
+      cashier: 5
+      seller:  0
+      manager: 30
+      admin:   100
+    approval_required_above_percent: 5
+    approval_role: manager
+  price_override:
+    allowed_roles: [manager, admin]
+  cash_payout:
+    max_cents_by_role:
+      cashier: 1000000
+      manager: 5000000
+      admin:   99999999
+  ecom_price_override:
+    allowed_roles: [manager, admin]
+  settings_sensitive_keys:
+    only_admin: ["integrations.cardnet.secret", "integrations.email.smtp_password", "integrations.whatsapp.token"]
+
+approval_flows:
+  manager_pin_required:
+    - pos.apply_discount
+    - pos.finalize_sale_if_negative_margin
+    - cash.movements.paid_out_above_threshold
+    - loans.rewrite
+    - inventory.ops.post_adjustment
+    - inventory.items.reclassify
+  two_person_rule:
+    - cash.movements.cash_to_safe
+    - settings.system.save_roles
+
+data_visibility:
+  customers:
+    cashier: own_branch_only
+    seller:  own_branch_only
+    manager: branch_and_subordinate_branches
+    marketing: all_branches_read_only
+    admin:   all_branches
+  inventory:
+    cashier: own_branch_only_edit_stock_impacting=false
+    seller:  own_branch_only_read_only
+    manager: all_branches
+    admin:   all_branches
+  loans:
+    cashier: own_branch_only
+    seller:  own_branch_only(view_only)
+    manager: all_branches
+    admin:   all_branches
+  ecom:
+    marketing: read_only
+    manager:   all_branches
+    admin:     all_branches
+
+rls_policies:
+  branches_scoped_tables:
+    - customers
+    - orders
+    - invoices
+    - stock_ledger
+    - loans
+    - layaways
+    - purchases
+    - repairs
+    - shifts
+  rule_examples:
+    customers:
+      cashier: "customer.branch_id = auth.branch_id"
+      seller:  "customer.branch_id = auth.branch_id"
+      manager: "customer.branch_id IN auth.managed_branch_ids"
+      admin:   "true"
+    stock_ledger:
+      cashier: "branch_id = auth.branch_id"
+      manager: "branch_id IN auth.managed_branch_ids"
+      admin:   "true"
+    loans:
+      seller:  "branch_id = auth.branch_id AND access_mode = 'view'"
+      cashier: "branch_id = auth.branch_id"
+      manager: "branch_id IN auth.managed_branch_ids"
+      admin:   "true"
+
+auditing:
+  enabled: true
+  tables: [orders, invoices, payments, sales_returns, loans, loan_payments, loan_forfeitures, layaways, layaway_payments, stock_ledger, inv_count_sessions, inv_transfers, purchases, purchase_items, repairs, repair_materials, shifts, cash_movements, gift_cards, gift_card_ledger, credit_notes, credit_note_ledger, notifications, settings, ecom_channels, ecom_listings, ecom_orders, ecom_shipments, ecom_returns, ecom_return_items]
+  fields:
+    capture: [actor_id, action, entity, entity_id, details, created_at]
+  redaction:
+    pii_fields: ["id_images.storage_path", "customers.document_no", "notifications.payload", "settings.v", "users.pin_hash"]
+    strategy: "hash-or-mask"
+  retention_days: 365
+
+logging:
+  http: true
+  sql:  true
+  events:
+    - pos.sale.finalized
+    - pos.refund.created
+    - loans.ticket.created
+    - loans.payment.posted
+    - loans.rewrite.approved
+    - inventory.count.posted
+    - inventory.transfer.shipped
+    - inventory.transfer.received
+    - ecom.order.imported
+    - ecom.order.shipped
+    - cash.shift.opened
+    - cash.shift.closed
+    - cash.movement.posted

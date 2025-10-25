@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+body {
+  @apply antialiased transition-colors duration-200;
+}
+
+html.dark body {
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
+html.light body,
+html:not(.dark) body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+html:not(.dark) .bg-slate-950 {
+  background-color: #ffffff;
+}
+
+html:not(.dark) .bg-slate-950\/90 {
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+html:not(.dark) .bg-slate-950\/80 {
+  background-color: rgba(255, 255, 255, 0.8);
+}
+
+html:not(.dark) .bg-slate-950\/70 {
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
+html:not(.dark) .bg-slate-950\/60 {
+  background-color: rgba(255, 255, 255, 0.6);
+}
+
+html:not(.dark) .bg-slate-900 {
+  background-color: #f8fafc;
+}
+
+html:not(.dark) .bg-slate-900\/90 {
+  background-color: rgba(248, 250, 252, 0.9);
+}
+
+html:not(.dark) .bg-slate-900\/80 {
+  background-color: rgba(248, 250, 252, 0.8);
+}
+
+html:not(.dark) .bg-slate-900\/70 {
+  background-color: rgba(248, 250, 252, 0.7);
+}
+
+html:not(.dark) .bg-slate-900\/60 {
+  background-color: rgba(248, 250, 252, 0.6);
+}
+
+html:not(.dark) .bg-slate-800\/80,
+html:not(.dark) .bg-slate-800\/70,
+html:not(.dark) .bg-slate-800\/60 {
+  background-color: rgba(226, 232, 240, 0.7);
+}
+
+html:not(.dark) .border-slate-800 {
+  border-color: rgba(203, 213, 225, 0.9);
+}
+
+html:not(.dark) .border-slate-800\/80 {
+  border-color: rgba(203, 213, 225, 0.8);
+}
+
+html:not(.dark) .border-slate-800\/70 {
+  border-color: rgba(203, 213, 225, 0.7);
+}
+
+html:not(.dark) .border-slate-800\/60 {
+  border-color: rgba(203, 213, 225, 0.6);
+}
+
+html:not(.dark) .text-white,
+html:not(.dark) .text-slate-100,
+html:not(.dark) .text-slate-200 {
+  color: #0f172a;
+}
+
+html:not(.dark) .text-slate-300 {
+  color: #1e293b;
+}
+
+html:not(.dark) .text-slate-400 {
+  color: #334155;
+}
+
+html:not(.dark) .text-slate-500 {
+  color: #475569;
+}
+
+html:not(.dark) .text-slate-600 {
+  color: #475569;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.5);
+  border-radius: 9999px;
+}
