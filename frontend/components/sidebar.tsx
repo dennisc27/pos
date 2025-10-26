@@ -6,14 +6,17 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeftRight,
+  ArrowRightLeft,
   BadgeDollarSign,
   BarChart3,
   Boxes,
+  ClipboardList,
   Clock,
   Cog,
   FileText,
   Gift,
   GitBranch,
+  Globe,
   HandCoins,
   Handshake,
   Hourglass,
@@ -21,6 +24,7 @@ import {
   LayoutDashboard,
   Megaphone,
   PackagePlus,
+  PackageSearch,
   QrCode,
   ShoppingBag,
   ShoppingCart,
@@ -81,6 +85,15 @@ const sections: NavSection[] = [
     ],
   },
   {
+    title: "E-Commerce",
+    items: [
+      { name: "Channels", href: "/ecom/channels", icon: Globe },
+      { name: "Listings", href: "/ecom/products", icon: PackageSearch },
+      { name: "Orders", href: "/ecom/orders", icon: ClipboardList },
+      { name: "Returns", href: "/ecom/returns", icon: ArrowRightLeft },
+    ],
+  },
+  {
     title: "Purchasing",
     items: [
       { name: "Overview", href: "/purchases", icon: ShoppingCart },
@@ -119,15 +132,15 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden w-64 shrink-0 border-r border-slate-800 bg-slate-950/80 px-4 py-6 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col">
-      <div className="flex items-center gap-2 px-2 text-sm font-semibold tracking-wide text-slate-200">
-        <span className="rounded bg-sky-500/10 px-2 py-1 text-xs uppercase text-sky-400">POS</span>
+    <aside className="hidden w-64 shrink-0 border-r border-border bg-card px-4 py-6 dark:border-slate-800 dark:bg-slate-950/80 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col">
+      <div className="flex items-center gap-2 px-2 text-sm font-semibold tracking-wide text-foreground">
+        <span className="rounded bg-primary/10 px-2 py-1 text-xs uppercase text-primary">POS</span>
         <span>Pawn Command</span>
       </div>
       <nav className="mt-8 flex-1 space-y-6 overflow-y-auto pr-1">
         {sections.map((section) => (
           <div key={section.title}>
-            <p className="px-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <p className="px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {section.title}
             </p>
             <div className="mt-1 space-y-1">
@@ -143,8 +156,8 @@ export function Sidebar() {
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
                       isActive
-                        ? "bg-slate-800/80 text-white shadow"
-                        : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-100",
+                        ? "bg-secondary text-foreground shadow dark:bg-slate-800/80 dark:text-white"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100",
                     )}
                   >
                     <Icon className="h-4 w-4" />
