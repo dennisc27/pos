@@ -382,21 +382,21 @@ export default function SettingsSystemPage() {
     }
 
     return (
-      <div className="flex flex-col gap-2 text-sm text-slate-200">
+      <div className="flex flex-col gap-2 text-sm text-foreground">
         <div className="flex flex-wrap gap-3">
           <label className="flex items-center gap-2">
-            <span className="text-xs uppercase tracking-wide text-slate-400">Branch ID</span>
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">Branch ID</span>
             <input
-              className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-white focus:border-sky-500 focus:outline-none"
+              className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               value={branchId}
               onChange={(event) => setBranchId(event.target.value.replace(/[^0-9]/g, ""))}
             />
           </label>
           {activeScope === "user" && (
             <label className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-wide text-slate-400">User ID</span>
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">User ID</span>
               <input
-                className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 value={userId}
                 onChange={(event) => setUserId(event.target.value.replace(/[^0-9]/g, ""))}
               />
@@ -404,7 +404,7 @@ export default function SettingsSystemPage() {
           )}
         </div>
         {scopeValidationError && (
-          <p className="text-xs text-rose-300">{scopeValidationError}</p>
+          <p className="text-xs text-destructive">{scopeValidationError}</p>
         )}
       </div>
     );
@@ -413,12 +413,12 @@ export default function SettingsSystemPage() {
   return (
     <div className="space-y-8">
       <header className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-sky-400">
+        <div className="flex items-center gap-2 text-primary">
           <Settings2 className="h-5 w-5" />
           <span className="text-xs font-semibold uppercase tracking-wide">Configuración</span>
         </div>
-        <h1 className="text-3xl font-semibold text-white">Parámetros del sistema</h1>
-        <p className="max-w-3xl text-sm text-slate-400">
+        <h1 className="text-3xl font-semibold text-foreground">Parámetros del sistema</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">
           Ajusta la configuración POS y las credenciales de notificaciones por alcance (global, sucursal, usuario).
         </p>
       </header>
@@ -426,7 +426,9 @@ export default function SettingsSystemPage() {
       {status && (
         <div
           className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${
-            status.tone === "success" ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-200" : "border-rose-500/60 bg-rose-500/10 text-rose-200"
+            status.tone === "success"
+              ? "border-emerald-500/40 bg-emerald-50 text-emerald-700 dark:border-emerald-500/60 dark:bg-emerald-500/10 dark:text-emerald-200"
+              : "border-rose-500/40 bg-rose-50 text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200"
           }`}
         >
           {status.tone === "success" ? <CheckCircle2 className="mt-0.5 h-4 w-4" /> : <AlertCircle className="mt-0.5 h-4 w-4" />}
@@ -434,8 +436,8 @@ export default function SettingsSystemPage() {
         </div>
       )}
 
-      <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-lg shadow-slate-950/40">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
           <div className="flex gap-2">
             {([
               { id: "global", label: "Global" },
@@ -448,8 +450,8 @@ export default function SettingsSystemPage() {
                 onClick={() => setActiveScope(tab.id)}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                   activeScope === tab.id
-                    ? "bg-sky-500 text-white shadow"
-                    : "border border-slate-700 bg-slate-950/60 text-slate-300 hover:bg-slate-800"
+                    ? "bg-primary text-primary-foreground shadow"
+                    : "border border-border bg-muted text-foreground hover:bg-muted/80"
                 }`}
               >
                 {tab.label}
@@ -458,7 +460,7 @@ export default function SettingsSystemPage() {
           </div>
           {renderScopeControls()}
           <button
-            className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition hover:bg-muted"
             onClick={() => fetchSettings()}
             disabled={loading}
           >
@@ -467,37 +469,37 @@ export default function SettingsSystemPage() {
         </div>
 
         <div className="mt-4 space-y-8">
-          <section className="rounded-md border border-slate-800 bg-slate-950/50 p-4">
-            <header className="mb-3 flex items-center gap-2 text-sky-300">
+          <section className="rounded-md border border-border bg-muted/40 p-4">
+            <header className="mb-3 flex items-center gap-2 text-primary">
               <Store className="h-4 w-4" />
               <h2 className="text-sm font-semibold uppercase tracking-wide">Configuración POS</h2>
             </header>
 
             <div className="space-y-4">
               <div>
-                <h3 className="text-sm font-semibold text-white">Medios de pago</h3>
-                <p className="text-xs text-slate-400">Define los tender disponibles y si están activos.</p>
+                <h3 className="text-sm font-semibold text-foreground">Medios de pago</h3>
+                <p className="text-xs text-muted-foreground">Define los tender disponibles y si están activos.</p>
                 <div className="mt-3 space-y-2">
                   {tenders.map((tender, index) => (
-                    <div key={index} className="flex flex-wrap items-center gap-2 rounded-md border border-slate-800 bg-slate-950/80 px-3 py-2">
+                    <div key={index} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-3 py-2 shadow-sm">
                       <input
-                        className="w-24 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white focus:border-sky-500 focus:outline-none"
+                        className="w-24 rounded-md border border-border bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                         placeholder="Código"
                         value={tender.code}
                         onChange={(event) => updateTender(index, { code: event.target.value })}
                       />
                       <input
-                        className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white focus:border-sky-500 focus:outline-none"
+                        className="flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                         placeholder="Etiqueta"
                         value={tender.label}
                         onChange={(event) => updateTender(index, { label: event.target.value })}
                       />
-                      <label className="flex items-center gap-1 text-xs text-slate-200">
+                      <label className="flex items-center gap-1 text-xs text-foreground">
                         <input
                           type="checkbox"
                           checked={tender.enabled}
                           onChange={(event) => updateTender(index, { enabled: event.target.checked })}
-                          className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-950"
+                          className="h-4 w-4 rounded border border-border bg-background"
                         />
                         Habilitado
                       </label>
@@ -512,7 +514,7 @@ export default function SettingsSystemPage() {
                   ))}
                   <button
                     type="button"
-                    className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                    className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground transition hover:bg-muted"
                     onClick={addTender}
                   >
                     Añadir tender
@@ -522,12 +524,12 @@ export default function SettingsSystemPage() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300" htmlFor="drawer-threshold">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="drawer-threshold">
                     Variación máxima (centavos)
                   </label>
                   <input
                     id="drawer-threshold"
-                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     value={drawerConfig.maxOverShortCents}
                     onChange={(event) =>
                       setDrawerConfig((state) => ({
@@ -538,8 +540,8 @@ export default function SettingsSystemPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300">Seguridad</label>
-                  <div className="flex gap-3 text-xs text-slate-200">
+                  <label className="text-xs font-medium text-muted-foreground">Seguridad</label>
+                  <div className="flex gap-3 text-xs text-foreground">
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -547,7 +549,7 @@ export default function SettingsSystemPage() {
                         onChange={(event) =>
                           setDrawerConfig((state) => ({ ...state, requirePin: event.target.checked }))
                         }
-                        className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-950"
+                        className="h-4 w-4 rounded border border-border bg-background"
                       />
                       Requiere PIN
                     </label>
@@ -558,7 +560,7 @@ export default function SettingsSystemPage() {
                         onChange={(event) =>
                           setDrawerConfig((state) => ({ ...state, allowBlindOpen: event.target.checked }))
                         }
-                        className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-950"
+                        className="h-4 w-4 rounded border border-border bg-background"
                       />
                       Permitir apertura sin venta
                     </label>
@@ -568,42 +570,42 @@ export default function SettingsSystemPage() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300" htmlFor="receipt-header">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="receipt-header">
                     Encabezado de recibo
                   </label>
                   <textarea
                     id="receipt-header"
-                    className="min-h-[80px] w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
+                    className="min-h-[80px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     value={receiptConfig.header}
                     onChange={(event) => setReceiptConfig((state) => ({ ...state, header: event.target.value }))}
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-300" htmlFor="receipt-footer">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="receipt-footer">
                     Pie de recibo
                   </label>
                   <textarea
                     id="receipt-footer"
-                    className="min-h-[80px] w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
+                    className="min-h-[80px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     value={receiptConfig.footer}
                     onChange={(event) => setReceiptConfig((state) => ({ ...state, footer: event.target.value }))}
                   />
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-xs text-slate-200">
+              <label className="flex items-center gap-2 text-xs text-foreground">
                 <input
                   type="checkbox"
                   checked={receiptConfig.showLogo}
                   onChange={(event) => setReceiptConfig((state) => ({ ...state, showLogo: event.target.checked }))}
-                  className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-950"
+                  className="h-4 w-4 rounded border border-border bg-background"
                 />
                 Mostrar logo en recibo
               </label>
             </div>
           </section>
 
-          <section className="rounded-md border border-slate-800 bg-slate-950/50 p-4">
-            <header className="mb-3 flex items-center gap-2 text-sky-300">
+          <section className="rounded-md border border-border bg-muted/40 p-4">
+            <header className="mb-3 flex items-center gap-2 text-primary">
               <Bell className="h-4 w-4" />
               <h2 className="text-sm font-semibold uppercase tracking-wide">Notificaciones</h2>
             </header>
@@ -613,19 +615,19 @@ export default function SettingsSystemPage() {
                 const fields = providerFieldLabels[provider];
                 const form = providers[provider];
                 return (
-                  <div key={provider} className="space-y-3 rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                    <div className="flex items-center justify-between text-xs text-slate-300">
+                  <div key={provider} className="space-y-3 rounded-md border border-border bg-background p-3 shadow-sm">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span className="font-semibold uppercase">{provider}</span>
-                      {form.masked && <span className="text-slate-500">Valor oculto</span>}
+                      {form.masked && <span className="text-muted-foreground">Valor oculto</span>}
                     </div>
                     {Object.entries(fields).map(([field, label]) => (
                       <div key={field} className="space-y-1">
-                        <label className="text-[11px] text-slate-400" htmlFor={`${provider}-${field}`}>
+                        <label className="text-[11px] text-muted-foreground" htmlFor={`${provider}-${field}`}>
                           {label}
                         </label>
                         <input
                           id={`${provider}-${field}`}
-                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-white focus:border-sky-500 focus:outline-none"
+                          className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                           value={form.values[field] ?? ""}
                           onChange={(event) => updateProviderField(provider, field, event.target.value)}
                           type={field.toLowerCase().includes("password") || field.toLowerCase().includes("secret") ? "password" : "text"}
@@ -634,7 +636,7 @@ export default function SettingsSystemPage() {
                     ))}
                     <button
                       type="button"
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground transition hover:bg-muted"
                       onClick={() => handleProviderTest(provider)}
                     >
                       Probar proveedor
@@ -646,10 +648,10 @@ export default function SettingsSystemPage() {
           </section>
         </div>
 
-        <div className="mt-6 flex justify-end gap-3 border-t border-slate-800 pt-4">
+        <div className="mt-6 flex justify-end gap-3 border-t border-border pt-4">
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground transition hover:bg-muted"
             onClick={() => fetchSettings()}
             disabled={loading}
           >
@@ -657,7 +659,7 @@ export default function SettingsSystemPage() {
           </button>
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-md bg-sky-500 px-3 py-2 text-sm font-medium text-white hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             onClick={handleSave}
             disabled={saving || loading}
           >

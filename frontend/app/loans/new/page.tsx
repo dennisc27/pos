@@ -10,10 +10,10 @@ import {
   ChevronRight,
   ClipboardCheck,
   FileText,
-  IdCard,
   Loader2,
   PackagePlus,
   ShieldCheck,
+  User,
 } from "lucide-react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -61,7 +61,7 @@ const steps = [
     key: "customer",
     title: "Datos del cliente",
     description: "Selecciona sucursal, cliente y número de ticket.",
-    icon: IdCard,
+    icon: User,
   },
   {
     key: "id_capture",
@@ -437,7 +437,7 @@ export default function LoansNewPage() {
 
       <ol className="mb-10 grid gap-4 sm:grid-cols-5">
         {steps.map((step, index) => {
-          const Icon = step.icon;
+          const Icon = step.icon ?? User;
           const isActive = index === stepIndex;
           const isCompleted = index < stepIndex;
           return (
