@@ -1,132 +1,132 @@
-- [ ] POS - Refunds (/pos/refund) - BE - GET /api/invoices/:no
-- [ ] POS - Refunds (/pos/refund) - BE - POST /api/refunds → creates sales_return + items
-- [ ] POS - Refunds (/pos/refund) - BE - Restock when condition in (new, used)
-- [ ] POS - Refunds (/pos/refund) - FE - Invoice lookup field; selectable lines; totals_box; policy_alerts
-- [ ] POS - Refunds (/pos/refund) - FE - Choose refund method (cash/store_credit)
-- [ ] POS - Refunds (/pos/refund) - AC - Return line restocks if not damaged
-- [ ] POS - Refunds (/pos/refund) - AC - Credit note issued when store_credit
-- [ ] POS - Buy from Customer (/pos/buy) - BE - POST /api/purchases + items
-- [ ] POS - Buy from Customer (/pos/buy) - BE - Payout (cash) movement to current shift
-- [ ] POS - Buy from Customer (/pos/buy) - BE - Attach photos (path only)
-- [ ] POS - Buy from Customer (/pos/buy) - FE - Intake form + photo uploader + offer panel
-- [ ] POS - Buy from Customer (/pos/buy) - FE - Print receipt
-- [ ] POS - Buy from Customer (/pos/buy) - AC - Posting creates purchase + ledger (purchase)
-- [ ] POS - Buy from Customer (/pos/buy) - AC - Drawer log reflects payout
-- [ ] POS - Gift Card (/pos/gift-card) - BE - POST /api/gift-cards/issue | /reload | /redeem
-- [ ] POS - Gift Card (/pos/gift-card) - BE - Update gift_card_ledger
-- [ ] POS - Gift Card (/pos/gift-card) - FE - Issue/reload/redeem forms + balance widget
-- [ ] POS - Gift Card (/pos/gift-card) - AC - Balance reflects deltas exactly; prevents overdraft
-- [ ] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/open (with PIN), POST /api/shifts/:id/close
-- [ ] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/:id/drop|paid-in|paid-out (kinds validated)
-- [ ] Cash & Shifts - Shifts (/cash/shift) - BE - Compute expected vs actual; persist shift_reports.snapshot
-- [ ] Cash & Shifts - Shifts (/cash/shift) - FE - Denomination counter; drawer actions; Z-report list
-- [ ] Cash & Shifts - Shifts (/cash/shift) - AC - Over/short computed; discrepancy > threshold flagged
-- [ ] Cash & Shifts - Movements (/cash/movements) - BE - POST /api/cash-movements (kinds: deposit, cash_to_safe, drop, paid_in, paid_out, expense, income)
-- [ ] Cash & Shifts - Movements (/cash/movements) - FE - Movement form + table filtered to current shift
-- [ ] Cash & Shifts - Movements (/cash/movements) - AC - Movement appears in shift end totals
-- [ ] Loans/Pawns - New Loan (/loans/new) - BE - GET /api/interest-models
-- [ ] Loans/Pawns - New Loan (/loans/new) - BE - POST /api/loans + collateral (photos paths) + schedule
-- [ ] Loans/Pawns - New Loan (/loans/new) - BE - Signed URL flow for id_images (server signs, FE uploads)
-- [ ] Loans/Pawns - New Loan (/loans/new) - FE - Wizard steps: customer -> id_capture -> collateral -> terms -> ticket_print
-- [ ] Loans/Pawns - New Loan (/loans/new) - AC - Ticket number unique; schedule stores interest rows
-- [ ] Loans/Pawns - Loan Detail (/loans/:id) - BE - GET /api/loans/:id (header, schedule, balance, history)
-- [ ] Loans/Pawns - Loan Detail (/loans/:id) - BE - POST /api/loans/:id/pay (interest/advance)
-- [ ] Loans/Pawns - Loan Detail (/loans/:id) - BE - POST /api/loans/:id/renew|redeem|extension|rewrite
-- [ ] Loans/Pawns - Loan Detail (/loans/:id) - FE - Header card + actions (respect capabilities_by_role)
+- [x] POS - Refunds (/backend/app/pos/refund) - BE - GET /api/invoices/:no
+- [x] POS - Refunds (/backend/app/pos/refund) - BE - POST /api/refunds → creates sales_return + items
+- [x] POS - Refunds (/backend/app/pos/refund) - BE - Restock when condition in (new, used)
+- [x] POS - Refunds (/frontend/app/pos/refund) - FE - Invoice lookup field; selectable lines; totals_box; policy_alerts
+- [x] POS - Refunds (/frontend/app/pos/refund) - FE - Choose refund method (cash/store_credit)
+- [x] POS - Refunds (/pos/refund) - AC - Return line restocks if not damaged
+- [x] POS - Refunds (/pos/refund) - AC - Credit note issued when store_credit
+- [x] POS - Buy from Customer (/backend/app/pos/buy) - BE - POST /api/purchases + items
+- [x] POS - Buy from Customer (/backend/app/pos/buy) - BE - Payout (cash) movement to current shift
+- [x] POS - Buy from Customer (/backend/app/pos/buy) - BE - Attach photos (path only)
+- [x] POS - Buy from Customer (/frontend/app/pos/buy) - FE - Intake form + photo uploader + offer panel
+- [x] POS - Buy from Customer (/frontend/app/pos/buy) - FE - Print receipt
+- [x] POS - Buy from Customer (/pos/buy) - AC - Posting creates purchase + ledger (purchase)
+- [x] POS - Buy from Customer (/pos/buy) - AC - Drawer log reflects payout
+- [x] POS - Gift Card (/backend/app/pos/gift-card) - BE - POST /api/gift-cards/issue | /reload | /redeem
+- [x] POS - Gift Card (/backend/app/pos/gift-card) - BE - Update gift_card_ledger
+- [x] POS - Gift Card (/frontend/app/pos/gift-card) - FE - Issue/reload/redeem forms + balance widget
+- [x] POS - Gift Card (/pos/gift-card) - AC - Balance reflects deltas exactly; prevents overdraft
+- [x] Cash & Shifts - Shifts (/backend/app/cash/shift) - BE - POST /api/shifts/open (with PIN), POST /api/shifts/:id/close
+- [x] Cash & Shifts - Shifts (/backend/app/cash/shift) - BE - POST /api/shifts/:id/drop|paid-in|paid-out (kinds validated)
+- [x] Cash & Shifts - Shifts (/backend/app/cash/shift) - BE - Compute expected vs actual; persist shift_reports.snapshot
+- [x] Cash & Shifts - Shifts (/frontend/app/cash/shift) - FE - Denomination counter; drawer actions; Z-report list
+- [x] Cash & Shifts - Shifts (/cash/shift) - AC - Over/short computed; discrepancy > threshold flagged
+- [x] Cash & Shifts - Movements (/backend/app/cash/movements) - BE - POST /api/cash-movements (kinds: deposit, cash_to_safe, drop, paid_in, paid_out, expense, income)
+- [x] Cash & Shifts - Movements (/frontend/app/cash/movements) - FE - Movement form + table filtered to current shift
+- [x] Cash & Shifts - Movements (/cash/movements) - AC - Movement appears in shift end totals
+- [x] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - GET /api/interest-models
+- [x] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - POST /api/loans + collateral (photos paths) + schedule
+- [x] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - Signed URL flow for id_images (server signs, FE uploads)
+- [x] Loans/Pawns - New Loan (/frontend/app/loans/new) - FE - Wizard steps: customer -> id_capture -> collateral -> terms -> ticket_print
+- [x] Loans/Pawns - New Loan (/loans/new) - AC - Ticket number unique; schedule stores interest rows
+- [ ] Loans/Pawns - Loan Detail (/backend/app/loans/:id) - BE - GET /api/loans/:id (header, schedule, balance, history)
+- [ ] Loans/Pawns - Loan Detail (/backend/app/loans/:id) - BE - POST /api/loans/:id/pay (interest/advance)
+- [ ] Loans/Pawns - Loan Detail (/backend/app/loans/:id) - BE - POST /api/loans/:id/renew|redeem|extension|rewrite
+- [ ] Loans/Pawns - Loan Detail (/frontend/app/loans/:id) - FE - Header card + actions (respect capabilities_by_role)
 - [ ] Loans/Pawns - Loan Detail (/loans/:id) - AC - Renew updates due date & schedule; redeem closes loan
-- [ ] Loans/Pawns - Forfeiture (/loans/:id/forfeit) - BE - Create product_code from collateral, push stock_ledger('pawn_forfeit_in')
-- [ ] Loans/Pawns - Forfeiture (/loans/:id/forfeit) - FE - Collateral picker -> code generator -> toast
+- [ ] Loans/Pawns - Forfeiture (/backend/app/loans/:id/forfeit) - BE - Create product_code from collateral, push stock_ledger('pawn_forfeit_in')
+- [ ] Loans/Pawns - Forfeiture (/frontend/app/loans/:id/forfeit) - FE - Collateral picker -> code generator -> toast
 - [ ] Loans/Pawns - Forfeiture (/loans/:id/forfeit) - AC - Code appears in inventory; loan marked forfeited
-- [ ] Loans/Pawns - InstaPawn (/loans/instapawn) - BE - POST /api/instapawn -> create intake + barcode token (expiry)
-- [ ] Loans/Pawns - InstaPawn (/loans/instapawn) - BE - Send WhatsApp/SMS via notifications
-- [ ] Loans/Pawns - InstaPawn (/loans/instapawn) - FE - Intake form + barcode card + status
+- [ ] Loans/Pawns - InstaPawn (/backend/app/loans/instapawn) - BE - POST /api/instapawn -> create intake + barcode token (expiry)
+- [ ] Loans/Pawns - InstaPawn (/backend/app/loans/instapawn) - BE - Send WhatsApp/SMS via notifications
+- [ ] Loans/Pawns - InstaPawn (/frontend/app/loans/instapawn) - FE - Intake form + barcode card + status
 - [ ] Loans/Pawns - InstaPawn (/loans/instapawn) - AC - Token converts to loan once scanned in-store
-- [ ] Loans/Pawns - Past-due (/loans/due) - BE - GET /api/loans/past-due
-- [ ] Loans/Pawns - Past-due (/loans/due) - BE - POST /api/loans/outreach (bulk messaging)
-- [ ] Loans/Pawns - Past-due (/loans/due) - FE - Selectable table + bulk action bar + print list
+- [ ] Loans/Pawns - Past-due (/backend/app/loans/due) - BE - GET /api/loans/past-due
+- [ ] Loans/Pawns - Past-due (/backend/app/loans/due) - BE - POST /api/loans/outreach (bulk messaging)
+- [ ] Loans/Pawns - Past-due (/frontend/app/loans/due) - FE - Selectable table + bulk action bar + print list
 - [ ] Loans/Pawns - Past-due (/loans/due) - AC - Messages queued; export CSV works
-- [ ] Layaway - Create Layaway (/layaway/new) - BE - POST /api/layaways -> link to order (reserve stock)
-- [ ] Layaway - Create Layaway (/layaway/new) - FE - Reuse cart table; payment plan panel; agreement preview
+- [ ] Layaway - Create Layaway (/backend/app/layaway/new) - BE - POST /api/layaways -> link to order (reserve stock)
+- [ ] Layaway - Create Layaway (/frontend/app/layaway/new) - FE - Reuse cart table; payment plan panel; agreement preview
 - [ ] Layaway - Create Layaway (/layaway/new) - AC - Layaway becomes active and stock is reserved
-- [ ] Layaway - Layaway Detail (/layaway/:id) - BE - GET /api/layaways/:id
-- [ ] Layaway - Layaway Detail (/layaway/:id) - BE - POST /api/layaways/:id/pay | /cancel | /complete
-- [ ] Layaway - Layaway Detail (/layaway/:id) - BE - On overdue: /pawn → create loans row; mark layaway.pawned
-- [ ] Layaway - Layaway Detail (/layaway/:id) - FE - Payment history + actions_bar
+- [ ] Layaway - Layaway Detail (/backend/app/layaway/:id) - BE - GET /api/layaways/:id
+- [ ] Layaway - Layaway Detail (/backend/app/layaway/:id) - BE - POST /api/layaways/:id/pay | /cancel | /complete
+- [ ] Layaway - Layaway Detail (/backend/app/layaway/:id) - BE - On overdue: /pawn → create loans row; mark layaway.pawned
+- [ ] Layaway - Layaway Detail (/frontend/app/layaway/:id) - FE - Payment history + actions_bar
 - [ ] Layaway - Layaway Detail (/layaway/:id) - AC - Overdue conversion creates linked pawn_loan_id
-- [ ] Inventory - Items (/inventory) - BE - GET /api/inventory?filters=
-- [ ] Inventory - Items (/inventory) - BE - PATCH /api/product-codes/:id quick edits
-- [ ] Inventory - Items (/inventory) - BE - POST /api/labels/qr to generate printable sheet
-- [ ] Inventory - Items (/inventory) - FE - Table/grid; inline edit; bulk actions
+- [ ] Inventory - Items (/backend/app/inventory) - BE - GET /api/inventory?filters=
+- [ ] Inventory - Items (/backend/app/inventory) - BE - PATCH /api/product-codes/:id quick edits
+- [ ] Inventory - Items (/backend/app/inventory) - BE - POST /api/labels/qr to generate printable sheet
+- [ ] Inventory - Items (/frontend/app/inventory) - FE - Table/grid; inline edit; bulk actions
 - [ ] Inventory - Items (/inventory) - AC - Quick edit persists; QR sheet downloads
-- [ ] Inventory - Ops (/inventory/ops) - BE - POST /api/inventory/count-sessions
-- [ ] Inventory - Ops (/inventory/ops) - BE - POST /api/inventory/count-lines (scan add)
-- [ ] Inventory - Ops (/inventory/ops) - BE - POST /api/inventory/count-post → write stock_ledger('count_post')
-- [ ] Inventory - Ops (/inventory/ops) - BE - Transfers: POST /api/inventory/transfers, /approve, /ship, /receive
-- [ ] Inventory - Ops (/inventory/ops) - BE - Quarantine: /queue, /resolve
-- [ ] Inventory - Ops (/inventory/ops) - FE - Wizard: snapshot -> blind count -> review -> post
+- [ ] Inventory - Ops (/backend/app/inventory/ops) - BE - POST /api/inventory/count-sessions
+- [ ] Inventory - Ops (/backend/app/inventory/ops) - BE - POST /api/inventory/count-lines (scan add)
+- [ ] Inventory - Ops (/backend/app/inventory/ops) - BE - POST /api/inventory/count-post → write stock_ledger('count_post')
+- [ ] Inventory - Ops (/backend/app/inventory/ops) - BE - Transfers: POST /api/inventory/transfers, /approve, /ship, /receive
+- [ ] Inventory - Ops (/backend/app/inventory/ops) - BE - Quarantine: /queue, /resolve
+- [ ] Inventory - Ops (/frontend/app/inventory/ops) - FE - Wizard: snapshot -> blind count -> review -> post
 - [ ] Inventory - Ops (/inventory/ops) - AC - Variances reflected in ledger; transfers move stock between branches
-- [ ] Inventory - Split/Combine (/inventory/split-combine) - BE - POST /api/inventory/split → add product_code_components + ledger
-- [ ] Inventory - Split/Combine (/inventory/split-combine) - BE - POST /api/inventory/combine → inverse
-- [ ] Inventory - Split/Combine (/inventory/split-combine) - FE - Tree view + split/combine wizards
+- [ ] Inventory - Split/Combine (/backend/app/inventory/split-combine) - BE - POST /api/inventory/split → add product_code_components + ledger
+- [ ] Inventory - Split/Combine (/backend/app/inventory/split-combine) - BE - POST /api/inventory/combine → inverse
+- [ ] Inventory - Split/Combine (/frontend/app/inventory/split-combine) - FE - Tree view + split/combine wizards
 - [ ] Inventory - Split/Combine (/inventory/split-combine) - AC - Cost lineage conserved (sum(child costs) == parent cost within rounding rules)
-- [ ] Inventory - Barcode (/inventory/barcode) - BE - GET /api/codes + POST /api/labels/print
-- [ ] Inventory - Barcode (/inventory/barcode) - FE - Codes table + print preview
+- [ ] Inventory - Barcode (/backend/app/inventory/barcode) - BE - GET /api/codes + POST /api/labels/print
+- [ ] Inventory - Barcode (/frontend/app/inventory/barcode) - FE - Codes table + print preview
 - [ ] Inventory - Barcode (/inventory/barcode) - AC - Print sends correct layout
-- [ ] Purchases - Receive (/purchases/new) - BE - POST /api/purchases + lines
-- [ ] Purchases - Receive (/purchases/new) - BE - On post -> ledger('purchase') and label generation
-- [ ] Purchases - Receive (/purchases/new) - FE - Receive form + lines table + label modal
+- [ ] Purchases - Receive (/backend/app/purchases/new) - BE - POST /api/purchases + lines
+- [ ] Purchases - Receive (/backend/app/purchases/new) - BE - On post -> ledger('purchase') and label generation
+- [ ] Purchases - Receive (/frontend/app/purchases/new) - FE - Receive form + lines table + label modal
 - [ ] Purchases - Receive (/purchases/new) - AC - Stock increases correctly
-- [ ] Purchases - Returns (/purchases/returns) - BE - POST /api/purchase-returns
-- [ ] Purchases - Returns (/purchases/returns) - FE - Return lines UI + totals
+- [ ] Purchases - Returns (/backend/app/purchases/returns) - BE - POST /api/purchase-returns
+- [ ] Purchases - Returns (/frontend/app/purchases/returns) - FE - Return lines UI + totals
 - [ ] Purchases - Returns (/purchases/returns) - AC - Supplier credit created
-- [ ] Repairs/Fabrication - Intake (/repairs/intake) - BE - POST /api/repairs + photos
-- [ ] Repairs/Fabrication - Intake (/repairs/intake) - BE - POST /api/repairs/:id/request-approval
-- [ ] Repairs/Fabrication - Intake (/repairs/intake) - FE - Intake form; estimate panel
+- [ ] Repairs/Fabrication - Intake (/backend/app/repairs/intake) - BE - POST /api/repairs + photos
+- [ ] Repairs/Fabrication - Intake (/backend/app/repairs/intake) - BE - POST /api/repairs/:id/request-approval
+- [ ] Repairs/Fabrication - Intake (/frontend/app/repairs/intake) - FE - Intake form; estimate panel
 - [ ] Repairs/Fabrication - Intake (/repairs/intake) - AC - Approval status visible; deposit taken
-- [ ] Repairs/Fabrication - Board (/repairs/board) - BE - GET /api/repairs?state=
-- [ ] Repairs/Fabrication - Board (/repairs/board) - BE - POST /api/repairs/:id/move (lane transitions)
-- [ ] Repairs/Fabrication - Board (/repairs/board) - BE - Materials issue/return endpoints write repair_materials and update stock ledger
-- [ ] Repairs/Fabrication - Board (/repairs/board) - FE - Kanban with job_card + side_panel
+- [ ] Repairs/Fabrication - Board (/backend/app/repairs/board) - BE - GET /api/repairs?state=
+- [ ] Repairs/Fabrication - Board (/backend/app/repairs/board) - BE - POST /api/repairs/:id/move (lane transitions)
+- [ ] Repairs/Fabrication - Board (/backend/app/repairs/board) - BE - Materials issue/return endpoints write repair_materials and update stock ledger
+- [ ] Repairs/Fabrication - Board (/frontend/app/repairs/board) - FE - Kanban with job_card + side_panel
 - [ ] Repairs/Fabrication - Board (/repairs/board) - AC - Materials ledger adjusts inventory
-- [ ] Repairs/Fabrication - Detail (/repairs/:id) - BE - GET /api/repairs/:id
-- [ ] Repairs/Fabrication - Detail (/repairs/:id) - BE - POST /api/repairs/:id/pay|close|warranty|notify
-- [ ] Repairs/Fabrication - Detail (/repairs/:id) - FE - Timeline + materials table + actions
+- [ ] Repairs/Fabrication - Detail (/backend/app/repairs/:id) - BE - GET /api/repairs/:id
+- [ ] Repairs/Fabrication - Detail (/backend/app/repairs/:id) - BE - POST /api/repairs/:id/pay|close|warranty|notify
+- [ ] Repairs/Fabrication - Detail (/frontend/app/repairs/:id) - FE - Timeline + materials table + actions
 - [ ] Repairs/Fabrication - Detail (/repairs/:id) - AC - Close -> warranty doc generated; client notification queued
-- [ ] CRM & Marketing - Customers (/crm/customers) - BE - GET /api/customers?filters=
-- [ ] CRM & Marketing - Customers (/crm/customers) - BE - POST /api/customers | PATCH /api/customers/:id
-- [ ] CRM & Marketing - Customers (/crm/customers) - BE - Signed URL for id_images
-- [ ] CRM & Marketing - Customers (/crm/customers) - FE - Search filters + profile drawer + messages sidebar
+- [ ] CRM & Marketing - Customers (/backend/app/crm/customers) - BE - GET /api/customers?filters=
+- [ ] CRM & Marketing - Customers (/backend/app/crm/customers) - BE - POST /api/customers | PATCH /api/customers/:id
+- [ ] CRM & Marketing - Customers (/backend/app/crm/customers) - BE - Signed URL for id_images
+- [ ] CRM & Marketing - Customers (/frontend/app/crm/customers) - FE - Search filters + profile drawer + messages sidebar
 - [ ] CRM & Marketing - Customers (/crm/customers) - AC - Blacklist toggle blocks POS/loans
-- [ ] CRM & Marketing - Marketing (/crm/marketing) - BE - POST /api/mkt/templates | /segments | /campaigns
-- [ ] CRM & Marketing - Marketing (/crm/marketing) - BE - /campaigns/:id/send queues notifications
-- [ ] CRM & Marketing - Marketing (/crm/marketing) - FE - Template editor (variables), segment builder, send wizard, results dashboard
+- [ ] CRM & Marketing - Marketing (/backend/app/crm/marketing) - BE - POST /api/mkt/templates | /segments | /campaigns
+- [ ] CRM & Marketing - Marketing (/backend/app/crm/marketing) - BE - /campaigns/:id/send queues notifications
+- [ ] CRM & Marketing - Marketing (/frontend/app/crm/marketing) - FE - Template editor (variables), segment builder, send wizard, results dashboard
 - [ ] CRM & Marketing - Marketing (/crm/marketing) - AC - Sends tracked in mkt_sends and notifications
-- [ ] Reports - End Shift (/reports/shift-end) - BE - GET /api/reports/shift-end?shiftId=; POST /api/reports/shift-end/export
-- [ ] Reports - End Shift (/reports/shift-end) - FE - Totals cards + discrepancy panel + export
+- [ ] Reports - End Shift (/backend/app/reports/shift-end) - BE - GET /api/reports/shift-end?shiftId=; POST /api/reports/shift-end/export
+- [ ] Reports - End Shift (/frontend/app/reports/shift-end) - FE - Totals cards + discrepancy panel + export
 - [ ] Reports - End Shift (/reports/shift-end) - AC - Export PDF contains exact breakdown by tender
-- [ ] Reports - Loans Aging (/reports/loans-aging) - BE - GET /api/reports/loans-aging
-- [ ] Reports - Loans Aging (/reports/loans-aging) - FE - Bucket chart + table + export
+- [ ] Reports - Loans Aging (/backend/app/reports/loans-aging) - BE - GET /api/reports/loans-aging
+- [ ] Reports - Loans Aging (/frontend/app/reports/loans-aging) - FE - Bucket chart + table + export
 - [ ] Reports - Loans Aging (/reports/loans-aging) - AC - Bucket sums match per-loan totals
-- [ ] E-Commerce - Channels (/ecom/channels) - BE - POST /api/ecom/channels + test connection
-- [ ] E-Commerce - Channels (/ecom/channels) - BE - Ingest webhooks → ecom_webhook_logs
-- [ ] E-Commerce - Channels (/ecom/channels) - FE - Channel cards + rules form + logs viewer
+- [ ] E-Commerce - Channels (/backend/app/ecom/channels) - BE - POST /api/ecom/channels + test connection
+- [ ] E-Commerce - Channels (/backend/app/ecom/channels) - BE - Ingest webhooks → ecom_webhook_logs
+- [ ] E-Commerce - Channels (/frontend/app/ecom/channels) - FE - Channel cards + rules form + logs viewer
 - [ ] E-Commerce - Channels (/ecom/channels) - AC - Full sync populates listings/orders
-- [ ] E-Commerce - Listings (/ecom/products) - BE - GET /api/ecom/listings?filters=
-- [ ] E-Commerce - Listings (/ecom/products) - BE - POST /api/ecom/listings/bulk (publish/unpublish, edit, media, SEO)
-- [ ] E-Commerce - Listings (/ecom/products) - FE - Grid/table + media picker + SEO panel
+- [ ] E-Commerce - Listings (/backend/app/ecom/products) - BE - GET /api/ecom/listings?filters=
+- [ ] E-Commerce - Listings (/backend/app/ecom/products) - BE - POST /api/ecom/listings/bulk (publish/unpublish, edit, media, SEO)
+- [ ] E-Commerce - Listings (/frontend/app/ecom/products) - FE - Grid/table + media picker + SEO panel
 - [ ] E-Commerce - Listings (/ecom/products) - AC - Listing sync updates last_synced per channel
-- [ ] E-Commerce - Orders (/ecom/orders) - BE - POST /api/ecom/orders/import (per channel)
-- [ ] E-Commerce - Orders (/ecom/orders) - BE - POST /api/ecom/orders/:id/pick|pack|label|ship|cancel
-- [ ] E-Commerce - Orders (/ecom/orders) - FE - Tabs/Kanban + pick list + label modal + tracking bar
+- [ ] E-Commerce - Orders (/backend/app/ecom/orders) - BE - POST /api/ecom/orders/import (per channel)
+- [ ] E-Commerce - Orders (/backend/app/ecom/orders) - BE - POST /api/ecom/orders/:id/pick|pack|label|ship|cancel
+- [ ] E-Commerce - Orders (/frontend/app/ecom/orders) - FE - Tabs/Kanban + pick list + label modal + tracking bar
 - [ ] E-Commerce - Orders (/ecom/orders) - AC - Shipping label/track no. saved; stock allocated
-- [ ] E-Commerce - Returns (/ecom/returns) - BE - POST /api/ecom/returns/:id/approve|receive|refund|deny
-- [ ] E-Commerce - Returns (/ecom/returns) - BE - Return items w/ condition → restock when allowed
-- [ ] E-Commerce - Returns (/ecom/returns) - FE - RMA table + receive panel + refund modal
+- [ ] E-Commerce - Returns (/backend/app/ecom/returns) - BE - POST /api/ecom/returns/:id/approve|receive|refund|deny
+- [ ] E-Commerce - Returns (/backend/app/ecom/returns) - BE - Return items w/ condition → restock when allowed
+- [ ] E-Commerce - Returns (/frontend/app/ecom/returns) - FE - RMA table + receive panel + refund modal
 - [ ] E-Commerce - Returns (/ecom/returns) - AC - Refund posts to payments/credit notes; ledger updated
-- [ ] Settings (/settings/system) - BE - GET/POST /api/settings (scope global|branch|user)
-- [ ] Settings (/settings/system) - BE - POS config: tenders, drawer behavior, receipt layout
-- [ ] Settings (/settings/system) - BE - Notifications providers test; integrations secrets
-- [ ] Settings (/settings/system) - FE - Tabs + form sections + test buttons
+- [ ] Settings (/backend/app/settings/system) - BE - GET/POST /api/settings (scope global|branch|user)
+- [ ] Settings (/backend/app/settings/system) - BE - POS config: tenders, drawer behavior, receipt layout
+- [ ] Settings (/backend/app/settings/system) - BE - Notifications providers test; integrations secrets
+- [ ] Settings (/frontend/app/settings/system) - FE - Tabs + form sections + test buttons
 - [ ] Settings (/settings/system) - AC - Saving updates settings JSON with proper scope
 - [ ] Security & Audit - BE - Signed URL policy for ID images (server only signs; FE stores path)
 - [ ] Security & Audit - BE - Audit log middleware for approvals/overrides/voids/admin

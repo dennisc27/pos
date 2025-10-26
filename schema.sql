@@ -300,15 +300,33 @@ CREATE TABLE IF NOT EXISTS loans (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
   customer_id BIGINT NOT NULL,
-  ticket_no VARCHAR(64) UNIQUE,
+  ticket_number VARCHAR(64) UNIQUE,
   principal_cents BIGINT NOT NULL,
-  interest_model VARCHAR(64),
+  interest_model_id BIGINT NOT NULL,
+  interest_rate DECIMAL(5,4) NOT NULL,
   due_date DATE NOT NULL,
-  status ENUM('active','redeemed','forfeited') DEFAULT 'active',
+  status ENUM('active','redeemed','forfeited','renewed') DEFAULT 'active',
   comments TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
-  FOREIGN KEY (customer_id) REFERENCES customers(id)
+  FOREIGN KEY (customer_id) REFERENCES customers(id),
+  FOREIGN KEY (interest_model_id) REFERENCES interest_models(id)
+);
+
+CREATE TABLE IF NOT EXISTS interest_models (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  description TEXT NULL,
+  rate_type ENUM('flat','simple','compound') DEFAULT 'simple',
+  period_days INT NOT NULL DEFAULT 30,
+  interest_rate_bps INT NOT NULL,
+  grace_days INT DEFAULT 0,
+  min_principal_cents BIGINT DEFAULT 0,
+  max_principal_cents BIGINT NULL,
+  late_fee_bps INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS loan_collateral (
