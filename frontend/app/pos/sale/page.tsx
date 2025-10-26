@@ -18,15 +18,28 @@ import {
 
 import {
   type CartLine,
+  type CreatedInvoice,
+  type CreatedOrder,
   type PriceOverrideApproval,
+  type ReceiptPrintJob,
+  type RecordedPayment,
   type SaleSummary,
   type TenderBreakdown,
   type ValidatedOrder
 } from "@/components/pos/types";
 import { formatCurrency, fromCents, toCents } from "@/components/pos/utils";
-import { requestPriceOverride, searchProducts, validateOrder } from "@/lib/pos-client";
+import {
+  createInvoice,
+  createOrder,
+  queueReceiptPrint,
+  recordPayment,
+  requestPriceOverride,
+  searchProducts,
+  validateOrder
+} from "@/lib/pos-client";
 
 const DEFAULT_BRANCH_ID = 1;
+const DEFAULT_USER_ID = 1;
 const DEFAULT_TAX_RATE = 0.18;
 const DISCOUNT_OVERRIDE_THRESHOLD = 0.1; // 10%
 
@@ -41,6 +54,17 @@ const TENDER_OPTIONS = [
 type TenderMethod = (typeof TENDER_OPTIONS)[number]["value"];
 
 type TenderLine = TenderBreakdown & { method: TenderMethod };
+
+const PAYMENT_METHOD_MAP: Record<
+  TenderMethod,
+  "cash" | "card" | "transfer" | "gift_card" | "credit_note"
+> = {
+  cash: "cash",
+  card: "card",
+  transfer: "transfer",
+  store_credit: "credit_note",
+  gift: "gift_card"
+};
 
 type ValidationState =
   | { status: "idle" }
@@ -61,6 +85,118 @@ type OverrideDraft = {
   pin: string;
   reason: string;
 };
+
+type TenderPaymentPayload = {
+  method: "cash" | "card" | "transfer" | "gift_card" | "credit_note";
+  amountCents: number;
+  meta: Record<string, unknown> | null;
+};
+
+type FinalizeState =
+  | { status: "idle" }
+  | { status: "processing" }
+  | {
+      status: "success";
+      receipt: ReceiptPrintJob;
+      payments: RecordedPayment[];
+      changeCents: number;
+    }
+  | { status: "error"; message: string };
+
+function parsePositiveInteger(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function buildPaymentMeta(tender: TenderLine, method: TenderPaymentPayload["method"]) {
+  const reference = tender.reference?.trim();
+
+  if (method === "gift_card") {
+    const giftCardId = parsePositiveInteger(reference);
+    if (!giftCardId) {
+      throw new Error("Gift card payments require a numeric gift card ID reference.");
+    }
+    const payload: Record<string, unknown> = { giftCardId };
+    if (reference) {
+      payload.reference = reference;
+    }
+    return payload;
+  }
+
+  if (method === "credit_note") {
+    const creditNoteId = parsePositiveInteger(reference);
+    if (!creditNoteId) {
+      throw new Error("Store credit payments require a numeric credit note ID reference.");
+    }
+    const payload: Record<string, unknown> = { creditNoteId };
+    if (reference) {
+      payload.reference = reference;
+    }
+    return payload;
+  }
+
+  if (reference) {
+    return { reference };
+  }
+
+  return null;
+}
+
+function allocateTenderPayments(tenderLines: TenderLine[], totalCents: number) {
+  const sorted = [...tenderLines].sort((a, b) => {
+    if (a.method === b.method) {
+      return 0;
+    }
+    if (a.method === "cash") {
+      return 1;
+    }
+    if (b.method === "cash") {
+      return -1;
+    }
+    return 0;
+  });
+
+  let remainingCents = totalCents;
+  const payments: TenderPaymentPayload[] = [];
+
+  sorted.forEach((tender) => {
+    const backendMethod = PAYMENT_METHOD_MAP[tender.method];
+    const amountCents = toCents(tender.amount);
+    if (amountCents <= 0 || remainingCents <= 0) {
+      return;
+    }
+
+    const appliedCents = backendMethod === "cash"
+      ? Math.min(amountCents, Math.max(remainingCents, 0))
+      : Math.min(amountCents, remainingCents);
+
+    if (appliedCents <= 0) {
+      return;
+    }
+
+    const meta = buildPaymentMeta(tender, backendMethod);
+
+    payments.push({ method: backendMethod, amountCents: appliedCents, meta });
+    remainingCents = Math.max(remainingCents - appliedCents, 0);
+  });
+
+  if (remainingCents > 0) {
+    throw new Error("Tender amounts do not cover the sale total. Collect the remaining balance.");
+  }
+
+  const totalTenderedCents = tenderLines.reduce((sum, tender) => sum + Math.max(toCents(tender.amount), 0), 0);
+  const changeCents = Math.max(totalTenderedCents - totalCents, 0);
+
+  return { payments, changeCents };
+}
 
 function buildSummary(cartLines: CartLine[], tenderLines: TenderLine[]): SaleSummary {
   const subtotal = cartLines.reduce(
@@ -140,9 +276,18 @@ export default function PosSalePage() {
   const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideSubmitting, setOverrideSubmitting] = useState(false);
   const [validationState, setValidationState] = useState<ValidationState>({ status: "idle" });
+  const [finalizeState, setFinalizeState] = useState<FinalizeState>({ status: "idle" });
 
   const summary = useMemo(() => buildSummary(cartLines, tenderLines), [cartLines, tenderLines]);
   const changeDueDisplay = summary.changeDue > 0 ? summary.changeDue : 0;
+  const hasCashTender = useMemo(() => tenderLines.some((tender) => tender.method === "cash"), [tenderLines]);
+  const canFinalizeSale =
+    cartLines.length > 0 &&
+    tenderLines.length > 0 &&
+    summary.total > 0 &&
+    summary.balanceDue <= 0.01 &&
+    hasCashTender;
+  const finalizeDisabled = finalizeState.status === "processing" || !canFinalizeSale;
 
   useEffect(() => {
     if (!searchTerm.trim()) {
@@ -183,6 +328,7 @@ export default function PosSalePage() {
 
   useEffect(() => {
     setValidationState((state) => (state.status === "idle" ? state : { status: "idle" }));
+    setFinalizeState((state) => (state.status === "success" ? state : { status: "idle" }));
   }, [cartLines, tenderLines]);
 
   const handleAddProduct = (product: Awaited<ReturnType<typeof searchProducts>>[number]) => {
@@ -433,6 +579,93 @@ export default function PosSalePage() {
       setValidationState({
         status: "error",
         message: error instanceof Error ? error.message : "Unable to validate sale"
+      });
+    }
+  };
+
+  const handleFinalizeSale = async () => {
+    if (finalizeDisabled) {
+      return;
+    }
+
+    if (cartLines.some((line) => !line.productCodeVersionId)) {
+      setFinalizeState({
+        status: "error",
+        message: "One or more items cannot be finalized because they are missing a branch-specific version."
+      });
+      return;
+    }
+
+    setFinalizeState({ status: "processing" });
+
+    try {
+      const orderItemsPayload = cartLines.map((line) => ({
+        productCodeVersionId: line.productCodeVersionId!,
+        qty: line.qty,
+        unitPriceCents: toCents(line.price)
+      }));
+
+      const validationPayload =
+        validationState.status === "success"
+          ? validationState.payload
+          : await validateOrder({
+              branchId: DEFAULT_BRANCH_ID,
+              items: orderItemsPayload
+            });
+
+      if (validationState.status !== "success") {
+        setValidationState({ status: "success", payload: validationPayload });
+      }
+
+      const orderResult: CreatedOrder = await createOrder({
+        branchId: DEFAULT_BRANCH_ID,
+        userId: DEFAULT_USER_ID,
+        taxCents: validationPayload.taxCents,
+        items: orderItemsPayload
+      });
+
+      const invoiceResult: CreatedInvoice = await createInvoice({ orderId: orderResult.order.id });
+
+      const { payments, changeCents } = allocateTenderPayments(tenderLines, invoiceResult.totals.totalCents);
+      if (payments.length === 0) {
+        throw new Error("Add at least one tender before finalizing the sale.");
+      }
+
+      const recordedPayments: RecordedPayment[] = [];
+      for (const payment of payments) {
+        const result = await recordPayment({
+          orderId: orderResult.order.id,
+          invoiceId: invoiceResult.invoice.id,
+          method: payment.method,
+          amountCents: payment.amountCents,
+          meta: payment.meta ?? undefined
+        });
+        recordedPayments.push(result);
+      }
+
+      const receipt: ReceiptPrintJob = await queueReceiptPrint(invoiceResult.invoice.id);
+
+      setFinalizeState({
+        status: "success",
+        receipt,
+        payments: recordedPayments,
+        changeCents
+      });
+
+      setCartLines([]);
+      setTenderLines([]);
+      setSearchResults([]);
+      setSearchTerm("");
+      setSearchStatus("idle");
+      setSearchError(null);
+      setPendingTender(null);
+      setPendingOverride(null);
+      setOverrideError(null);
+      setOverrideDraft({ managerId: "", pin: "", reason: "" });
+    } catch (error) {
+      setFinalizeState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Unable to finalize sale"
       });
     }
   };
@@ -757,7 +990,7 @@ export default function PosSalePage() {
           </div>
 
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
                 onClick={handleValidateSale}
@@ -766,6 +999,19 @@ export default function PosSalePage() {
               >
                 {validationState.status === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 Validate sale totals
+              </button>
+              <button
+                type="button"
+                onClick={handleFinalizeSale}
+                disabled={finalizeDisabled}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:bg-amber-600/60"
+              >
+                {finalizeState.status === "processing" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Wallet className="h-4 w-4" />
+                )}
+                Finalize cash sale
               </button>
             </div>
             {validationState.status === "success" ? (
@@ -779,6 +1025,46 @@ export default function PosSalePage() {
             {validationState.status === "error" ? (
               <div className="mt-3 rounded-2xl border border-rose-500/70 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-300">
                 {validationState.message}
+              </div>
+            ) : null}
+            {finalizeState.status === "success" ? (
+              <div className="mt-3 space-y-3 rounded-2xl border border-amber-500/60 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                <div>
+                  <p className="font-semibold">Sale completed</p>
+                  <p className="text-xs">
+                    Invoice {finalizeState.receipt.invoice.invoiceNo} queued for printing. Cash drawer kicked automatically.
+                  </p>
+                  {finalizeState.changeCents > 0 ? (
+                    <p className="text-xs font-medium text-amber-800 dark:text-amber-100">
+                      Provide change of {formatCurrency(fromCents(finalizeState.changeCents))}.
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-100">Receipt preview</p>
+                  <pre className="mt-2 max-h-48 overflow-y-auto rounded-xl bg-white/60 p-3 text-xs leading-relaxed text-slate-700 shadow-inner dark:bg-slate-900/60 dark:text-slate-200">
+                    {finalizeState.receipt.printJob.preview.map((line, index) => (
+                      <span key={`${line}-${index}`} className="block">
+                        {line || "\u00a0"}
+                      </span>
+                    ))}
+                  </pre>
+                </div>
+                <div className="flex items-center justify-between text-xs text-amber-800 dark:text-amber-100">
+                  <span>Order {finalizeState.receipt.order.orderNumber ?? `#${finalizeState.receipt.order.id}`}</span>
+                  <button
+                    type="button"
+                    onClick={() => setFinalizeState({ status: "idle" })}
+                    className="rounded-full border border-amber-500 px-3 py-1 text-xs font-medium text-amber-600 transition hover:bg-amber-500 hover:text-white dark:border-amber-400 dark:text-amber-200 dark:hover:bg-amber-400 dark:hover:text-slate-950"
+                  >
+                    Start next sale
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {finalizeState.status === "error" ? (
+              <div className="mt-3 rounded-2xl border border-rose-500/70 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-300">
+                {finalizeState.message}
               </div>
             ) : null}
           </div>

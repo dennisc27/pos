@@ -1,4 +1,11 @@
-import type { ProductSearchResult, ValidatedOrder } from "@/components/pos/types";
+import type {
+  CreatedInvoice,
+  CreatedOrder,
+  ProductSearchResult,
+  ReceiptPrintJob,
+  RecordedPayment,
+  ValidatedOrder
+} from "@/components/pos/types";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
@@ -117,5 +124,131 @@ export async function requestPriceOverride(
   }
 
   const json = (await response.json()) as PriceOverrideResponse;
+  return json.data;
+}
+
+type CreateOrderResponse = {
+  data: CreatedOrder;
+  meta: { created: boolean };
+};
+
+export async function createOrder(
+  payload: {
+    branchId: number;
+    userId: number;
+    customerId?: number | null;
+    orderNumber?: string;
+    status?: string;
+    taxCents?: number;
+    items: OrderItemPayload[];
+  },
+  { signal }: { signal?: AbortSignal } = {}
+) {
+  const response = await fetch("/api/orders", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => null);
+    const message =
+      (errorPayload && typeof errorPayload.message === "string" && errorPayload.message) ||
+      `Unable to create order (status ${response.status})`;
+    throw new Error(message);
+  }
+
+  const json = (await response.json()) as CreateOrderResponse;
+  return json.data;
+}
+
+type CreateInvoiceResponse = {
+  data: CreatedInvoice;
+  meta: { created: boolean };
+};
+
+export async function createInvoice(
+  payload: { orderId: number; invoiceNumber?: string },
+  { signal }: { signal?: AbortSignal } = {}
+) {
+  const response = await fetch("/api/invoices", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => null);
+    const message =
+      (errorPayload && typeof errorPayload.message === "string" && errorPayload.message) ||
+      `Unable to create invoice (status ${response.status})`;
+    throw new Error(message);
+  }
+
+  const json = (await response.json()) as CreateInvoiceResponse;
+  return json.data;
+}
+
+type RecordPaymentResponse = {
+  data: RecordedPayment;
+  meta: { created: boolean };
+};
+
+export async function recordPayment(
+  payload: {
+    orderId?: number | null;
+    invoiceId?: number | null;
+    shiftId?: number | null;
+    method: string;
+    amountCents: number;
+    meta?: Record<string, unknown> | null;
+  },
+  { signal }: { signal?: AbortSignal } = {}
+) {
+  const response = await fetch("/api/payments", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => null);
+    const message =
+      (errorPayload && typeof errorPayload.message === "string" && errorPayload.message) ||
+      `Unable to record payment (status ${response.status})`;
+    throw new Error(message);
+  }
+
+  const json = (await response.json()) as RecordPaymentResponse;
+  return json.data;
+}
+
+type PrintReceiptResponse = {
+  data: ReceiptPrintJob;
+  meta: { queued: boolean };
+};
+
+export async function queueReceiptPrint(
+  invoiceId: number,
+  { signal }: { signal?: AbortSignal } = {}
+) {
+  const response = await fetch(`/api/receipts/${invoiceId}/print`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => null);
+    const message =
+      (errorPayload && typeof errorPayload.message === "string" && errorPayload.message) ||
+      `Unable to queue receipt print (status ${response.status})`;
+    throw new Error(message);
+  }
+
+  const json = (await response.json()) as PrintReceiptResponse;
   return json.data;
 }

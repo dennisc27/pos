@@ -107,3 +107,124 @@ export type ValidatedOrder = {
   totalCents: number;
   discountCents: number;
 };
+
+export type CreatedOrder = {
+  order: {
+    id: number;
+    orderNumber: string | null;
+    branchId: number;
+    userId: number;
+    customerId: number | null;
+    status: string;
+    subtotalCents: number;
+    taxCents: number;
+    totalCents: number;
+    createdAt: string | null;
+    updatedAt: string | null;
+  };
+  items: {
+    productCodeVersionId: number;
+    qty: number;
+    unitPriceCents: number;
+    totalCents: number;
+    listPriceCents: number;
+    overrideApplied: boolean;
+  }[];
+};
+
+export type CreatedInvoice = {
+  invoice: {
+    id: number;
+    invoiceNo: string;
+    orderId: number;
+    totalCents: number;
+    taxCents: number;
+    createdAt: string | null;
+  };
+  totals: {
+    totalCents: number;
+    netCents: number;
+    taxCents: number;
+  };
+  order: {
+    id: number;
+    branchId: number;
+    status: string;
+  };
+  items: {
+    id: number;
+    qty: number;
+    unitPriceCents: number;
+    totalCents: number;
+    netCents: number;
+    taxCents: number;
+  }[];
+};
+
+export type RecordedPayment = {
+  payment: {
+    id: number;
+    orderId: number | null;
+    invoiceId: number | null;
+    shiftId: number | null;
+    method: string;
+    amountCents: number;
+    meta: Record<string, unknown> | null;
+    createdAt: string | null;
+  };
+  invoice: {
+    invoiceId: number;
+    totalCents: number | null;
+    paidCents: number;
+    remainingCents: number;
+  } | null;
+  order: {
+    orderId: number;
+    paidCents: number;
+  } | null;
+  ledger: {
+    giftCard: { giftCardId: number; balanceCents: number } | null;
+    creditNote: { creditNoteId: number; balanceCents: number } | null;
+    stockPosted: boolean;
+  };
+};
+
+export type ReceiptPrintJob = {
+  invoice: {
+    id: number;
+    invoiceNo: string;
+    orderId: number;
+    totalCents: number;
+    taxCents: number;
+    createdAt: string | null;
+  };
+  order: {
+    id: number;
+    orderNumber: string | null;
+    branchId: number;
+    userId: number;
+    subtotalCents: number;
+    taxCents: number;
+    totalCents: number;
+  };
+  items: {
+    id: number;
+    qty: number;
+    unitPriceCents: number;
+    totalCents: number;
+    code: string | null;
+    name: string | null;
+    netCents: number;
+    taxCents: number;
+  }[];
+  payments: {
+    id: number;
+    method: string;
+    amountCents: number;
+    createdAt: string | null;
+  }[];
+  printJob: {
+    preview: string[];
+    escposBase64: string;
+  };
+};

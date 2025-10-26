@@ -32,8 +32,8 @@ FE
 TEST/AC
 - [x] Scan item by code → line appears with correct price
 - [x] Apply discount beyond policy requires manager
-- [ ] Finalize cash sale kicks drawer and prints receipt
-- [ ] Stock decreases; payment + invoice persisted
+- [x] Finalize cash sale kicks drawer and prints receipt
+- [x] Stock decreases; payment + invoice persisted
 
 ### 1.2 Refunds (/pos/refund)
 BE

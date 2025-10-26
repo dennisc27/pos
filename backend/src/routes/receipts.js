@@ -100,6 +100,13 @@ const buildReceiptText = ({
     });
   }
 
+  const hasCashPayment = paymentsSummary.some((payment) => payment.method === 'cash');
+  if (hasCashPayment) {
+    addPreview('');
+    addPreview('[Drawer kick sent]');
+    addPrinter(`${ESC}p\x00\x3C\xFF`);
+  }
+
   addPrinter('');
   addPrinter('Thank you for your purchase!');
   addPreview('');
