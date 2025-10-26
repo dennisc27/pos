@@ -1,24 +1,24 @@
-- [ ] POS - Refunds (/pos/refund) - BE - GET /api/invoices/:no
-- [ ] POS - Refunds (/pos/refund) - BE - POST /api/refunds → creates sales_return + items
-- [ ] POS - Refunds (/pos/refund) - BE - Restock when condition in (new, used)
-- [ ] POS - Refunds (/pos/refund) - FE - Invoice lookup field; selectable lines; totals_box; policy_alerts
-- [ ] POS - Refunds (/pos/refund) - FE - Choose refund method (cash/store_credit)
-- [ ] POS - Refunds (/pos/refund) - AC - Return line restocks if not damaged
-- [ ] POS - Refunds (/pos/refund) - AC - Credit note issued when store_credit
-- [ ] POS - Buy from Customer (/pos/buy) - BE - POST /api/purchases + items
-- [ ] POS - Buy from Customer (/pos/buy) - BE - Payout (cash) movement to current shift
-- [ ] POS - Buy from Customer (/pos/buy) - BE - Attach photos (path only)
-- [ ] POS - Buy from Customer (/pos/buy) - FE - Intake form + photo uploader + offer panel
-- [ ] POS - Buy from Customer (/pos/buy) - FE - Print receipt
-- [ ] POS - Buy from Customer (/pos/buy) - AC - Posting creates purchase + ledger (purchase)
-- [ ] POS - Buy from Customer (/pos/buy) - AC - Drawer log reflects payout
-- [ ] POS - Gift Card (/pos/gift-card) - BE - POST /api/gift-cards/issue | /reload | /redeem
-- [ ] POS - Gift Card (/pos/gift-card) - BE - Update gift_card_ledger
-- [ ] POS - Gift Card (/pos/gift-card) - FE - Issue/reload/redeem forms + balance widget
-- [ ] POS - Gift Card (/pos/gift-card) - AC - Balance reflects deltas exactly; prevents overdraft
-- [ ] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/open (with PIN), POST /api/shifts/:id/close
-- [ ] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/:id/drop|paid-in|paid-out (kinds validated)
-- [ ] Cash & Shifts - Shifts (/cash/shift) - BE - Compute expected vs actual; persist shift_reports.snapshot
+- [x] POS - Refunds (/pos/refund) - BE - GET /api/invoices/:no
+- [x] POS - Refunds (/pos/refund) - BE - POST /api/refunds → creates sales_return + items
+- [x] POS - Refunds (/pos/refund) - BE - Restock when condition in (new, used)
+- [x] POS - Refunds (/pos/refund) - FE - Invoice lookup field; selectable lines; totals_box; policy_alerts
+- [x] POS - Refunds (/pos/refund) - FE - Choose refund method (cash/store_credit)
+- [x] POS - Refunds (/pos/refund) - AC - Return line restocks if not damaged
+- [x] POS - Refunds (/pos/refund) - AC - Credit note issued when store_credit
+- [x] POS - Buy from Customer (/pos/buy) - BE - POST /api/purchases + items
+- [x] POS - Buy from Customer (/pos/buy) - BE - Payout (cash) movement to current shift
+- [x] POS - Buy from Customer (/pos/buy) - BE - Attach photos (path only)
+- [x] POS - Buy from Customer (/pos/buy) - FE - Intake form + photo uploader + offer panel
+- [x] POS - Buy from Customer (/pos/buy) - FE - Print receipt
+- [x] POS - Buy from Customer (/pos/buy) - AC - Posting creates purchase + ledger (purchase)
+- [x] POS - Buy from Customer (/pos/buy) - AC - Drawer log reflects payout
+- [x] POS - Gift Card (/pos/gift-card) - BE - POST /api/gift-cards/issue | /reload | /redeem
+- [x] POS - Gift Card (/pos/gift-card) - BE - Update gift_card_ledger
+- [x] POS - Gift Card (/pos/gift-card) - FE - Issue/reload/redeem forms + balance widget
+- [x] POS - Gift Card (/pos/gift-card) - AC - Balance reflects deltas exactly; prevents overdraft
+- [x] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/open (with PIN), POST /api/shifts/:id/close
+- [x] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/:id/drop|paid-in|paid-out (kinds validated)
+- [x] Cash & Shifts - Shifts (/cash/shift) - BE - Compute expected vs actual; persist shift_reports.snapshot
 - [ ] Cash & Shifts - Shifts (/cash/shift) - FE - Denomination counter; drawer actions; Z-report list
 - [ ] Cash & Shifts - Shifts (/cash/shift) - AC - Over/short computed; discrepancy > threshold flagged
 - [ ] Cash & Shifts - Movements (/cash/movements) - BE - POST /api/cash-movements (kinds: deposit, cash_to_safe, drop, paid_in, paid_out, expense, income)
