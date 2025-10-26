@@ -1,648 +1,1313 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { ItemsGrid } from "@/components/inventory/items-grid";
-import { ReceiveWizard } from "@/components/inventory/receive-wizard";
-import { TransferPipeline } from "@/components/inventory/transfer-pipeline";
-import { QuarantineQueue } from "@/components/inventory/quarantine-queue";
-import { CountsProgress } from "@/components/inventory/counts-progress";
-import { ValueSnapshot } from "@/components/inventory/value-snapshot";
-import type {
-  CountSession,
-  InventoryItem,
-  InventoryTransfer,
-  QuarantineItem,
-  ReceivingShipment,
-  ValueMetric,
-} from "@/components/inventory/types";
-import { formatCurrency, formatQuantity } from "@/components/inventory/utils";
+import {
+  AlertCircle,
+  Boxes,
+  CheckCircle2,
+  Edit3,
+  Loader2,
+  PackageCheck,
+  PackageMinus,
+  PackagePlus,
+  Printer,
+  RefreshCcw,
+  Search,
+  Tag,
+  XCircle,
+} from "lucide-react";
 
-const INITIAL_INVENTORY_ITEMS: InventoryItem[] = [
-  {
-    id: "inv-1",
-    sku: "JW-2041",
-    description: "18K Gold Curb Chain 24\"",
-    category: "Jewelry · Gold",
-    location: { name: "Showroom Case A", kind: "store" },
-    qty: 1,
-    uom: "pcs",
-    wac: 48500,
-    retail: 72800,
-    agedDays: 34,
-    channel: "Storefront",
-    status: "available",
-  },
-  {
-    id: "inv-2",
-    sku: "WT-5528",
-    description: "Rolex Datejust 16233 Two-Tone",
-    category: "Watches · Luxury",
-    location: { name: "Safe Vault", kind: "safe" },
-    qty: 1,
-    uom: "pcs",
-    wac: 178000,
-    retail: 245000,
-    agedDays: 12,
-    channel: "Website",
-    status: "available",
-  },
-  {
-    id: "inv-3",
-    sku: "MT-8840",
-    description: "24K Scrap Gold Lot",
-    category: "Metal · Scrap",
-    location: { name: "Bench Refining", kind: "bench" },
-    qty: 312.5,
-    uom: "grams",
-    wac: 3100,
-    retail: 4520,
-    agedDays: 5,
-    channel: "Wholesale",
-    status: "hold",
-  },
-  {
-    id: "inv-4",
-    sku: "ST-1109",
-    description: "1.05ct Round Brilliant Loose",
-    category: "Stones · Diamonds",
-    location: { name: "Gem Safe", kind: "safe" },
-    qty: 1,
-    uom: "pcs",
-    wac: 158000,
-    retail: 198000,
-    agedDays: 61,
-    channel: "Storefront",
-    status: "available",
-  },
-  {
-    id: "inv-5",
-    sku: "EL-3312",
-    description: "DJI Mini 4 Pro Drone",
-    category: "Electronics",
-    location: { name: "Online staging rack", kind: "transfer" },
-    qty: 4,
-    uom: "pcs",
-    wac: 32500,
-    retail: 46900,
-    agedDays: 24,
-    channel: "Amazon",
-    status: "pending_transfer",
-  },
-  {
-    id: "inv-6",
-    sku: "JW-3020",
-    description: "14K Diamond Halo Ring",
-    category: "Jewelry · Engagement",
-    location: { name: "Repair Queue", kind: "wip" },
-    qty: 1,
-    uom: "pcs",
-    wac: 38500,
-    retail: 62900,
-    agedDays: 97,
-    channel: "Storefront",
-    status: "hold",
-  },
-];
+import { formatCurrencyFromCents } from "@/lib/utils";
 
-const INITIAL_SHIPMENTS: ReceivingShipment[] = [
-  {
-    id: "rcv-1",
-    vendor: "Santo Domingo Estates Buy",
-    eta: "Today 3:00pm",
-    items: 28,
-    photosRequired: 18,
-    value: 182000,
-    status: "counting",
-  },
-  {
-    id: "rcv-2",
-    vendor: "Consignment - Elegant Gems",
-    eta: "Tomorrow 11:00am",
-    items: 14,
-    photosRequired: 14,
-    value: 265000,
-    status: "unpacked",
-  },
-  {
-    id: "rcv-3",
-    vendor: "Vendor Purchase Order #PO-1187",
-    eta: "Awaiting arrival",
-    items: 9,
-    photosRequired: 6,
-    value: 98000,
-    status: "tagging",
-  },
-];
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
-const INITIAL_TRANSFERS: InventoryTransfer[] = [
-  {
-    id: "tr-1",
-    reference: "TR-2024-045",
-    from: "Branch - Piantini",
-    to: "Branch - Santiago",
-    items: 17,
-    value: 225000,
-    status: "in_transit",
-    carrier: "Metro Logistics",
-    lastScan: "10:15 · Dispatch hub",
-  },
-  {
-    id: "tr-2",
-    reference: "CSGN-031",
-    from: "Vendor - Lito's Workshop",
-    to: "Branch - Piantini",
-    items: 6,
-    value: 128000,
-    status: "staged",
-    carrier: "Awaiting pickup",
-    lastScan: "08:40 · Dock",
-  },
-  {
-    id: "tr-3",
-    reference: "TR-2024-038",
-    from: "Branch - Piantini",
-    to: "Branch - Zona Colonial",
-    items: 11,
-    value: 102500,
-    status: "received",
-    carrier: "Courier signed",
-    lastScan: "Yesterday 17:25 · Received",
-  },
-];
+const numberFormatter = new Intl.NumberFormat("es-DO");
+const dateTimeFormatter = new Intl.DateTimeFormat("es-DO", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
 
-const INITIAL_QUARANTINE: QuarantineItem[] = [
-  {
-    id: "q-1",
-    sku: "WT-4413",
-    description: "Citizen Eco-Drive Watch",
-    reason: "Authenticity review",
-    assignedTo: "David (Horologist)",
-    since: "2 days",
-    nextAction: "Upload movement photos",
-  },
-  {
-    id: "q-2",
-    sku: "JW-2190",
-    description: "10K Cuban Link Bracelet",
-    reason: "Police hold",
-    assignedTo: "Compliance",
-    since: "5 days",
-    nextAction: "Submit report",
-  },
-  {
-    id: "q-3",
-    sku: "EL-3302",
-    description: "MacBook Pro 14\"",
-    reason: "Repair assessment",
-    assignedTo: "Carlos (Bench)",
-    since: "1 day",
-    nextAction: "Estimate board",
-  },
-];
+const availabilityOptions = [
+  { value: "all", label: "Disponibilidad" },
+  { value: "in_stock", label: "Con stock" },
+  { value: "low_stock", label: "Stock bajo" },
+  { value: "reserved", label: "Reservado" },
+  { value: "out_of_stock", label: "Sin stock" },
+] as const;
 
-const INITIAL_COUNTS: CountSession[] = [
-  {
-    id: "count-1",
-    name: "Showroom Cases",
-    scope: "Cases A-D · High value",
-    type: "blind",
-    scheduledFor: "Today 7:30pm",
-    progress: 45,
-    counted: 82,
-    expected: 180,
-    status: "in_progress",
-  },
-  {
-    id: "count-2",
-    name: "Electronics Wall",
-    scope: "All serialized electronics",
-    type: "cycle",
-    scheduledFor: "Tomorrow 9:00am",
-    progress: 0,
-    counted: 0,
-    expected: 64,
-    status: "scheduled",
-  },
-  {
-    id: "count-3",
-    name: "Safe Vault",
-    scope: "Luxury watches & stones",
-    type: "full",
-    scheduledFor: "In reconciliation",
-    progress: 92,
-    counted: 118,
-    expected: 128,
-    status: "reconciling",
-  },
-];
+const statusOptions = [
+  { value: "all", label: "Estado" },
+  { value: "active", label: "Activos" },
+  { value: "inactive", label: "Inactivos" },
+] as const;
 
-const statusLabels: Record<InventoryItem["status"], string> = {
-  available: "Disponibles",
-  hold: "Hold",
-  pending_transfer: "Traslado",
-  quarantine: "Cuarentena",
+const sortFieldOptions = [
+  { value: "name", label: "Nombre" },
+  { value: "code", label: "Código" },
+  { value: "updatedAt", label: "Actualización" },
+  { value: "qtyOnHand", label: "Existencia" },
+  { value: "priceCents", label: "Precio" },
+] as const;
+
+const sortDirectionOptions = [
+  { value: "asc", label: "Asc" },
+  { value: "desc", label: "Desc" },
+] as const;
+
+const pageSizeOptions = [25, 50, 100, 150, 200];
+
+type InventoryItem = {
+  productCodeId: number;
+  productCodeVersionId: number;
+  code: string;
+  name: string;
+  sku: string | null;
+  description: string | null;
+  categoryId: number | null;
+  categoryName: string | null;
+  branchId: number;
+  branchName: string | null;
+  priceCents: number | null;
+  costCents: number | null;
+  qtyOnHand: number;
+  qtyReserved: number;
+  availableQty: number;
+  isActive: boolean;
+  updatedAt: string | null;
 };
 
-const channelFilters = ["all", "Storefront", "Website", "Amazon", "Wholesale"] as const;
-
-const nextShipmentStatus: Record<ReceivingShipment["status"], ReceivingShipment["status"] | null> = {
-  unpacked: "counting",
-  counting: "tagging",
-  tagging: "ready",
-  ready: null,
+type InventorySummary = {
+  totalVariants: number;
+  totalSkus: number;
+  totalQtyOnHand: number;
+  totalReserved: number;
+  totalAvailable: number;
+  totalRetailValueCents: number;
 };
 
-const nextTransferStatus: Record<InventoryTransfer["status"], InventoryTransfer["status"] | null> = {
-  staged: "in_transit",
-  in_transit: "received",
-  received: null,
+type InventoryResponse = {
+  items: InventoryItem[];
+  summary: InventorySummary;
+  pagination: {
+    page: number;
+    pageSize: number;
+    hasMore: boolean;
+    nextPage: number | null;
+  };
+  metadata: {
+    branches: { id: number; name: string }[];
+    categories: { id: number; name: string }[];
+  };
+  filtersApplied: {
+    search: string;
+    branchIds: number[];
+    categoryIds: number[];
+    productCodeIds: number[];
+    productCodeVersionIds: number[];
+    status: string;
+    availability: string;
+    lowStockThreshold: number;
+    page: number;
+    pageSize: number;
+    sortField: string;
+    sortDirection: string;
+  };
+  warnings?: {
+    missingBranchIds?: number[];
+  };
 };
 
-const nextCountStatus: Record<CountSession["status"], CountSession["status"] | null> = {
-  scheduled: "in_progress",
-  in_progress: "reconciling",
-  reconciling: "posted",
-  posted: null,
+type LabelItem = {
+  productCodeVersionId: number;
+  productCodeId: number;
+  code: string;
+  name: string;
+  sku: string | null;
+  branchId: number;
+  branchName: string | null;
+  priceCents: number | null;
+  qrPayload: string;
+  note: string | null;
 };
 
-export default function InventoryPage() {
-  const [items, setItems] = useState(INITIAL_INVENTORY_ITEMS);
-  const [shipments, setShipments] = useState(INITIAL_SHIPMENTS);
-  const [transfers, setTransfers] = useState(INITIAL_TRANSFERS);
-  const [quarantine, setQuarantine] = useState(INITIAL_QUARANTINE);
-  const [countSessions, setCountSessions] = useState(INITIAL_COUNTS);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilters, setStatusFilters] = useState<InventoryItem["status"][]>([]);
-  const [channelFilter, setChannelFilter] = useState<(typeof channelFilters)[number]>("all");
-  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
-  const [activityLog, setActivityLog] = useState<string[]>([]);
+type LabelBatch = {
+  generatedAt: string;
+  totalLabels: number;
+  labels: LabelItem[];
+  warnings?: {
+    missingVersionIds?: number[];
+  };
+};
 
-  const filteredItems = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-    return items.filter((item) => {
-      const matchesQuery =
-        !query ||
-        item.description.toLowerCase().includes(query) ||
-        item.sku.toLowerCase().includes(query) ||
-        item.category.toLowerCase().includes(query);
-      const matchesStatus =
-        statusFilters.length === 0 || statusFilters.includes(item.status);
-      const matchesChannel =
-        channelFilter === "all" || item.channel === channelFilter;
-      return matchesQuery && matchesStatus && matchesChannel;
+type InventoryFilters = {
+  search: string;
+  branchId: number | "all";
+  categoryId: number | "all";
+  status: "all" | "active" | "inactive";
+  availability: "all" | "in_stock" | "out_of_stock" | "reserved" | "low_stock";
+  sortField: (typeof sortFieldOptions)[number]["value"];
+  sortDirection: "asc" | "desc";
+  page: number;
+  pageSize: number;
+  lowStockThreshold: number;
+};
+
+const defaultFilters: InventoryFilters = {
+  search: "",
+  branchId: "all",
+  categoryId: "all",
+  status: "all",
+  availability: "all",
+  sortField: "name",
+  sortDirection: "asc",
+  page: 1,
+  pageSize: 50,
+  lowStockThreshold: 3,
+};
+
+type FlashMessage = { tone: "success" | "error"; message: string } | null;
+
+type EditFormState = {
+  name: string;
+  sku: string;
+  description: string;
+  price: string;
+  cost: string;
+  qtyOnHand: string;
+  qtyReserved: string;
+  isActive: boolean;
+  categoryId: string;
+};
+
+function buildFiltersPayload(filters: InventoryFilters) {
+  const payload: Record<string, unknown> = {
+    search: filters.search.trim(),
+    page: filters.page,
+    pageSize: filters.pageSize,
+    sortField: filters.sortField,
+    sortDirection: filters.sortDirection,
+    lowStockThreshold: filters.lowStockThreshold,
+  };
+
+  if (filters.status !== "all") {
+    payload.status = filters.status;
+  }
+
+  if (filters.availability !== "all") {
+    payload.availability = filters.availability;
+  }
+
+  if (filters.branchId !== "all") {
+    payload.branchIds = [filters.branchId];
+  }
+
+  if (filters.categoryId !== "all") {
+    payload.categoryIds = [filters.categoryId];
+  }
+
+  return payload;
+}
+
+function computeSummary(items: InventoryItem[]): InventorySummary {
+  const skuSet = new Set(items.map((item) => item.productCodeId));
+  const totalQtyOnHand = items.reduce((sum, item) => sum + item.qtyOnHand, 0);
+  const totalReserved = items.reduce((sum, item) => sum + item.qtyReserved, 0);
+  const totalAvailable = items.reduce((sum, item) => sum + item.availableQty, 0);
+  const totalRetailValueCents = items.reduce((sum, item) => {
+    const price = Number.isFinite(item.priceCents) && item.priceCents !== null ? item.priceCents : 0;
+    return sum + price * item.qtyOnHand;
+  }, 0);
+
+  return {
+    totalVariants: items.length,
+    totalSkus: skuSet.size,
+    totalQtyOnHand,
+    totalReserved,
+    totalAvailable,
+    totalRetailValueCents,
+  };
+}
+
+function normalizeNumberInput(raw: string) {
+  if (!raw.trim()) {
+    return undefined;
+  }
+
+  const normalized = raw.replace(/\s+/g, "").replace(/,/g, ".");
+  const value = Number(normalized);
+
+  if (!Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return value;
+}
+function InventoryPage() {
+  const [filters, setFilters] = useState<InventoryFilters>(defaultFilters);
+  const [searchInput, setSearchInput] = useState(defaultFilters.search);
+  const [data, setData] = useState<InventoryResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [flashMessage, setFlashMessage] = useState<FlashMessage>(null);
+  const [labelConfig, setLabelConfig] = useState<Record<number, number>>({});
+  const [labelNote, setLabelNote] = useState("");
+  const [includePriceOnLabels, setIncludePriceOnLabels] = useState(true);
+  const [labelPreview, setLabelPreview] = useState<LabelBatch | null>(null);
+  const [labelError, setLabelError] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [editForm, setEditForm] = useState<EditFormState | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const fetchInventory = useCallback(
+    async (filtersToLoad: InventoryFilters, options?: { silent?: boolean }) => {
+      if (!options?.silent) {
+        setLoading(true);
+      }
+      setError(null);
+
+      try {
+        const payload = buildFiltersPayload(filtersToLoad);
+        const params = new URLSearchParams({ filters: JSON.stringify(payload) });
+        const response = await fetch(`${API_BASE_URL}/api/inventory?${params.toString()}`);
+        const responseBody = (await response.json().catch(() => ({}))) as Partial<InventoryResponse> & {
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(responseBody?.error ?? "No se pudo cargar el inventario");
+        }
+
+        const typedBody = responseBody as InventoryResponse;
+        setData(typedBody);
+
+        const responsePage = Number(typedBody?.filtersApplied?.page ?? filtersToLoad.page);
+        if (!Number.isNaN(responsePage) && responsePage !== filtersToLoad.page) {
+          setFilters((previous) => {
+            if (previous.page === responsePage) {
+              return previous;
+            }
+
+            return { ...previous, page: responsePage };
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "No se pudo cargar el inventario";
+        setError(message);
+      } finally {
+        if (!options?.silent) {
+          setLoading(false);
+        }
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    fetchInventory(filters);
+  }, [filters, fetchInventory]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setFilters((previous) => {
+        if (previous.search === searchInput && previous.page === 1) {
+          return previous;
+        }
+
+        return { ...previous, search: searchInput, page: 1 };
+      });
+    }, 350);
+
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+
+    setLabelConfig((previous) => {
+      const validIds = new Set(data.items.map((item) => item.productCodeVersionId));
+      const next: Record<number, number> = {};
+
+      for (const [key, value] of Object.entries(previous)) {
+        const versionId = Number(key);
+        if (validIds.has(versionId)) {
+          next[versionId] = value;
+        }
+      }
+
+      return next;
     });
-  }, [items, searchTerm, statusFilters, channelFilter]);
+  }, [data]);
 
-  const valuationMetrics: ValueMetric[] = useMemo(
-    () => [
-      {
-        label: "Retail on hand",
-        amount: items.reduce((sum, item) => sum + item.retail * item.qty, 0),
-        trend: { direction: "up", label: "+4.8% vs last month" },
-      },
-      {
-        label: "Weighted avg cost",
-        amount: items.reduce((sum, item) => sum + item.wac * item.qty, 0),
-        trend: { direction: "up", label: "+2.1% vs last month" },
-      },
-      {
-        label: "Online listed",
-        amount: items.filter((item) => item.channel !== "Storefront").reduce((sum, item) => sum + item.retail * item.qty, 0),
-        trend: { direction: "flat", label: "No change" },
-      },
-      {
-        label: "Quarantine value",
-        amount: quarantine.length * 71500,
-        trend: { direction: "down", label: "-1 case today" },
-      },
-    ],
-    [items, quarantine],
+  useEffect(() => {
+    if (!editingItem) {
+      setEditForm(null);
+      return;
+    }
+
+    setEditForm({
+      name: editingItem.name ?? "",
+      sku: editingItem.sku ?? "",
+      description: editingItem.description ?? "",
+      price: editingItem.priceCents != null ? (editingItem.priceCents / 100).toFixed(2) : "",
+      cost: editingItem.costCents != null ? (editingItem.costCents / 100).toFixed(2) : "",
+      qtyOnHand: editingItem.qtyOnHand.toString(),
+      qtyReserved: editingItem.qtyReserved.toString(),
+      isActive: editingItem.isActive,
+      categoryId: editingItem.categoryId != null ? String(editingItem.categoryId) : "",
+    });
+  }, [editingItem]);
+
+  const branchOptions = useMemo(() => {
+    const options = [...(data?.metadata.branches ?? [])];
+    if (filters.branchId !== "all") {
+      const exists = options.some((option) => option.id === filters.branchId);
+      if (!exists) {
+        const fallbackName =
+          data?.items.find((item) => item.branchId === filters.branchId)?.branchName ??
+          `Sucursal ${filters.branchId}`;
+        options.push({ id: filters.branchId, name: fallbackName });
+      }
+    }
+
+    return options.sort((a, b) => a.name.localeCompare(b.name));
+  }, [data, filters.branchId]);
+
+  const categoryOptions = useMemo(() => {
+    const options = [...(data?.metadata.categories ?? [])];
+    if (filters.categoryId !== "all") {
+      const exists = options.some((option) => option.id === filters.categoryId);
+      if (!exists) {
+        const fallbackName =
+          data?.items.find((item) => item.categoryId === filters.categoryId)?.categoryName ??
+          `Categoría ${filters.categoryId}`;
+        options.push({ id: filters.categoryId, name: fallbackName });
+      }
+    }
+
+    return options.sort((a, b) => a.name.localeCompare(b.name));
+  }, [data, filters.categoryId]);
+
+  const selectedLabelCount = useMemo(
+    () =>
+      Object.values(labelConfig).reduce((sum, quantity) => {
+        return sum + (quantity > 0 ? quantity : 0);
+      }, 0),
+    [labelConfig]
   );
 
-  const summaryTiles = useMemo(
-    () => [
-      {
-        label: "Retail value",
-        value: formatCurrency(valuationMetrics[0].amount),
-        accent: "text-emerald-600 dark:text-emerald-300",
-      },
-      {
-        label: "Weighted cost",
-        value: formatCurrency(valuationMetrics[1].amount),
-        accent: "text-slate-700 dark:text-slate-200",
-      },
-      {
-        label: "Active SKUs",
-        value: items.length.toString(),
-        accent: "text-sky-600 dark:text-sky-300",
-      },
-      {
-        label: "Units on hand",
-        value: formatQuantity(items.reduce((sum, item) => sum + item.qty, 0)),
-        accent: "text-slate-700 dark:text-slate-200",
-      },
-      {
-        label: "Quarantine",
-        value: `${quarantine.length} items`,
-        accent: "text-rose-500 dark:text-rose-300",
-      },
-    ],
-    [valuationMetrics, items, quarantine],
-  );
+  const items = data?.items ?? [];
+  const summary = data?.summary ?? computeSummary(items);
+  const currentPage = data?.pagination?.page ?? filters.page;
+  const hasMore = data?.pagination?.hasMore ?? false;
 
-  const logAction = (message: string) => {
-    setActivityLog((current) => [message, ...current].slice(0, 6));
+  const handleToggleLabel = (versionId: number) => {
+    setLabelConfig((previous) => {
+      const next = { ...previous };
+      if (next[versionId]) {
+        delete next[versionId];
+      } else {
+        next[versionId] = 1;
+      }
+      return next;
+    });
   };
 
-  const toggleStatusFilter = (status: InventoryItem["status"]) => {
-    setStatusFilters((current) =>
-      current.includes(status)
-        ? current.filter((value) => value !== status)
-        : [...current, status],
-    );
+  const handleLabelQuantityChange = (versionId: number, value: string) => {
+    const numericValue = Number(value);
+    setLabelConfig((previous) => {
+      const next = { ...previous };
+      if (!Number.isFinite(numericValue) || numericValue <= 0) {
+        delete next[versionId];
+      } else {
+        next[versionId] = Math.min(Math.round(numericValue), 50);
+      }
+      return next;
+    });
   };
 
-  const handleToggleSelect = (id: string) => {
-    setSelectedItemIds((current) =>
-      current.includes(id)
-        ? current.filter((value) => value !== id)
-        : [...current, id],
-    );
-  };
+  const handleGenerateLabels = async () => {
+    const itemsPayload = Object.entries(labelConfig)
+      .map(([key, quantity]) => ({ productCodeVersionId: Number(key), quantity }))
+      .filter((entry) => entry.quantity > 0);
 
-  const handleStatusChange = (id: string, status: InventoryItem["status"]) => {
-    setItems((current) =>
-      current.map((item) => (item.id === id ? { ...item, status } : item)),
-    );
-    logAction(`Item ${id} marcado como ${statusLabels[status]}`);
-  };
+    if (itemsPayload.length === 0) {
+      setLabelError("Selecciona al menos un artículo y cantidad");
+      return;
+    }
 
-  const handleRequestTransfer = (id: string) => {
-    setItems((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, status: "pending_transfer" } : item,
-      ),
-    );
-    setSelectedItemIds((current) => [...new Set([...current, id])]);
-    logAction(`SKU preparado para traslado (${id})`);
-  };
+    setLabelError(null);
+    setFlashMessage(null);
 
-  const handleBulkTransfer = () => {
-    if (selectedItemIds.length === 0) return;
-    setItems((current) =>
-      current.map((item) =>
-        selectedItemIds.includes(item.id)
-          ? { ...item, status: "pending_transfer" }
-          : item,
-      ),
-    );
-    logAction(`Se programaron ${selectedItemIds.length} artículos para traslado`);
-    setSelectedItemIds([]);
-  };
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/labels/qr`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: itemsPayload,
+          includePrice: includePriceOnLabels,
+          labelNote: labelNote.trim() || null,
+        }),
+      });
 
-  const handleAdvanceShipment = (
-    id: string,
-    next: ReceivingShipment["status"] | null,
-  ) => {
-    setShipments((current) =>
-      current.map((shipment) =>
-        shipment.id === id && next
-          ? { ...shipment, status: next }
-          : shipment,
-      ),
-    );
-    if (!next) {
-      logAction(`Recepción ${id} lista para poner en piso`);
-    } else {
-      logAction(`Recepción ${id} avanzó a etapa ${next}`);
+      const body = (await response.json().catch(() => ({}))) as LabelBatch & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(body?.error ?? "No se pudieron generar las etiquetas");
+      }
+
+      setLabelPreview(body);
+      setFlashMessage({
+        tone: "success",
+        message: `Se generaron ${body.totalLabels ?? 0} etiquetas listas para imprimir`,
+      });
+
+      if (body?.warnings?.missingVersionIds?.length) {
+        setLabelError(
+          `Algunas versiones no fueron encontradas (${body.warnings.missingVersionIds.join(", ")})`
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudieron generar las etiquetas";
+      setLabelError(message);
     }
   };
 
-  const handleTogglePhotos = (id: string) => {
-    setShipments((current) =>
-      current.map((shipment) =>
-        shipment.id === id
-          ? {
-              ...shipment,
-              photosRequired: Math.max(0, shipment.photosRequired - 3),
-            }
-          : shipment,
-      ),
-    );
-    logAction(`Actualizado checklist fotográfico para recepción ${id}`);
+  const handleStartEdit = (item: InventoryItem) => {
+    setEditingItem(item);
+    setFlashMessage(null);
   };
 
-  const handleAdvanceTransfer = (
-    id: string,
-    next: InventoryTransfer["status"] | null,
-  ) => {
-    setTransfers((current) =>
-      current.map((transfer) =>
-        transfer.id === id && next
-          ? {
-              ...transfer,
-              status: next,
-              lastScan: `${new Date().toLocaleTimeString("es-DO", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })} · ${next === "received" ? "Recibido" : "Escaneado"}`,
-            }
-          : transfer,
-      ),
-    );
-    if (next) {
-      logAction(`Transferencia ${id} marcada como ${next}`);
+  const handleCancelEdit = () => {
+    if (savingEdit) {
+      return;
+    }
+    setEditingItem(null);
+  };
+
+  const handleSaveEdit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!editingItem || !editForm) {
+      return;
+    }
+
+    if (!editForm.name.trim()) {
+      setFlashMessage({ tone: "error", message: "El nombre es obligatorio" });
+      return;
+    }
+
+    const parsedPrice = normalizeNumberInput(editForm.price);
+    const parsedCost = normalizeNumberInput(editForm.cost);
+    const parsedQtyOnHand = normalizeNumberInput(editForm.qtyOnHand);
+    const parsedQtyReserved = normalizeNumberInput(editForm.qtyReserved);
+
+    if (parsedQtyOnHand === undefined || parsedQtyReserved === undefined) {
+      setFlashMessage({ tone: "error", message: "Las cantidades deben ser números válidos" });
+      return;
+    }
+
+    if (parsedPrice !== undefined && parsedPrice < 0) {
+      setFlashMessage({ tone: "error", message: "El precio debe ser mayor o igual a cero" });
+      return;
+    }
+
+    if (parsedCost !== undefined && parsedCost < 0) {
+      setFlashMessage({ tone: "error", message: "El costo debe ser mayor o igual a cero" });
+      return;
+    }
+
+    setSavingEdit(true);
+    setFlashMessage(null);
+
+    try {
+      const payload: Record<string, unknown> = {
+        name: editForm.name.trim(),
+        description: editForm.description.trim() || null,
+        sku: editForm.sku.trim() || null,
+        categoryId: editForm.categoryId ? Number(editForm.categoryId) : null,
+        versionUpdates: [
+          {
+            branchId: editingItem.branchId,
+            priceCents: parsedPrice !== undefined ? Math.round(parsedPrice * 100) : undefined,
+            costCents: parsedCost !== undefined ? Math.round(parsedCost * 100) : undefined,
+            qtyOnHand: Math.round(parsedQtyOnHand),
+            qtyReserved: Math.round(parsedQtyReserved),
+            isActive: editForm.isActive,
+          },
+        ],
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/product-codes/${editingItem.productCodeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const body = (await response.json().catch(() => ({}))) as InventoryResponse & {
+        error?: string;
+        warnings?: { missingBranchIds?: number[] };
+      };
+
+      if (!response.ok) {
+        throw new Error(body?.error ?? "No se pudo actualizar el producto");
+      }
+
+      await fetchInventory(filters, { silent: true });
+
+      const missingBranches = body?.warnings?.missingBranchIds ?? [];
+      if (missingBranches.length > 0) {
+        setFlashMessage({
+          tone: "error",
+          message: `No se pudo actualizar la sucursal ${missingBranches.join(", ")}`,
+        });
+      } else {
+        setFlashMessage({ tone: "success", message: "Producto actualizado correctamente" });
+      }
+
+      setEditingItem(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo actualizar el producto";
+      setFlashMessage({ tone: "error", message });
+    } finally {
+      setSavingEdit(false);
     }
   };
 
-  const handleManifestView = (id: string) => {
-    logAction(`Se abrió el manifiesto de la transferencia ${id}`);
+  const handleResetFilters = () => {
+    setFilters(defaultFilters);
+    setSearchInput(defaultFilters.search);
   };
 
-  const handleResolveQuarantine = (id: string) => {
-    setQuarantine((current) => current.filter((item) => item.id !== id));
-    setItems((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, status: "available" } : item,
-      ),
-    );
-    logAction(`Caso de cuarentena ${id} liberado`);
+  const handleRefresh = () => {
+    fetchInventory(filters);
   };
 
-  const handleEscalateQuarantine = (id: string) => {
-    setQuarantine((current) =>
-      current.map((item) =>
-        item.id === id
-          ? { ...item, assignedTo: `${item.assignedTo} · Supervisor` }
-          : item,
-      ),
-    );
-    logAction(`Cuarentena ${id} escalada a supervisor`);
+  const handleClearLabelSelection = () => {
+    setLabelConfig({});
+    setLabelPreview(null);
   };
 
-  const handleAdvanceCount = (
-    id: string,
-    next: CountSession["status"] | null,
-  ) => {
-    setCountSessions((current) =>
-      current.map((session) =>
-        session.id === id
-          ? {
-              ...session,
-              status: next ?? session.status,
-              progress: next === "posted" ? 100 : session.progress,
-            }
-          : session,
-      ),
-    );
-    if (next) {
-      logAction(`Conteo ${id} pasó a estado ${next}`);
+  const handlePrevPage = () => {
+    setFilters((previous) => ({ ...previous, page: Math.max(1, previous.page - 1) }));
+  };
+
+  const handleNextPage = () => {
+    if (!hasMore) {
+      return;
     }
+
+    setFilters((previous) => ({ ...previous, page: previous.page + 1 }));
   };
-
-  const handleOpenReconciliation = (id: string) => {
-    setCountSessions((current) =>
-      current.map((session) =>
-        session.id === id
-          ? { ...session, status: "reconciling", progress: Math.max(session.progress, 75) }
-          : session,
-      ),
-    );
-    logAction(`Se abrió reconciliación para el conteo ${id}`);
-  };
-
-  const toolbar = (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-      <div className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-white px-3 py-1 shadow-sm dark:border-slate-800/70 dark:bg-slate-950/40">
-        <input
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-          placeholder="Buscar SKU, categoría..."
-          className="w-48 bg-transparent text-xs text-slate-600 outline-none placeholder:text-slate-400 dark:text-slate-200 dark:placeholder:text-slate-500"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              setSearchTerm("");
-            }
-          }}
-        />
-      </div>
-      <div className="flex items-center gap-2">
-        {Object.entries(statusLabels).map(([value, label]) => (
-          <button
-            key={value}
-            onClick={() => toggleStatusFilter(value as InventoryItem["status"])}
-            className={`rounded-full border px-3 py-1 transition ${
-              statusFilters.includes(value as InventoryItem["status"]) ?
-                "border-sky-500 bg-sky-500/10 text-sky-700 dark:border-sky-500/70 dark:text-sky-300" :
-                "border-slate-300 text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className="flex items-center gap-1 rounded-full border border-slate-200/70 bg-white px-1 py-1 shadow-sm dark:border-slate-800/70 dark:bg-slate-950/40">
-        {channelFilters.map((channel) => (
-          <button
-            key={channel}
-            onClick={() => setChannelFilter(channel)}
-            className={`rounded-full px-3 py-1 text-xs transition ${
-              channelFilter === channel
-                ? "bg-sky-500 text-white"
-                : "text-slate-600 hover:text-slate-900 dark:text-slate-300"
-            }`}
-          >
-            {channel === "all" ? "Todos" : channel}
-          </button>
-        ))}
-      </div>
-      {selectedItemIds.length > 0 ? (
-        <div className="flex items-center gap-2 rounded-full border border-sky-400/60 bg-sky-500/10 px-3 py-1 text-[11px] text-sky-700 dark:border-sky-500/40 dark:text-sky-200">
-          <span>{selectedItemIds.length} seleccionados</span>
-          <button
-            className="rounded-full border border-sky-500/40 px-2 py-0.5 text-sky-600 transition hover:border-sky-500/60 hover:text-sky-700 dark:text-sky-200"
-            onClick={handleBulkTransfer}
-          >
-            Programar traslado
-          </button>
-          <button
-            className="rounded-full border border-transparent px-2 py-0.5 text-slate-500 hover:text-slate-700 dark:text-slate-300"
-            onClick={() => setSelectedItemIds([])}
-          >
-            Limpiar
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-
   return (
-    <div className="flex flex-col gap-6">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {summaryTiles.map((tile) => (
-          <div
-            key={tile.label}
-            className="flex flex-col gap-1 rounded-2xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50 px-4 py-3 text-xs text-slate-600 shadow-sm dark:border-slate-800/70 dark:from-slate-950/70 dark:to-slate-950/50 dark:text-slate-300"
-          >
-            <span className="uppercase tracking-wide text-[10px] text-slate-500 dark:text-slate-500">{tile.label}</span>
-            <span className={`text-sm font-semibold text-slate-900 dark:text-white ${tile.accent}`}>{tile.value}</span>
+    <div className="flex min-h-screen flex-col bg-slate-50">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-6 py-5">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-900">Inventario</h1>
+            <p className="text-sm text-slate-500">
+              Consulta existencias por sucursal, edita precios rápidamente y genera etiquetas QR.
+            </p>
           </div>
-        ))}
-      </section>
-
-      {activityLog.length > 0 ? (
-        <aside className="rounded-2xl border border-slate-200/70 bg-gradient-to-r from-white via-white to-slate-50 p-4 text-xs text-slate-600 shadow-sm dark:border-slate-800/70 dark:from-slate-950/60 dark:via-slate-950/50 dark:to-slate-900/60 dark:text-slate-300">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">
-            Bitácora rápida
-          </p>
-          <ul className="space-y-1">
-            {activityLog.map((entry, index) => (
-              <li key={`${entry}-${index}`} className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-sky-400 dark:bg-sky-300" />
-                <span>{entry}</span>
-              </li>
-            ))}
-          </ul>
-        </aside>
-      ) : null}
-
-      <div className="grid gap-6 xl:grid-cols-[1.75fr_1fr]">
-        <div className="flex flex-col gap-6">
-          <ItemsGrid
-            items={filteredItems}
-            toolbar={toolbar}
-            selectedIds={selectedItemIds}
-            onToggleSelect={handleToggleSelect}
-            onStatusChange={handleStatusChange}
-            onRequestTransfer={handleRequestTransfer}
-          />
-          <TransferPipeline
-            transfers={transfers}
-            onAdvance={handleAdvanceTransfer}
-            onViewManifest={handleManifestView}
-          />
-          <QuarantineQueue
-            items={quarantine}
-            onResolve={handleResolveQuarantine}
-            onEscalate={handleEscalateQuarantine}
-          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              <RefreshCcw className="h-4 w-4" />
+              Actualizar
+            </button>
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              <XCircle className="h-4 w-4" />
+              Limpiar filtros
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-6">
-          <ValueSnapshot metrics={valuationMetrics} />
-          <ReceiveWizard
-            shipments={shipments}
-            onAdvance={handleAdvanceShipment}
-            onTogglePhotos={handleTogglePhotos}
-          />
-          <CountsProgress
-            sessions={countSessions}
-            onAdvance={handleAdvanceCount}
-            onOpenReconciliation={handleOpenReconciliation}
-          />
-        </div>
-      </div>
+      </header>
+
+      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-6 py-6">
+        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between text-sm text-slate-500">
+              <span>SKUs únicos</span>
+              <Boxes className="h-4 w-4" />
+            </div>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">{numberFormatter.format(summary.totalSkus)}</p>
+          </article>
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between text-sm text-slate-500">
+              <span>Existencia</span>
+              <PackageCheck className="h-4 w-4" />
+            </div>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">
+              {numberFormatter.format(summary.totalQtyOnHand)}
+            </p>
+          </article>
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between text-sm text-slate-500">
+              <span>Reservado</span>
+              <PackageMinus className="h-4 w-4" />
+            </div>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">
+              {numberFormatter.format(summary.totalReserved)}
+            </p>
+          </article>
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between text-sm text-slate-500">
+              <span>Disponible</span>
+              <PackagePlus className="h-4 w-4" />
+            </div>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">
+              {numberFormatter.format(summary.totalAvailable)}
+            </p>
+          </article>
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between text-sm text-slate-500">
+              <span>Valor retail</span>
+              <Tag className="h-4 w-4" />
+            </div>
+            <p className="mt-2 text-2xl font-semibold text-slate-900">
+              {formatCurrencyFromCents(summary.totalRetailValueCents)}
+            </p>
+          </article>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-1 flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="Buscar por nombre, código o SKU"
+                  className="w-full rounded-md border border-slate-200 py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+
+              <select
+                value={filters.branchId === "all" ? "all" : String(filters.branchId)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setFilters((previous) => ({
+                    ...previous,
+                    branchId: value === "all" ? "all" : Number(value),
+                    page: 1,
+                  }));
+                }}
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-48"
+              >
+                <option value="all">Todas las sucursales</option>
+                {branchOptions.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filters.categoryId === "all" ? "all" : String(filters.categoryId)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setFilters((previous) => ({
+                    ...previous,
+                    categoryId: value === "all" ? "all" : Number(value),
+                    page: 1,
+                  }));
+                }}
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-48"
+              >
+                <option value="all">Todas las categorías</option>
+                {categoryOptions.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filters.status}
+                onChange={(event) =>
+                  setFilters((previous) => ({
+                    ...previous,
+                    status: event.target.value as InventoryFilters["status"],
+                    page: 1,
+                  }))
+                }
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-36"
+              >
+                {statusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filters.availability}
+                onChange={(event) =>
+                  setFilters((previous) => ({
+                    ...previous,
+                    availability: event.target.value as InventoryFilters["availability"],
+                    page: 1,
+                  }))
+                }
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-40"
+              >
+                {availabilityOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              {filters.availability === "low_stock" && (
+                <input
+                  type="number"
+                  min={1}
+                  value={filters.lowStockThreshold}
+                  onChange={(event) =>
+                    setFilters((previous) => ({
+                      ...previous,
+                      lowStockThreshold: Math.max(1, Math.round(Number(event.target.value) || 1)),
+                      page: 1,
+                    }))
+                  }
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-28"
+                  placeholder="Umbral"
+                />
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+              <select
+                value={filters.sortField}
+                onChange={(event) =>
+                  setFilters((previous) => ({
+                    ...previous,
+                    sortField: event.target.value as InventoryFilters["sortField"],
+                    page: 1,
+                  }))
+                }
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-40"
+              >
+                {sortFieldOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    Orden: {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filters.sortDirection}
+                onChange={(event) =>
+                  setFilters((previous) => ({
+                    ...previous,
+                    sortDirection: event.target.value as InventoryFilters["sortDirection"],
+                    page: 1,
+                  }))
+                }
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-28"
+              >
+                {sortDirectionOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filters.pageSize}
+                onChange={(event) =>
+                  setFilters((previous) => ({
+                    ...previous,
+                    pageSize: Number(event.target.value),
+                    page: 1,
+                  }))
+                }
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-28"
+              >
+                {pageSizeOptions.map((size) => (
+                  <option key={size} value={size}>
+                    {size}/pág
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </section>
+
+        {flashMessage && (
+          <div
+            className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+              flashMessage.tone === "success"
+                ? "border-green-200 bg-green-50 text-green-700"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
+          >
+            {flashMessage.tone === "success" ? (
+              <CheckCircle2 className="h-4 w-4" />
+            ) : (
+              <AlertCircle className="h-4 w-4" />
+            )}
+            <span>{flashMessage.message}</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="relative">
+            {loading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/70">
+                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                <span className="text-sm font-medium text-blue-600">Actualizando inventario…</span>
+              </div>
+            )}
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Etiquetas
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Producto
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Sucursal
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Precio
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Costo
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Existencia
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Reservado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Disponible
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Estado
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Actualizado
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {items.map((item) => (
+                  <tr
+                    key={item.productCodeVersionId}
+                    className={!item.isActive ? "bg-slate-50" : undefined}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-slate-300"
+                          checked={Boolean(labelConfig[item.productCodeVersionId])}
+                          onChange={() => handleToggleLabel(item.productCodeVersionId)}
+                        />
+                        {labelConfig[item.productCodeVersionId] && (
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={labelConfig[item.productCodeVersionId]}
+                            onChange={(event) =>
+                              handleLabelQuantityChange(item.productCodeVersionId, event.target.value)
+                            }
+                            className="w-16 rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          />
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-900">{item.code}</div>
+                      <div className="text-sm text-slate-600">{item.name}</div>
+                      <div className="text-xs text-slate-400">
+                        SKU: {item.sku ?? "—"} · {item.categoryName ?? "Sin categoría"}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-medium text-slate-900">
+                        {item.branchName ?? `Sucursal ${item.branchId}`}
+                      </div>
+                      <div className="text-xs text-slate-500">ID {item.branchId}</div>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-900">
+                      {item.priceCents != null ? formatCurrencyFromCents(item.priceCents) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-700">
+                      {item.costCents != null ? formatCurrencyFromCents(item.costCents) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-900">
+                      {numberFormatter.format(item.qtyOnHand)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-700">
+                      {numberFormatter.format(item.qtyReserved)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-900">
+                      {numberFormatter.format(item.availableQty)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                          item.isActive
+                            ? "bg-green-100 text-green-700"
+                            : "bg-slate-200 text-slate-600"
+                        }`}
+                      >
+                        {item.isActive ? "Activo" : "Inactivo"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {item.updatedAt ? dateTimeFormatter.format(new Date(item.updatedAt)) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleStartEdit(item)}
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                        Editar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!loading && items.length === 0 && (
+              <div className="px-4 py-6 text-center text-sm text-slate-500">
+                No se encontraron productos con los filtros seleccionados.
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
+            <span>
+              Mostrando {items.length} resultados · Página {currentPage}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handlePrevPage}
+                disabled={currentPage <= 1}
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Anterior
+              </button>
+              <span className="px-2 text-slate-500">{currentPage}</span>
+              <button
+                type="button"
+                onClick={handleNextPage}
+                disabled={!hasMore}
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Siguiente
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {editingItem && editForm && (
+          <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-blue-900">
+                  Edición rápida: {editingItem.code}
+                </h2>
+                <p className="text-sm text-blue-700">
+                  {editingItem.branchName ?? `Sucursal ${editingItem.branchId}`} · SKU {editingItem.sku ?? "—"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                disabled={savingEdit}
+                className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <XCircle className="h-4 w-4" />
+                Cancelar
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <label className="flex flex-col gap-1 text-sm text-blue-900 md:col-span-2">
+                Nombre
+                <input
+                  required
+                  value={editForm.name}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, name: event.target.value } : previous
+                    )
+                  }
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-blue-900">
+                SKU
+                <input
+                  value={editForm.sku}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, sku: event.target.value } : previous
+                    )
+                  }
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-blue-900 md:col-span-2">
+                Descripción
+                <textarea
+                  rows={3}
+                  value={editForm.description}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, description: event.target.value } : previous
+                    )
+                  }
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-blue-900">
+                Categoría
+                <select
+                  value={editForm.categoryId}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, categoryId: event.target.value } : previous
+                    )
+                  }
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                >
+                  <option value="">Sin categoría</option>
+                  {categoryOptions.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-blue-900">
+                Precio (RD$)
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={editForm.price}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, price: event.target.value } : previous
+                    )
+                  }
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-blue-900">
+                Costo (RD$)
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={editForm.cost}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, cost: event.target.value } : previous
+                    )
+                  }
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-blue-900">
+                Existencia
+                <input
+                  type="number"
+                  min={0}
+                  step="1"
+                  value={editForm.qtyOnHand}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, qtyOnHand: event.target.value } : previous
+                    )
+                  }
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-blue-900">
+                Reservado
+                <input
+                  type="number"
+                  min={0}
+                  step="1"
+                  value={editForm.qtyReserved}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, qtyReserved: event.target.value } : previous
+                    )
+                  }
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </label>
+
+              <label className="flex items-center gap-2 text-sm text-blue-900">
+                <input
+                  type="checkbox"
+                  checked={editForm.isActive}
+                  onChange={(event) =>
+                    setEditForm((previous) =>
+                      previous ? { ...previous, isActive: event.target.checked } : previous
+                    )
+                  }
+                  className="h-4 w-4 rounded border-blue-200"
+                />
+                Activo en la sucursal
+              </label>
+
+              <div className="md:col-span-3 flex items-center justify-end gap-3">
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {savingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Guardar cambios
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Etiquetas QR</h2>
+              <p className="text-sm text-slate-500">
+                Selecciona artículos en la tabla y genera etiquetas listas para impresión.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center">
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={includePriceOnLabels}
+                  onChange={(event) => setIncludePriceOnLabels(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                Incluir precio
+              </label>
+              <input
+                type="text"
+                value={labelNote}
+                onChange={(event) => setLabelNote(event.target.value)}
+                placeholder="Nota opcional"
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-48"
+              />
+              <div className="text-sm font-medium text-slate-600">
+                Seleccionados: {selectedLabelCount}
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateLabels}
+                disabled={selectedLabelCount === 0}
+                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Printer className="h-4 w-4" />
+                Generar etiquetas
+              </button>
+              <button
+                type="button"
+                onClick={handleClearLabelSelection}
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Limpiar selección
+              </button>
+            </div>
+          </div>
+
+          {labelError && (
+            <div className="mt-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <AlertCircle className="h-4 w-4" />
+              <span>{labelError}</span>
+            </div>
+          )}
+
+          {labelPreview && (
+            <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <span>Total etiquetas: {labelPreview.totalLabels}</span>
+                <span>Generado: {dateTimeFormatter.format(new Date(labelPreview.generatedAt))}</span>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {labelPreview.labels.slice(0, 6).map((label) => (
+                  <div
+                    key={`${label.productCodeVersionId}-${label.qrPayload}`}
+                    className="rounded-md bg-white p-3 shadow-sm"
+                  >
+                    <p className="text-sm font-semibold text-slate-900">
+                      {label.code} · {label.name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {label.branchName ?? `Sucursal ${label.branchId}`}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">QR: {label.qrPayload}</p>
+                    {label.priceCents != null && (
+                      <p className="mt-1 text-sm font-medium text-slate-900">
+                        {formatCurrencyFromCents(label.priceCents)}
+                      </p>
+                    )}
+                    {label.note && <p className="mt-1 text-xs text-slate-500">Nota: {label.note}</p>}
+                  </div>
+                ))}
+              </div>
+              {labelPreview.labels.length > 6 && (
+                <p className="mt-3 text-xs text-slate-500">
+                  Se muestran 6 de {labelPreview.labels.length} etiquetas. Usa el JSON para tu flujo de impresión.
+                </p>
+              )}
+              <details className="mt-3">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                  Ver JSON completo
+                </summary>
+                <pre className="mt-2 max-h-64 overflow-auto rounded bg-slate-900/90 p-3 text-xs text-slate-100">
+                  {JSON.stringify(labelPreview, null, 2)}
+                </pre>
+              </details>
+            </div>
+          )}
+        </section>
+      </main>
     </div>
   );
 }
+
+export default InventoryPage;

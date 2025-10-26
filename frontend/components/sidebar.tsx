@@ -6,14 +6,17 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeftRight,
+  ArrowRightLeft,
   BadgeDollarSign,
   BarChart3,
   Boxes,
+  ClipboardList,
   Clock,
   Cog,
   FileText,
   Gift,
   GitBranch,
+  Globe,
   HandCoins,
   Handshake,
   Hourglass,
@@ -21,6 +24,7 @@ import {
   LayoutDashboard,
   Megaphone,
   PackagePlus,
+  PackageSearch,
   QrCode,
   ShoppingBag,
   ShoppingCart,
@@ -78,6 +82,15 @@ const sections: NavSection[] = [
       { name: "Ops", href: "/inventory/ops", icon: FileText },
       { name: "Split & combine", href: "/inventory/split-combine", icon: GitBranch },
       { name: "Barcode", href: "/inventory/barcode", icon: QrCode },
+    ],
+  },
+  {
+    title: "E-Commerce",
+    items: [
+      { name: "Channels", href: "/ecom/channels", icon: Globe },
+      { name: "Listings", href: "/ecom/products", icon: PackageSearch },
+      { name: "Orders", href: "/ecom/orders", icon: ClipboardList },
+      { name: "Returns", href: "/ecom/returns", icon: ArrowRightLeft },
     ],
   },
   {
