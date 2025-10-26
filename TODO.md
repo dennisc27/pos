@@ -21,14 +21,14 @@
 - [x] Cash & Shifts - Shifts (/backend/app/cash/shift) - BE - Compute expected vs actual; persist shift_reports.snapshot
 - [x] Cash & Shifts - Shifts (/frontend/app/cash/shift) - FE - Denomination counter; drawer actions; Z-report list
 - [x] Cash & Shifts - Shifts (/cash/shift) - AC - Over/short computed; discrepancy > threshold flagged
-- [ ] Cash & Shifts - Movements (/backend/app/cash/movements) - BE - POST /api/cash-movements (kinds: deposit, cash_to_safe, drop, paid_in, paid_out, expense, income)
-- [ ] Cash & Shifts - Movements (/frontend/app/cash/movements) - FE - Movement form + table filtered to current shift
-- [ ] Cash & Shifts - Movements (/cash/movements) - AC - Movement appears in shift end totals
-- [ ] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - GET /api/interest-models
-- [ ] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - POST /api/loans + collateral (photos paths) + schedule
-- [ ] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - Signed URL flow for id_images (server signs, FE uploads)
-- [ ] Loans/Pawns - New Loan (/frontend/app/loans/new) - FE - Wizard steps: customer -> id_capture -> collateral -> terms -> ticket_print
-- [ ] Loans/Pawns - New Loan (/loans/new) - AC - Ticket number unique; schedule stores interest rows
+- [x] Cash & Shifts - Movements (/backend/app/cash/movements) - BE - POST /api/cash-movements (kinds: deposit, cash_to_safe, drop, paid_in, paid_out, expense, income)
+- [x] Cash & Shifts - Movements (/frontend/app/cash/movements) - FE - Movement form + table filtered to current shift
+- [x] Cash & Shifts - Movements (/cash/movements) - AC - Movement appears in shift end totals
+- [x] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - GET /api/interest-models
+- [x] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - POST /api/loans + collateral (photos paths) + schedule
+- [x] Loans/Pawns - New Loan (/backend/app/loans/new) - BE - Signed URL flow for id_images (server signs, FE uploads)
+- [x] Loans/Pawns - New Loan (/frontend/app/loans/new) - FE - Wizard steps: customer -> id_capture -> collateral -> terms -> ticket_print
+- [x] Loans/Pawns - New Loan (/loans/new) - AC - Ticket number unique; schedule stores interest rows
 - [ ] Loans/Pawns - Loan Detail (/backend/app/loans/:id) - BE - GET /api/loans/:id (header, schedule, balance, history)
 - [ ] Loans/Pawns - Loan Detail (/backend/app/loans/:id) - BE - POST /api/loans/:id/pay (interest/advance)
 - [ ] Loans/Pawns - Loan Detail (/backend/app/loans/:id) - BE - POST /api/loans/:id/renew|redeem|extension|rewrite

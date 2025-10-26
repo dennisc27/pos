@@ -11,7 +11,11 @@ import {
   creditNotes,
   giftCardLedger,
   giftCards,
+  interestModels,
   invoices,
+  idImages,
+  loanCollateral,
+  loanSchedules,
   orderItems,
   orders,
   payments,
@@ -22,7 +26,7 @@ import {
   stockLedger,
   users,
 } from './db/schema.js';
-import { and, desc, eq, isNull, like, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, like, or, sql } from 'drizzle-orm';
 
 // Load environment variables
 dotenv.config();
@@ -113,6 +117,86 @@ const cashMovementDirection = {
   income: 1,
 };
 
+const manualMovementKinds = new Set([
+  'deposit',
+  'cash_to_safe',
+  'drop',
+  'paid_in',
+  'paid_out',
+  'expense',
+  'income',
+]);
+
+const allowedIdImageContentTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+
+const uploadSigningSecret = process.env.UPLOAD_SIGNING_SECRET || process.env.APP_SECRET || 'change-me';
+const uploadBaseUrl = (process.env.UPLOAD_BASE_URL || 'https://uploads.local/ingest').replace(/\/$/, '');
+const uploadPublicUrl = (process.env.UPLOAD_PUBLIC_URL || 'https://uploads.local/files').replace(/\/$/, '');
+const maxUploadExpirySeconds = Math.max(60, Math.min(Number(process.env.UPLOAD_URL_MAX_AGE ?? 900), 3600));
+const maxIdImageBytes = Math.max(256000, Number(process.env.ID_IMAGE_MAX_BYTES ?? 5 * 1024 * 1024));
+
+function extensionForContentType(contentType) {
+  switch (contentType) {
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/png':
+      return 'png';
+    case 'image/webp':
+      return 'webp';
+    case 'image/heic':
+      return 'heic';
+    case 'image/heif':
+      return 'heif';
+    default:
+      return null;
+  }
+}
+
+function sanitizeBaseFileName(name) {
+  if (typeof name !== 'string') {
+    return 'id-image';
+  }
+
+  const trimmed = name.trim().toLowerCase();
+  if (!trimmed) {
+    return 'id-image';
+  }
+
+  const withoutExt = trimmed.replace(/\.[^.]+$/, '');
+  const sanitized = withoutExt.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return sanitized || 'id-image';
+}
+
+function buildIdImageStoragePath(originalFileName, contentType) {
+  const ext = extensionForContentType(contentType);
+  if (!ext) {
+    throw new HttpError(400, 'Unsupported content type');
+  }
+
+  const baseName = sanitizeBaseFileName(originalFileName);
+  const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+  const randomSuffix = crypto.randomBytes(8).toString('hex');
+  return `id-images/${timestamp}-${randomSuffix}-${baseName}.${ext}`;
+}
+
+function signUploadPayload(path, contentType, expiresAtIso) {
+  const payload = `${path}:${contentType}:${expiresAtIso}`;
+  return crypto.createHmac('sha256', uploadSigningSecret).update(payload).digest('hex');
+}
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
 function parseAmount(amount) {
   const normalized = Number(amount);
 
@@ -123,14 +207,172 @@ function parseAmount(amount) {
   return Math.round(normalized);
 }
 
+function normalizeReasonInput(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+async function recordShiftMovement({
+  shiftId,
+  performerId,
+  pin,
+  amountCents,
+  reason,
+  kind,
+  direction,
+}) {
+  const amount = Number(amountCents);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new HttpError(400, 'amountCents must be a positive number');
+  }
+
+  if (!Number.isInteger(shiftId) || shiftId <= 0) {
+    throw new HttpError(400, 'shiftId must be a positive number');
+  }
+
+  if (!Number.isInteger(performerId) || performerId <= 0) {
+    throw new HttpError(400, 'performedBy must be a positive number');
+  }
+
+  if (!pin) {
+    throw new HttpError(400, 'pin is required');
+  }
+
+  if (typeof direction !== 'number') {
+    throw new HttpError(400, 'Unsupported cash movement kind');
+  }
+
+  if (direction < 0 && !reason) {
+    const formattedKind = typeof kind === 'string' ? kind.replace(/_/g, ' ') : 'this';
+    throw new HttpError(400, `reason is required for ${formattedKind} movements`);
+  }
+
+  const [shift] = await db
+    .select(shiftSelection)
+    .from(shifts)
+    .where(eq(shifts.id, shiftId))
+    .limit(1);
+
+  if (!shift) {
+    throw new HttpError(404, 'Shift not found');
+  }
+
+  if (shift.closedAt) {
+    throw new HttpError(409, 'Shift is already closed');
+  }
+
+  const [user] = await db
+    .select({ id: users.id, branchId: users.branchId, pinHash: users.pinHash })
+    .from(users)
+    .where(eq(users.id, performerId))
+    .limit(1);
+
+  if (!user) {
+    throw new HttpError(404, 'User not found');
+  }
+
+  if (Number(user.branchId) !== Number(shift.branchId)) {
+    throw new HttpError(403, 'User is not assigned to this branch');
+  }
+
+  if (!verifyPin(pin, user.pinHash)) {
+    throw new HttpError(403, 'Invalid PIN');
+  }
+
+  const baseExpected = Number(shift.expectedCashCents ?? shift.openingCashCents ?? 0);
+  const nextExpected = baseExpected + direction * amount;
+
+  if (nextExpected < 0) {
+    throw new HttpError(400, 'Movement would result in negative expected cash');
+  }
+
+  const result = await db.transaction(async (tx) => {
+    await tx.insert(cashMovements).values({
+      shiftId,
+      kind,
+      amountCents: amount,
+      reason,
+    });
+
+    await tx
+      .update(shifts)
+      .set({ expectedCashCents: nextExpected })
+      .where(eq(shifts.id, shiftId));
+
+    const [[updatedShift], [movement]] = await Promise.all([
+      tx.select(shiftSelection).from(shifts).where(eq(shifts.id, shiftId)).limit(1),
+      tx
+        .select(cashMovementSelection)
+        .from(cashMovements)
+        .where(eq(cashMovements.shiftId, shiftId))
+        .orderBy(desc(cashMovements.id))
+        .limit(1),
+    ]);
+
+    if (!updatedShift || !movement) {
+      throw new Error('FAILED_TO_RECORD_MOVEMENT');
+    }
+
+    return { shift: updatedShift, movement };
+  });
+
+  return result;
+}
+
+async function loadShiftMovements(shiftId) {
+  const [shift] = await db
+    .select(shiftSelection)
+    .from(shifts)
+    .where(eq(shifts.id, shiftId))
+    .limit(1);
+
+  if (!shift) {
+    return null;
+  }
+
+  const movementRows = await db
+    .select(cashMovementSelection)
+    .from(cashMovements)
+    .where(eq(cashMovements.shiftId, shiftId))
+    .orderBy(desc(cashMovements.id));
+
+  const totalsByKind = movementRows.reduce((acc, row) => {
+    const key = row.kind;
+    const amount = Number(row.amountCents ?? 0);
+
+    if (!acc[key]) {
+      acc[key] = { totalCents: 0, count: 0 };
+    }
+
+    acc[key].totalCents += amount;
+    acc[key].count += 1;
+    return acc;
+  }, {});
+
+  const netMovementCents = movementRows.reduce((sum, row) => {
+    const direction = cashMovementDirection[row.kind] ?? 0;
+    return sum + direction * Number(row.amountCents ?? 0);
+  }, 0);
+
+  return {
+    shift,
+    movements: movementRows,
+    summary: {
+      totalsByKind,
+      netMovementCents,
+    },
+  };
+}
+
 function createShiftMovementHandler(kind, direction) {
   return async (req, res, next) => {
     try {
       const shiftId = Number(req.params.id);
-
-      if (!Number.isInteger(shiftId) || shiftId <= 0) {
-        return res.status(400).json({ error: 'Shift id must be a positive number' });
-      }
 
       const { amountCents, performedBy, pin, reason = null } = req.body ?? {};
 
@@ -140,94 +382,30 @@ function createShiftMovementHandler(kind, direction) {
 
       const performerId = Number(performedBy);
 
-      if (!Number.isInteger(performerId) || performerId <= 0) {
-        return res.status(400).json({ error: 'performedBy must be a positive number' });
-      }
-
       const amount = parseAmount(amountCents);
 
       if (amount === null) {
         return res.status(400).json({ error: 'amountCents must be a positive number' });
       }
 
-      const trimmedReason = typeof reason === 'string' ? reason.trim() : null;
-      const normalizedReason = trimmedReason && trimmedReason.length > 0 ? trimmedReason : null;
+      const normalizedReason = normalizeReasonInput(reason);
 
-      if (direction < 0 && !normalizedReason) {
-        return res.status(400).json({ error: 'reason is required for cash drops and paid out movements' });
-      }
-
-      const [shift] = await db
-        .select(shiftSelection)
-        .from(shifts)
-        .where(eq(shifts.id, shiftId))
-        .limit(1);
-
-      if (!shift) {
-        return res.status(404).json({ error: 'Shift not found' });
-      }
-
-      if (shift.closedAt) {
-        return res.status(409).json({ error: 'Shift is already closed' });
-      }
-
-      const [user] = await db
-        .select({ id: users.id, branchId: users.branchId, pinHash: users.pinHash })
-        .from(users)
-        .where(eq(users.id, performerId))
-        .limit(1);
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      if (Number(user.branchId) !== Number(shift.branchId)) {
-        return res.status(403).json({ error: 'User is not assigned to this branch' });
-      }
-
-      if (!verifyPin(pin, user.pinHash)) {
-        return res.status(403).json({ error: 'Invalid PIN' });
-      }
-
-      const baseExpected = Number(shift.expectedCashCents ?? shift.openingCashCents ?? 0);
-      const nextExpected = baseExpected + direction * amount;
-
-      if (nextExpected < 0) {
-        return res.status(400).json({ error: 'Movement would result in negative expected cash' });
-      }
-
-      const result = await db.transaction(async (tx) => {
-        await tx.insert(cashMovements).values({
-          shiftId,
-          kind,
-          amountCents: amount,
-          reason: normalizedReason,
-        });
-
-        await tx
-          .update(shifts)
-          .set({ expectedCashCents: nextExpected })
-          .where(eq(shifts.id, shiftId));
-
-        const [[updatedShift], [movement]] = await Promise.all([
-          tx.select(shiftSelection).from(shifts).where(eq(shifts.id, shiftId)).limit(1),
-          tx
-            .select(cashMovementSelection)
-            .from(cashMovements)
-            .where(eq(cashMovements.shiftId, shiftId))
-            .orderBy(desc(cashMovements.id))
-            .limit(1),
-        ]);
-
-        if (!updatedShift || !movement) {
-          throw new Error('FAILED_TO_RECORD_MOVEMENT');
-        }
-
-        return { shift: updatedShift, movement };
+      const result = await recordShiftMovement({
+        shiftId,
+        performerId,
+        pin,
+        amountCents: amount,
+        reason: normalizedReason,
+        kind,
+        direction,
       });
 
       res.status(201).json(result);
     } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+
       if (error instanceof Error && error.message === 'FAILED_TO_RECORD_MOVEMENT') {
         return res.status(500).json({ error: 'Unable to record cash movement' });
       }
@@ -338,7 +516,7 @@ app.post('/api/shifts/:id/close', async (req, res, next) => {
       return res.status(400).json({ error: 'Shift id must be a positive number' });
     }
 
-    const { closedBy, pin, closingCashCents, expectedCashCents = null } = req.body ?? {};
+    const { closedBy, pin, closingCashCents } = req.body ?? {};
 
     if (!closedBy || !pin) {
       return res.status(400).json({ error: 'closedBy and pin are required' });
@@ -504,6 +682,517 @@ app.post('/api/shifts/:id/close', async (req, res, next) => {
 app.post('/api/shifts/:id/drop', createShiftMovementHandler('drop', -1));
 app.post('/api/shifts/:id/paid-in', createShiftMovementHandler('paid_in', 1));
 app.post('/api/shifts/:id/paid-out', createShiftMovementHandler('paid_out', -1));
+
+app.get('/api/cash-movements', async (req, res, next) => {
+  try {
+    const shiftId = Number(req.query.shiftId);
+
+    if (!Number.isInteger(shiftId) || shiftId <= 0) {
+      return res.status(400).json({ error: 'shiftId query parameter is required' });
+    }
+
+    const data = await loadShiftMovements(shiftId);
+
+    if (!data) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/shifts/active', async (req, res, next) => {
+  try {
+    const branchId = Number(req.query.branchId);
+
+    if (!Number.isInteger(branchId) || branchId <= 0) {
+      return res.status(400).json({ error: 'branchId query parameter is required' });
+    }
+
+    const [shift] = await db
+      .select(shiftSelection)
+      .from(shifts)
+      .where(and(eq(shifts.branchId, branchId), isNull(shifts.closedAt)))
+      .orderBy(desc(shifts.id))
+      .limit(1);
+
+    if (!shift) {
+      return res.status(404).json({ error: 'No active shift found for branch' });
+    }
+
+    const data = await loadShiftMovements(shift.id);
+
+    if (!data) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+
+    res.json(data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/cash-movements', async (req, res, next) => {
+  try {
+    const { shiftId, kind, amountCents, performedBy, pin, reason = null } = req.body ?? {};
+
+    if (!shiftId) {
+      return res.status(400).json({ error: 'shiftId is required' });
+    }
+
+    if (!performedBy || !pin) {
+      return res.status(400).json({ error: 'performedBy and pin are required' });
+    }
+
+    const amount = parseAmount(amountCents);
+
+    if (amount === null) {
+      return res.status(400).json({ error: 'amountCents must be a positive number' });
+    }
+
+    const movementKind = typeof kind === 'string' ? kind.trim() : '';
+
+    if (!manualMovementKinds.has(movementKind)) {
+      return res.status(400).json({
+        error: 'kind must be one of deposit, cash_to_safe, drop, paid_in, paid_out, expense, or income',
+      });
+    }
+
+    const direction = cashMovementDirection[movementKind];
+    const normalizedReason = normalizeReasonInput(reason);
+
+    const result = await recordShiftMovement({
+      shiftId: Number(shiftId),
+      performerId: Number(performedBy),
+      pin,
+      amountCents: amount,
+      reason: normalizedReason,
+      kind: movementKind,
+      direction,
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    if (error instanceof Error && error.message === 'FAILED_TO_RECORD_MOVEMENT') {
+      return res.status(500).json({ error: 'Unable to record cash movement' });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/interest-models', async (req, res, next) => {
+  try {
+    const models = await db
+      .select({
+        id: interestModels.id,
+        name: interestModels.name,
+        description: interestModels.description,
+        rateType: interestModels.rateType,
+        periodDays: interestModels.periodDays,
+        interestRateBps: interestModels.interestRateBps,
+        graceDays: interestModels.graceDays,
+        minPrincipalCents: interestModels.minPrincipalCents,
+        maxPrincipalCents: interestModels.maxPrincipalCents,
+        lateFeeBps: interestModels.lateFeeBps,
+      })
+      .from(interestModels)
+      .orderBy(asc(interestModels.name));
+
+    res.json({ interestModels: models });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/loans', async (req, res, next) => {
+  try {
+    const {
+      branchId,
+      customerId,
+      ticketNumber,
+      interestModelId,
+      principalCents,
+      comments = null,
+      schedule = [],
+      collateral = [],
+      idImagePaths = [],
+    } = req.body ?? {};
+
+    if (branchId == null || customerId == null) {
+      return res.status(400).json({ error: 'branchId and customerId are required' });
+    }
+
+    const numericBranchId = Number(branchId);
+    const numericCustomerId = Number(customerId);
+
+    if (!Number.isInteger(numericBranchId) || numericBranchId <= 0) {
+      return res.status(400).json({ error: 'branchId must be a positive integer' });
+    }
+
+    if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
+      return res.status(400).json({ error: 'customerId must be a positive integer' });
+    }
+
+    if (!ticketNumber || typeof ticketNumber !== 'string' || !ticketNumber.trim()) {
+      return res.status(400).json({ error: 'ticketNumber is required' });
+    }
+
+    if (interestModelId == null) {
+      return res.status(400).json({ error: 'interestModelId is required' });
+    }
+
+    const numericInterestModelId = Number(interestModelId);
+
+    if (!Number.isInteger(numericInterestModelId) || numericInterestModelId <= 0) {
+      return res.status(400).json({ error: 'interestModelId must be a positive integer' });
+    }
+
+    const normalizedPrincipal = Number(principalCents);
+    if (!Number.isFinite(normalizedPrincipal) || normalizedPrincipal <= 0) {
+      return res.status(400).json({ error: 'principalCents must be greater than 0' });
+    }
+
+    if (!Array.isArray(schedule) || schedule.length === 0) {
+      return res.status(400).json({ error: 'schedule must include at least one entry' });
+    }
+
+    const normalizedTicket = ticketNumber.trim();
+    const normalizedSchedule = schedule.map((entry, index) => {
+      const dueOnValue = entry?.dueOn;
+      const interestValue = Number(entry?.interestCents);
+      const feeValue = Number(entry?.feeCents ?? 0);
+
+      if (!dueOnValue || typeof dueOnValue !== 'string') {
+        throw new HttpError(400, `schedule[${index}].dueOn is required`);
+      }
+
+      const dueOnDate = new Date(dueOnValue);
+
+      if (Number.isNaN(dueOnDate.getTime())) {
+        throw new HttpError(400, `schedule[${index}].dueOn is invalid`);
+      }
+
+      if (!Number.isFinite(interestValue) || interestValue <= 0) {
+        throw new HttpError(400, `schedule[${index}].interestCents must be greater than 0`);
+      }
+
+      if (!Number.isFinite(feeValue) || feeValue < 0) {
+        throw new HttpError(400, `schedule[${index}].feeCents must be zero or greater`);
+      }
+
+      const normalizedDueOn = dueOnDate.toISOString().slice(0, 10);
+
+      return {
+        dueOn: normalizedDueOn,
+        interestCents: Math.round(interestValue),
+        feeCents: Math.round(feeValue),
+      };
+    });
+
+    const normalizedCollateral = Array.isArray(collateral)
+      ? collateral
+          .filter((item) => item && typeof item === 'object')
+          .map((item, index) => {
+            const description = typeof item.description === 'string' ? item.description.trim() : '';
+
+            if (!description) {
+              throw new HttpError(400, `collateral[${index}].description is required`);
+            }
+
+            const valueCents = item.estimatedValueCents == null ? null : Number(item.estimatedValueCents);
+
+            if (valueCents != null && (!Number.isFinite(valueCents) || valueCents < 0)) {
+              throw new HttpError(400, `collateral[${index}].estimatedValueCents must be zero or greater`);
+            }
+
+            const photoPath = typeof item.photoPath === 'string' ? item.photoPath.trim() : null;
+
+            return {
+              description,
+              estimatedValueCents: valueCents == null ? null : Math.round(valueCents),
+              photoPath,
+            };
+          })
+      : [];
+
+    const normalizedIdImagePaths = Array.isArray(idImagePaths)
+      ? idImagePaths.map((value, index) => {
+          if (typeof value !== 'string') {
+            throw new HttpError(400, `idImagePaths[${index}] must be a string`);
+          }
+
+          const trimmed = value.trim();
+
+          if (!trimmed) {
+            throw new HttpError(400, `idImagePaths[${index}] cannot be empty`);
+          }
+
+          if (!trimmed.startsWith('id-images/')) {
+            throw new HttpError(400, `idImagePaths[${index}] must reference an id-images storage path`);
+          }
+
+          return trimmed;
+        })
+      : [];
+
+    const [model] = await db
+      .select({
+        id: interestModels.id,
+        name: interestModels.name,
+        interestRateBps: interestModels.interestRateBps,
+        minPrincipalCents: interestModels.minPrincipalCents,
+        maxPrincipalCents: interestModels.maxPrincipalCents,
+      })
+      .from(interestModels)
+      .where(eq(interestModels.id, numericInterestModelId))
+      .limit(1);
+
+    if (!model) {
+      return res.status(404).json({ error: 'Interest model not found' });
+    }
+
+    const roundedPrincipal = Math.round(normalizedPrincipal);
+
+    if (model.minPrincipalCents != null && roundedPrincipal < Number(model.minPrincipalCents)) {
+      return res.status(400).json({ error: 'principalCents is below the minimum for this model' });
+    }
+
+    if (model.maxPrincipalCents != null && roundedPrincipal > Number(model.maxPrincipalCents)) {
+      return res.status(400).json({ error: 'principalCents exceeds the maximum for this model' });
+    }
+
+    const [existingTicket] = await db
+      .select({ id: loans.id })
+      .from(loans)
+      .where(eq(loans.ticketNumber, normalizedTicket))
+      .limit(1);
+
+    if (existingTicket) {
+      return res.status(409).json({ error: 'Ticket number already exists' });
+    }
+
+    const dueDateString = normalizedSchedule.reduce((latest, entry) => {
+      return entry.dueOn > latest ? entry.dueOn : latest;
+    }, normalizedSchedule[0].dueOn);
+
+    const rateDecimal = (Number(model.interestRateBps) / 10000).toFixed(4);
+    const normalizedComments = typeof comments === 'string' && comments.trim().length > 0 ? comments.trim() : null;
+
+    const createdLoan = await db.transaction(async (tx) => {
+      await tx.insert(loans).values({
+        branchId: numericBranchId,
+        customerId: numericCustomerId,
+        ticketNumber: normalizedTicket,
+        principalCents: roundedPrincipal,
+        interestModelId: Number(model.id),
+        interestRate: rateDecimal,
+        dueDate: dueDateString,
+        comments: normalizedComments,
+      });
+
+      const [loanRow] = await tx
+        .select({
+          id: loans.id,
+          branchId: loans.branchId,
+          customerId: loans.customerId,
+          ticketNumber: loans.ticketNumber,
+          principalCents: loans.principalCents,
+          interestModelId: loans.interestModelId,
+          interestRate: loans.interestRate,
+          dueDate: loans.dueDate,
+          status: loans.status,
+          comments: loans.comments,
+          createdAt: loans.createdAt,
+          updatedAt: loans.updatedAt,
+        })
+        .from(loans)
+        .where(eq(loans.ticketNumber, normalizedTicket))
+        .limit(1);
+
+      if (!loanRow) {
+        throw new Error('FAILED_TO_CREATE_LOAN');
+      }
+
+      for (const entry of normalizedSchedule) {
+        await tx.insert(loanSchedules).values({
+          loanId: loanRow.id,
+          dueOn: entry.dueOn,
+          interestCents: entry.interestCents,
+          feeCents: entry.feeCents,
+        });
+      }
+
+      for (const item of normalizedCollateral) {
+        await tx.insert(loanCollateral).values({
+          loanId: loanRow.id,
+          description: item.description,
+          estimatedValueCents: item.estimatedValueCents,
+          photoPath: item.photoPath,
+        });
+      }
+
+      const collateralRows = await tx
+        .select({
+          id: loanCollateral.id,
+          loanId: loanCollateral.loanId,
+          description: loanCollateral.description,
+          estimatedValueCents: loanCollateral.estimatedValueCents,
+          photoPath: loanCollateral.photoPath,
+        })
+        .from(loanCollateral)
+        .where(eq(loanCollateral.loanId, loanRow.id));
+
+      const scheduleRows = await tx
+        .select({
+          id: loanSchedules.id,
+          loanId: loanSchedules.loanId,
+          dueOn: loanSchedules.dueOn,
+          interestCents: loanSchedules.interestCents,
+          feeCents: loanSchedules.feeCents,
+          createdAt: loanSchedules.createdAt,
+        })
+        .from(loanSchedules)
+        .where(eq(loanSchedules.loanId, loanRow.id))
+        .orderBy(asc(loanSchedules.dueOn));
+
+      if (normalizedIdImagePaths.length > 0) {
+        const existingImageRows = await tx
+          .select({ storagePath: idImages.storagePath })
+          .from(idImages)
+          .where(
+            and(
+              eq(idImages.customerId, loanRow.customerId),
+              inArray(idImages.storagePath, normalizedIdImagePaths)
+            )
+          );
+
+        const existingPaths = new Set(existingImageRows.map((row) => row.storagePath));
+
+        for (const path of normalizedIdImagePaths) {
+          if (!existingPaths.has(path)) {
+            await tx.insert(idImages).values({
+              customerId: loanRow.customerId,
+              storagePath: path,
+            });
+          }
+        }
+      }
+
+      return {
+        loan: loanRow,
+        collateral: collateralRows,
+        schedule: scheduleRows,
+        idImagePaths: normalizedIdImagePaths,
+      };
+    });
+
+    const formatDateValue = (value) => {
+      if (value instanceof Date) {
+        return value.toISOString().slice(0, 10);
+      }
+
+      if (typeof value === 'string') {
+        return value;
+      }
+
+      return null;
+    };
+
+    res.status(201).json({
+      loan: {
+        ...createdLoan.loan,
+        dueDate: formatDateValue(createdLoan.loan.dueDate),
+        createdAt: createdLoan.loan.createdAt?.toISOString?.() ?? createdLoan.loan.createdAt,
+        updatedAt: createdLoan.loan.updatedAt?.toISOString?.() ?? createdLoan.loan.updatedAt,
+      },
+      collateral: createdLoan.collateral.map((item) => ({
+        ...item,
+        estimatedValueCents: item.estimatedValueCents == null ? null : Number(item.estimatedValueCents),
+      })),
+      schedule: createdLoan.schedule.map((entry) => ({
+        ...entry,
+        dueOn: formatDateValue(entry.dueOn),
+        createdAt: entry.createdAt?.toISOString?.() ?? entry.createdAt,
+      })),
+      idImagePaths: createdLoan.idImagePaths,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    if (error instanceof Error && error.message === 'FAILED_TO_CREATE_LOAN') {
+      return res.status(500).json({ error: 'Unable to create loan' });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/uploads/id-images/sign', (req, res) => {
+  const { fileName = 'id-image', contentType, expiresInSeconds = 300, contentLength = null } = req.body ?? {};
+
+  if (!contentType || typeof contentType !== 'string') {
+    return res.status(400).json({ error: 'contentType is required' });
+  }
+
+  const normalizedContentType = contentType.toLowerCase();
+
+  if (!allowedIdImageContentTypes.has(normalizedContentType)) {
+    return res.status(415).json({ error: 'Unsupported content type' });
+  }
+
+  if (contentLength != null) {
+    const numericLength = Number(contentLength);
+    if (!Number.isFinite(numericLength) || numericLength <= 0) {
+      return res.status(400).json({ error: 'contentLength must be a positive number when provided' });
+    }
+
+    if (numericLength > maxIdImageBytes) {
+      return res.status(413).json({ error: 'contentLength exceeds the allowed limit' });
+    }
+  }
+
+  const requestedExpiry = Number(expiresInSeconds);
+  const expirySeconds = Number.isFinite(requestedExpiry) && requestedExpiry > 0
+    ? Math.min(Math.max(60, Math.round(requestedExpiry)), maxUploadExpirySeconds)
+    : Math.min(300, maxUploadExpirySeconds);
+
+  const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+  const expiresAtIso = expiresAt.toISOString();
+  const storagePath = buildIdImageStoragePath(fileName, normalizedContentType);
+  const signature = signUploadPayload(storagePath, normalizedContentType, expiresAtIso);
+
+  const uploadUrl = `${uploadBaseUrl}/${storagePath}`;
+  const publicUrl = `${uploadPublicUrl}/${storagePath}`;
+
+  return res.json({
+    upload: {
+      url: uploadUrl,
+      method: 'PUT',
+      headers: {
+        'Content-Type': normalizedContentType,
+        'x-upload-signature': signature,
+        'x-upload-expires': expiresAtIso,
+      },
+      expiresAt: expiresAtIso,
+      maxBytes: maxIdImageBytes,
+    },
+    asset: {
+      path: storagePath,
+      url: publicUrl,
+      contentType: normalizedContentType,
+    },
+    signature,
+  });
+});
 
 app.get('/api/products', async (req, res, next) => {
   try {

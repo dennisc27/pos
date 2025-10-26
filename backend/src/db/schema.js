@@ -1,16 +1,17 @@
-import { 
-  bigint, 
-  boolean, 
-  char, 
-  datetime, 
-  decimal, 
-  int, 
-  json, 
-  mysqlEnum, 
-  mysqlTable, 
-  text, 
-  timestamp, 
-  varchar 
+import {
+  bigint,
+  boolean,
+  char,
+  date,
+  datetime,
+  decimal,
+  int,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar
 } from 'drizzle-orm/mysql-core';
 
 // ========= ORG & AUTH =========
@@ -177,6 +178,13 @@ export const customers = mysqlTable('customers', {
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
 
+export const idImages = mysqlTable('id_images', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  customerId: bigint('customer_id', { mode: 'number' }).notNull(),
+  storagePath: varchar('storage_path', { length: 512 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // ========= LOANS/PAWNS =========
 export const loans = mysqlTable('loans', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
@@ -184,11 +192,61 @@ export const loans = mysqlTable('loans', {
   customerId: bigint('customer_id', { mode: 'number' }).notNull(),
   ticketNumber: varchar('ticket_number', { length: 40 }).unique().notNull(),
   principalCents: bigint('principal_cents', { mode: 'number' }).notNull(),
+  interestModelId: bigint('interest_model_id', { mode: 'number' }).notNull(),
   interestRate: decimal('interest_rate', { precision: 5, scale: 4 }).notNull(),
-  dueDate: datetime('due_date').notNull(),
+  dueDate: date('due_date').notNull(),
   status: mysqlEnum('status', ['active', 'renewed', 'redeemed', 'forfeited']).default('active'),
+  comments: text('comments'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const interestModels = mysqlTable('interest_models', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  name: varchar('name', { length: 120 }).notNull(),
+  description: text('description'),
+  rateType: mysqlEnum('rate_type', ['flat', 'simple', 'compound']).default('simple'),
+  periodDays: int('period_days').default(30).notNull(),
+  interestRateBps: int('interest_rate_bps').notNull(),
+  graceDays: int('grace_days').default(0),
+  minPrincipalCents: bigint('min_principal_cents', { mode: 'number' }).default(0),
+  maxPrincipalCents: bigint('max_principal_cents', { mode: 'number' }),
+  lateFeeBps: int('late_fee_bps').default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const loanCollateral = mysqlTable('loan_collateral', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  loanId: bigint('loan_id', { mode: 'number' }).notNull(),
+  description: text('description').notNull(),
+  estimatedValueCents: bigint('estimated_value_cents', { mode: 'number' }),
+  photoPath: varchar('photo_path', { length: 512 }),
+});
+
+export const loanSchedules = mysqlTable('loan_schedules', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  loanId: bigint('loan_id', { mode: 'number' }).notNull(),
+  dueOn: date('due_on').notNull(),
+  interestCents: bigint('interest_cents', { mode: 'number' }).notNull(),
+  feeCents: bigint('fee_cents', { mode: 'number' }).default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const loanPayments = mysqlTable('loan_payments', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  loanId: bigint('loan_id', { mode: 'number' }).notNull(),
+  kind: mysqlEnum('kind', ['interest', 'advance', 'redeem', 'renew', 'extension']).notNull(),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  method: mysqlEnum('method', ['cash', 'card', 'transfer']).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const loanForfeitures = mysqlTable('loan_forfeitures', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  loanId: bigint('loan_id', { mode: 'number' }).notNull(),
+  codeId: bigint('code_id', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
 });
 
 // ========= LAYAWAYS =========
