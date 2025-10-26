@@ -136,6 +136,26 @@ export const orderItems = mysqlTable('order_items', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+export const invoices = mysqlTable('invoices', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  orderId: bigint('order_id', { mode: 'number' }).notNull(),
+  invoiceNo: varchar('invoice_no', { length: 64 }),
+  totalCents: bigint('total_cents', { mode: 'number' }).notNull(),
+  taxCents: bigint('tax_cents', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const payments = mysqlTable('payments', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  orderId: bigint('order_id', { mode: 'number' }),
+  invoiceId: bigint('invoice_id', { mode: 'number' }),
+  shiftId: bigint('shift_id', { mode: 'number' }),
+  method: mysqlEnum('method', ['cash', 'card', 'transfer', 'gift_card', 'credit_note']).notNull(),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  meta: json('meta'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // ========= CUSTOMERS =========
 export const customers = mysqlTable('customers', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
@@ -201,6 +221,40 @@ export const stockLedger = mysqlTable('stock_ledger', {
   referenceId: bigint('reference_id', { mode: 'number' }),
   referenceType: varchar('reference_type', { length: 40 }),
   notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const giftCards = mysqlTable('gift_cards', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  code: varchar('code', { length: 32 }).notNull(),
+  balanceCents: bigint('balance_cents', { mode: 'number' }).notNull(),
+  expiresOn: datetime('expires_on'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const giftCardLedger = mysqlTable('gift_card_ledger', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  giftCardId: bigint('gift_card_id', { mode: 'number' }).notNull(),
+  deltaCents: bigint('delta_cents', { mode: 'number' }).notNull(),
+  refTable: varchar('ref_table', { length: 40 }),
+  refId: bigint('ref_id', { mode: 'number' }),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const creditNotes = mysqlTable('credit_notes', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  customerId: bigint('customer_id', { mode: 'number' }).notNull(),
+  balanceCents: bigint('balance_cents', { mode: 'number' }).notNull(),
+  reason: text('reason'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const creditNoteLedger = mysqlTable('credit_note_ledger', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  creditNoteId: bigint('credit_note_id', { mode: 'number' }).notNull(),
+  deltaCents: bigint('delta_cents', { mode: 'number' }).notNull(),
+  refTable: varchar('ref_table', { length: 40 }),
+  refId: bigint('ref_id', { mode: 'number' }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

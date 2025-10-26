@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AppWindow,
   Camera,
@@ -19,6 +19,9 @@ import {
 
 import { ProductGallery } from "@/components/pos/product-gallery";
 import { OrderPanel } from "@/components/pos/order-panel";
+import { ReceiptPreview } from "@/components/pos/receipt-preview";
+import { TenderPanel } from "@/components/pos/tender-panel";
+import { formatCurrency } from "@/components/pos/utils";
 import type { CartLine, SaleSummary, TenderBreakdown, Product, ProductCategory } from "@/components/pos/types";
 
 const TENDER_METHODS = ["cash", "card", "transfer", "store_credit", "gift"] as const;
@@ -42,6 +45,14 @@ const TENDER_DEFAULT_STATUS: Record<TenderMethod, TenderBreakdown["status"]> = {
 };
 
 const DEFAULT_TAX_RATE = 0.18;
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const PAYMENT_METHOD_MAP: Record<TenderBreakdown["method"], "cash" | "card" | "transfer" | "gift_card" | "credit_note"> = {
+  cash: "cash",
+  card: "card",
+  transfer: "transfer",
+  store_credit: "credit_note",
+  gift: "gift_card",
+};
 
 const productCategories: ProductCategory[] = [
   { id: "all", label: "All categories", icon: AppWindow },
@@ -226,6 +237,47 @@ export default function PosPage() {
   const [customerName, setCustomerName] = useState("Walk-in customer");
   const [customerDialogMode, setCustomerDialogMode] = useState<"change" | "add" | null>(null);
   const [customerInput, setCustomerInput] = useState("");
+  const [scanInput, setScanInput] = useState("");
+  const [scanStatus, setScanStatus] = useState<string | null>(null);
+  const [validationState, setValidationState] = useState<"idle" | "validating" | "success" | "error">("idle");
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
+  const [isTenderModalOpen, setTenderModalOpen] = useState(false);
+  const [cashTenderInput, setCashTenderInput] = useState("");
+  const [finalizeState, setFinalizeState] = useState<"idle" | "processing" | "success" | "error">("idle");
+  const [finalizeMessage, setFinalizeMessage] = useState<string | null>(null);
+
+  const resolveProductVersionId = useCallback((productId: string) => {
+    const numeric = Number.parseInt(productId.replace(/\D/g, ""), 10);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
+  }, []);
+
+  const createLineFromProduct = useCallback((product: Product): CartLine => ({
+    id: product.id,
+    name: product.name,
+    sku: product.sku,
+    qty: 1,
+    price: product.price,
+    listPrice: product.price,
+    taxRate: DEFAULT_TAX_RATE,
+    variant: product.variant,
+    status: product.highlight ? "featured" : undefined
+  }), []);
+
+  const addProductToCart = useCallback(
+    (product: Product) => {
+      setCartLines((previous) => {
+        const existing = previous.find((line) => line.id === product.id);
+        if (existing) {
+          return previous.map((line) =>
+            line.id === product.id ? { ...line, qty: line.qty + 1 } : line
+          );
+        }
+
+        return [createLineFromProduct(product), ...previous];
+      });
+    },
+    [createLineFromProduct]
+  );
 
   const filteredProducts = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -245,30 +297,28 @@ export default function PosPage() {
   }, [activeCategoryId, searchTerm]);
 
   const saleSummary = useMemo(() => buildSummary(cartLines, tenderBreakdown), [cartLines, tenderBreakdown]);
+  const nonCashTenderTotal = useMemo(
+    () => tenderBreakdown.filter((item) => item.method !== "cash").reduce((sum, item) => sum + item.amount, 0),
+    [tenderBreakdown]
+  );
+  const cashRequired = useMemo(
+    () => Math.max(saleSummary.total - nonCashTenderTotal, 0),
+    [nonCashTenderTotal, saleSummary.total]
+  );
 
-  const handleToggleProduct = useCallback((product: Product) => {
-    setCartLines((previous) => {
-      const existing = previous.find((line) => line.id === product.id);
-      if (existing) {
-        return previous.filter((line) => line.id !== product.id);
-      }
+  const handleToggleProduct = useCallback(
+    (product: Product) => {
+      setCartLines((previous) => {
+        const existing = previous.find((line) => line.id === product.id);
+        if (existing) {
+          return previous.filter((line) => line.id !== product.id);
+        }
 
-      return [
-        {
-          id: product.id,
-          name: product.name,
-          sku: product.sku,
-          qty: 1,
-          price: product.price,
-          listPrice: product.price,
-          taxRate: DEFAULT_TAX_RATE,
-          variant: product.variant,
-          status: product.highlight ? "featured" : undefined
-        },
-        ...previous
-      ];
-    });
-  }, []);
+        return [createLineFromProduct(product), ...previous];
+      });
+    },
+    [createLineFromProduct]
+  );
 
   const handleRemoveLine = useCallback((lineId: string) => {
     setCartLines((previous) => previous.filter((line) => line.id !== lineId));
@@ -280,14 +330,65 @@ export default function PosPage() {
     );
   }, []);
 
-  const handlePriceChange = useCallback((lineId: string, price: number) => {
-    if (!Number.isFinite(price) || price <= 0) {
-      return;
-    }
-    setCartLines((previous) =>
-      previous.map((line) => (line.id === lineId ? { ...line, price } : line))
-    );
-  }, []);
+  const handlePriceChange = useCallback(
+    async (lineId: string, price: number) => {
+      if (!Number.isFinite(price) || price <= 0) {
+        return;
+      }
+
+      const line = cartLines.find((item) => item.id === lineId);
+      if (!line) {
+        return;
+      }
+
+      const referencePrice = line.listPrice ?? line.price;
+      const requiresApproval = price < referencePrice * 0.9;
+
+      if (requiresApproval) {
+        if (typeof window === "undefined") {
+          return;
+        }
+
+        const managerPin = window.prompt("Manager PIN required for discounts over 10%", "");
+        if (!managerPin) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/cart/price-override`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              lineItemId: lineId,
+              overridePriceCents: Math.round(price * 100),
+              reason: `Discount on ${line.name}`,
+              managerPin,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Approval failed with status ${response.status}`);
+          }
+
+          const payload: { approved?: boolean } = await response.json();
+          if (!payload.approved) {
+            throw new Error("Approval denied");
+          }
+        } catch (error) {
+          console.error("Manager override failed", error);
+          window.alert("Manager approval failed. Discount was not applied.");
+          return;
+        }
+      }
+
+      setCartLines((previous) =>
+        previous.map((item) => (item.id === lineId ? { ...item, price } : item))
+      );
+    },
+    [cartLines]
+  );
 
   const handleAddTender = useCallback(
     ({ method, amount, reference }: { method: TenderBreakdown["method"]; amount: number; reference?: string }) => {
@@ -360,6 +461,284 @@ export default function PosPage() {
     setTenderBreakdown((previous) => previous.filter((item) => item.id !== tenderId));
   }, []);
 
+  const handleScanSubmit = useCallback(() => {
+    const query = scanInput.trim().toLowerCase();
+    if (!query) {
+      setScanStatus(null);
+      return;
+    }
+
+    const exactMatch = catalogProducts.find(
+      (product) => product.sku.toLowerCase() === query || product.id.toLowerCase() === query
+    );
+
+    const match = exactMatch
+      ? exactMatch
+      : catalogProducts.find((product) => {
+          const haystack = `${product.sku} ${product.name}`.toLowerCase();
+          return haystack.includes(query);
+        });
+
+    if (match) {
+      addProductToCart(match);
+      setScanStatus(`Added ${match.name}`);
+    } else {
+      setScanStatus("Product not found");
+    }
+
+    setScanInput("");
+  }, [addProductToCart, scanInput]);
+
+  const handleScanKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleScanSubmit();
+      }
+    },
+    [handleScanSubmit]
+  );
+
+  const handleValidateSale = useCallback(async () => {
+    if (cartLines.length === 0) {
+      setValidationState("error");
+      setValidationMessage("Cart is empty. Scan or add an item first.");
+      return;
+    }
+
+    try {
+      setValidationState("validating");
+      setValidationMessage("Validating totals with server...");
+
+      const response = await fetch(`${API_BASE_URL}/api/orders/validate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          items: cartLines.map((line) => ({
+            sku: line.sku,
+            qty: line.qty,
+            unitPriceCents: Math.round(line.price * 100),
+            taxRate: line.taxRate ?? DEFAULT_TAX_RATE
+          })),
+          taxRate: DEFAULT_TAX_RATE
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+
+      const payload: { subtotalCents: number; taxCents: number; totalCents: number } = await response.json();
+      const serverSubtotal = (payload.subtotalCents ?? 0) / 100;
+      const serverTax = (payload.taxCents ?? 0) / 100;
+      const serverTotal = (payload.totalCents ?? 0) / 100;
+
+      const subtotalMatch = Math.abs(serverSubtotal - saleSummary.subtotal) < 0.01;
+      const taxMatch = Math.abs(serverTax - saleSummary.tax) < 0.01;
+      const totalMatch = Math.abs(serverTotal - saleSummary.total) < 0.01;
+
+      if (subtotalMatch && taxMatch && totalMatch) {
+        setValidationState("success");
+        setValidationMessage("Server totals confirmed. Ready to finalize the sale.");
+      } else {
+        setValidationState("error");
+        setValidationMessage("Totals mismatch. Refresh item prices before collecting payment.");
+      }
+    } catch (error) {
+      console.error("Failed to validate totals", error);
+      setValidationState("error");
+      setValidationMessage("Unable to validate totals with the server. Try again.");
+    }
+  }, [cartLines, saleSummary]);
+
+  useEffect(() => {
+    setValidationState("idle");
+    setValidationMessage(null);
+    setFinalizeState("idle");
+    setFinalizeMessage(null);
+  }, [cartLines, tenderBreakdown]);
+
+  const handleOpenTenderModal = useCallback(() => {
+    setCashTenderInput(cashRequired.toFixed(2));
+    setTenderModalOpen(true);
+  }, [cashRequired]);
+
+  const handleCloseTenderModal = useCallback(() => {
+    setTenderModalOpen(false);
+  }, []);
+
+  const handleConfirmTenderModal = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const parsed = parseAmount(cashTenderInput);
+      if (parsed === null || parsed < 0) {
+        return;
+      }
+
+      const applied = Math.max(0, Math.min(parsed, cashRequired));
+
+      setTenderBreakdown((previous) => {
+        const withoutCash = previous.filter((item) => item.method !== "cash");
+        if (applied <= 0) {
+          return withoutCash;
+        }
+
+        return [
+          ...withoutCash,
+          {
+            id: "cash-tender",
+            method: "cash" as TenderBreakdown["method"],
+            label: TENDER_LABELS.cash,
+            amount: applied,
+            status: "captured" as TenderBreakdown["status"],
+          },
+        ];
+      });
+
+      setTenderModalOpen(false);
+    },
+    [cashRequired, cashTenderInput]
+  );
+
+  const changeDue = useMemo(() => {
+    const parsed = parseAmount(cashTenderInput);
+    if (parsed === null) {
+      return 0;
+    }
+    return Math.max(parsed - cashRequired, 0);
+  }, [cashRequired, cashTenderInput]);
+
+  const cashShortfall = useMemo(() => {
+    const parsed = parseAmount(cashTenderInput);
+    if (parsed === null) {
+      return cashRequired;
+    }
+    return Math.max(cashRequired - parsed, 0);
+  }, [cashRequired, cashTenderInput]);
+
+  const handleFinalizeSale = useCallback(async () => {
+    if (cartLines.length === 0) {
+      setFinalizeState("error");
+      setFinalizeMessage("Cart is empty. Scan an item to continue.");
+      return;
+    }
+
+    try {
+      setFinalizeState("processing");
+      setFinalizeMessage("Creating order...");
+
+      const orderResponse = await fetch(`${API_BASE_URL}/api/orders`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          branchId: 1,
+          userId: 1,
+          items: cartLines.map((line) => ({
+            productCodeVersionId: resolveProductVersionId(line.id),
+            qty: line.qty,
+            unitPriceCents: Math.round(line.price * 100),
+            taxRate: line.taxRate ?? DEFAULT_TAX_RATE,
+          })),
+          taxRate: DEFAULT_TAX_RATE,
+        }),
+      });
+
+      if (!orderResponse.ok) {
+        throw new Error(`Order creation failed (${orderResponse.status})`);
+      }
+
+      const order = await orderResponse.json();
+
+      setFinalizeMessage("Issuing invoice...");
+
+      const invoiceResponse = await fetch(`${API_BASE_URL}/api/invoices`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: order.id,
+          taxRate: DEFAULT_TAX_RATE,
+        }),
+      });
+
+      if (!invoiceResponse.ok) {
+        throw new Error(`Invoice creation failed (${invoiceResponse.status})`);
+      }
+
+      const invoice = await invoiceResponse.json();
+
+      const hasCashTender = tenderBreakdown.some((item) => item.method === "cash");
+      const tenderLines = hasCashTender || saleSummary.cashDue <= 0
+        ? tenderBreakdown
+        : [
+            ...tenderBreakdown,
+            {
+              id: "auto-cash",
+              method: "cash" as TenderBreakdown["method"],
+              label: TENDER_LABELS.cash,
+              amount: saleSummary.cashDue,
+              status: "captured" as TenderBreakdown["status"],
+            },
+          ];
+
+      for (const tender of tenderLines) {
+        if (tender.amount <= 0) {
+          continue;
+        }
+
+        const method = PAYMENT_METHOD_MAP[tender.method];
+
+        if ((method === "gift_card" || method === "credit_note")) {
+          throw new Error("Finalize flow does not support gift cards or store credit yet");
+        }
+
+        setFinalizeMessage(`Recording ${tender.label.toLowerCase()} payment...`);
+
+        const paymentResponse = await fetch(`${API_BASE_URL}/api/payments`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            invoiceId: invoice.id,
+            orderId: order.id,
+            method,
+            amountCents: Math.round(tender.amount * 100),
+            meta: tender.reference ? { reference: tender.reference } : null,
+          }),
+        });
+
+        if (!paymentResponse.ok) {
+          throw new Error(`Payment failed (${paymentResponse.status})`);
+        }
+      }
+
+      setFinalizeMessage("Queuing receipt and kicking drawer...");
+
+      const printResponse = await fetch(`${API_BASE_URL}/api/receipts/${invoice.id}/print`, {
+        method: "POST",
+      });
+
+      if (!printResponse.ok) {
+        throw new Error(`Receipt print failed (${printResponse.status})`);
+      }
+
+      const printPayload = await printResponse.json();
+
+      setFinalizeState("success");
+      setFinalizeMessage(printPayload.message ?? "Drawer opened and receipt queued.");
+    } catch (error) {
+      console.error("Finalize sale failed", error);
+      setFinalizeState("error");
+      setFinalizeMessage("Unable to finalize sale. Review server logs and try again.");
+    }
+  }, [cartLines, resolveProductVersionId, saleSummary.cashDue, tenderBreakdown]);
+
   const closeCustomerDialog = useCallback(() => {
     setCustomerDialogMode(null);
     setCustomerInput("");
@@ -431,36 +810,131 @@ export default function PosPage() {
   return (
     <>
       <div className="flex flex-col gap-6 pb-24">
-        <div className="grid gap-6 xl:grid-cols-[2fr_1.15fr]">
-          <ProductGallery
-            categories={productCategories}
-            products={filteredProducts}
-            activeCategoryId={activeCategoryId}
-            searchTerm={searchTerm}
-          onSearchTermChange={setSearchTerm}
-          onCategorySelect={setActiveCategoryId}
-          selectedProductIds={selectedProductIds}
-          onToggleProduct={handleToggleProduct}
-        />
-        <OrderPanel
-          items={cartLines}
-          summary={saleSummary}
-          tenders={tenderBreakdown}
-          customerName={customerName}
-          customerDescriptor={customerName === "Walk-in customer" ? "Default walk-in profile" : "CRM customer"}
-          ticketId="R-20451"
-          onRemoveItem={handleRemoveLine}
-          onQuantityChange={handleQuantityChange}
-          onPriceChange={handlePriceChange}
-          onAddTender={handleAddTender}
-          onAdjustTender={handleAdjustTender}
-          onRemoveTender={handleRemoveTender}
-          onChangeCustomer={handleChangeCustomer}
-          onAddCustomer={handleAddCustomer}
-          tenderOptions={tenderOptions}
-          defaultTenderAmount={saleSummary.cashDue}
-          cashTenderAmount={saleSummary.cashDue}
-        />
+        <div className="grid gap-6 xl:grid-cols-[1.75fr_1fr]">
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-slate-200/70 bg-gradient-to-r from-white to-slate-50 p-5 shadow-sm dark:border-slate-800/80 dark:from-slate-950/60 dark:to-slate-950/80">
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Scan or type code
+                </label>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <div className="flex flex-1 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 shadow-sm focus-within:border-sky-400 dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200">
+                    <Smartphone className="h-4 w-4 text-sky-500 dark:text-sky-300" />
+                    <input
+                      value={scanInput}
+                      onChange={(event) => setScanInput(event.target.value)}
+                      onKeyDown={handleScanKeyDown}
+                      placeholder="Scan barcode or type SKU/name"
+                      className="flex-1 bg-transparent focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    onClick={handleScanSubmit}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+                    type="button"
+                  >
+                    Scan
+                  </button>
+                </div>
+                {scanStatus ? (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{scanStatus}</p>
+                ) : null}
+              </div>
+            </div>
+            <ProductGallery
+              categories={productCategories}
+              products={filteredProducts}
+              activeCategoryId={activeCategoryId}
+              searchTerm={searchTerm}
+              onSearchTermChange={setSearchTerm}
+              onCategorySelect={setActiveCategoryId}
+              selectedProductIds={selectedProductIds}
+              onToggleProduct={handleToggleProduct}
+            />
+            <OrderPanel
+              items={cartLines}
+              summary={saleSummary}
+              tenders={tenderBreakdown}
+              customerName={customerName}
+              customerDescriptor={
+                customerName === "Walk-in customer" ? "Default walk-in profile" : "CRM customer"
+              }
+              ticketId="R-20451"
+              onRemoveItem={handleRemoveLine}
+              onQuantityChange={handleQuantityChange}
+              onPriceChange={handlePriceChange}
+              onAddTender={handleAddTender}
+              onAdjustTender={handleAdjustTender}
+              onRemoveTender={handleRemoveTender}
+              onChangeCustomer={handleChangeCustomer}
+              onAddCustomer={handleAddCustomer}
+              tenderOptions={tenderOptions}
+              defaultTenderAmount={saleSummary.cashDue}
+              cashTenderAmount={saleSummary.cashDue}
+            />
+            <div className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-950/60">
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Finalize sale</h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Send the cart to the server so totals are validated before you close the ticket.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleValidateSale}
+                    disabled={validationState === "validating"}
+                    className="inline-flex items-center justify-center rounded-xl border border-emerald-500/70 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-500 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-emerald-500/50 dark:bg-emerald-500/20 dark:text-emerald-200 dark:hover:border-emerald-400/80 dark:hover:text-emerald-100"
+                  >
+                    {validationState === "validating" ? "Validating..." : "Validate totals with server"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenTenderModal}
+                    disabled={cartLines.length === 0}
+                    className="inline-flex items-center justify-center rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+                  >
+                    Collect payment
+                  </button>
+                </div>
+                {validationMessage ? (
+                  <p
+                    className={
+                      validationState === "success"
+                        ? "text-sm text-emerald-600 dark:text-emerald-300"
+                        : "text-sm text-rose-500 dark:text-rose-300"
+                    }
+                  >
+                    {validationMessage}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleFinalizeSale}
+                  disabled={finalizeState === "processing" || cartLines.length === 0}
+                  className="inline-flex items-center justify-center rounded-xl border border-emerald-600/70 bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-600 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200 dark:hover:border-emerald-400/80 dark:hover:text-emerald-100"
+                >
+                  {finalizeState === "processing" ? "Finalizing..." : "Finalize sale"}
+                </button>
+                {finalizeMessage ? (
+                  <p
+                    className={
+                      finalizeState === "success"
+                        ? "text-sm text-emerald-600 dark:text-emerald-300"
+                        : "text-sm text-rose-500 dark:text-rose-300"
+                    }
+                  >
+                    {finalizeMessage}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          <div className="space-y-6">
+            <TenderPanel summary={saleSummary} tenders={tenderBreakdown} />
+            <ReceiptPreview items={cartLines} summary={saleSummary} tenders={tenderBreakdown} />
+          </div>
         </div>
       </div>
       <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/90">
@@ -546,6 +1020,93 @@ export default function PosPage() {
                 className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
               >
                 {customerDialogMode === "change" ? "Update" : "Add customer"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+      {isTenderModalOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={handleCloseTenderModal}
+        >
+          <form
+            className="w-full max-w-lg space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={handleConfirmTenderModal}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Collect payment</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Review tender breakdown, confirm cash received, and note any change owed to the customer.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseTenderModal}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close tender modal"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2 rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/60 dark:text-slate-200">
+                <div className="flex items-center justify-between">
+                  <span>Total due</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(saleSummary.total)}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                  <span>Non-cash tendered</span>
+                  <span>{formatCurrency(nonCashTenderTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-sky-600 dark:text-sky-300">
+                  <span>Cash required</span>
+                  <span>{formatCurrency(cashRequired)}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Cash received
+                </label>
+                <input
+                  value={cashTenderInput}
+                  onChange={(event) => setCashTenderInput(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200"
+                  placeholder={cashRequired.toFixed(2)}
+                />
+              </div>
+              <div className="space-y-2 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 dark:border-slate-700/80 dark:bg-slate-950/70 dark:text-slate-300">
+                <div className="flex items-center justify-between">
+                  <span>Change due</span>
+                  <span className={changeDue > 0 ? "font-semibold text-emerald-600 dark:text-emerald-300" : "font-semibold"}>
+                    {formatCurrency(changeDue)}
+                  </span>
+                </div>
+                {cashShortfall > 0 ? (
+                  <div className="flex items-center justify-between text-xs text-rose-500 dark:text-rose-300">
+                    <span>Remaining balance</span>
+                    <span>{formatCurrency(cashShortfall)}</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCloseTenderModal}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+              >
+                Apply tender
               </button>
             </div>
           </form>
