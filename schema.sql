@@ -54,11 +54,13 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS customers (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
-  document_no VARCHAR(64),
-  full_name VARCHAR(160) NOT NULL,
-  email VARCHAR(190), phone VARCHAR(40),
-  blacklist BOOLEAN DEFAULT FALSE,
-  notes TEXT,
+  first_name VARCHAR(80) NOT NULL,
+  last_name VARCHAR(80) NOT NULL,
+  email VARCHAR(190),
+  phone VARCHAR(40),
+  address TEXT,
+  is_blacklisted BOOLEAN DEFAULT FALSE,
+  loyalty_points INT DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id)
@@ -72,14 +74,16 @@ CREATE TABLE IF NOT EXISTS id_images (
   FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
-CREATE TABLE IF NOT EXISTS contact_channels (
+CREATE TABLE IF NOT EXISTS id_image_upload_tokens (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  customer_id BIGINT NOT NULL,
-  channel ENUM('whatsapp','email','sms') NOT NULL,
-  opted_in BOOLEAN DEFAULT TRUE,
-  last_opt_change TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_contact_channel (customer_id, channel),
-  FOREIGN KEY (customer_id) REFERENCES customers(id)
+  path VARCHAR(512) NOT NULL,
+  signature VARCHAR(128) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  issued_to BIGINT NULL,
+  issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  used_at TIMESTAMP NULL,
+  UNIQUE KEY uniq_id_image_upload_path (path),
+  FOREIGN KEY (issued_to) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS loyalty_ledger (
@@ -90,6 +94,16 @@ CREATE TABLE IF NOT EXISTS loyalty_ledger (
   ref_table VARCHAR(40), ref_id BIGINT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+CREATE TABLE IF NOT EXISTS customer_notes (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  customer_id BIGINT NOT NULL,
+  author_id BIGINT NOT NULL,
+  note TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (customer_id) REFERENCES customers(id),
+  FOREIGN KEY (author_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS reviews (
@@ -142,6 +156,7 @@ CREATE TABLE IF NOT EXISTS product_code_components (
   child_code_id BIGINT NOT NULL,
   qty_ratio DECIMAL(18,6) NOT NULL, -- how many child units form the parent
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_component (parent_code_id, child_code_id),
   FOREIGN KEY (parent_code_id) REFERENCES product_codes(id),
   FOREIGN KEY (child_code_id) REFERENCES product_codes(id)
@@ -149,16 +164,112 @@ CREATE TABLE IF NOT EXISTS product_code_components (
 
 CREATE TABLE IF NOT EXISTS stock_ledger (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  branch_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
-  qty DECIMAL(18,4) NOT NULL,
-  reason ENUM('init','purchase','sale','sale_return','transfer_in','transfer_out','adjust_add','adjust_sub','pawn_forfeit_in','write_off','quarantine_in','quarantine_out','count_post') NOT NULL,
-  ref_table VARCHAR(40), ref_id BIGINT,
-  created_by BIGINT,
+  product_code_version_id BIGINT NOT NULL,
+  qty_change INT NOT NULL,
+  reason ENUM('sale','purchase','count_post','transfer_in','transfer_out','pawn_forfeit_in','return','adjustment','quarantine_in','quarantine_out','split_out','split_in','combine_out','combine_in','repair_issue','repair_return') NOT NULL,
+  ref_table VARCHAR(40),
+  ref_id BIGINT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id),
+  INDEX (product_code_version_id, created_at)
+);
+
+-- purchases & receiving
+CREATE TABLE IF NOT EXISTS purchases (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  branch_id BIGINT NOT NULL,
+  supplier_name VARCHAR(160),
+  supplier_invoice VARCHAR(80),
+  reference_no VARCHAR(80),
+  received_at DATETIME,
+  created_by BIGINT NULL,
+  total_cost_cents BIGINT NOT NULL DEFAULT 0,
+  total_quantity INT NOT NULL DEFAULT 0,
+  label_layout VARCHAR(16),
+  label_include_price BOOLEAN DEFAULT TRUE,
+  label_count INT DEFAULT 0,
+  label_note VARCHAR(140),
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id),
-  INDEX (branch_id, code_id, created_at)
+  FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_lines (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  purchase_id BIGINT NOT NULL,
+  product_code_version_id BIGINT NOT NULL,
+  quantity INT NOT NULL,
+  unit_cost_cents BIGINT NOT NULL,
+  line_total_cents BIGINT NOT NULL,
+  label_quantity INT DEFAULT 0,
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (purchase_id) REFERENCES purchases(id),
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_returns (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  purchase_id BIGINT NOT NULL,
+  branch_id BIGINT NOT NULL,
+  supplier_name VARCHAR(160),
+  supplier_invoice VARCHAR(80),
+  reason TEXT,
+  notes TEXT,
+  created_by BIGINT NULL,
+  total_quantity INT NOT NULL DEFAULT 0,
+  total_cost_cents BIGINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (purchase_id) REFERENCES purchases(id),
+  FOREIGN KEY (branch_id) REFERENCES branches(id),
+  FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_return_lines (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  purchase_return_id BIGINT NOT NULL,
+  purchase_line_id BIGINT NOT NULL,
+  product_code_version_id BIGINT NOT NULL,
+  quantity INT NOT NULL,
+  unit_cost_cents BIGINT NOT NULL,
+  line_total_cents BIGINT NOT NULL,
+  note TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (purchase_return_id) REFERENCES purchase_returns(id),
+  FOREIGN KEY (purchase_line_id) REFERENCES purchase_lines(id),
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
+);
+
+CREATE TABLE IF NOT EXISTS supplier_credits (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  branch_id BIGINT NOT NULL,
+  supplier_name VARCHAR(160),
+  supplier_invoice VARCHAR(80),
+  purchase_id BIGINT NULL,
+  purchase_return_id BIGINT NULL,
+  amount_cents BIGINT NOT NULL,
+  balance_cents BIGINT NOT NULL,
+  reason TEXT,
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (branch_id) REFERENCES branches(id),
+  FOREIGN KEY (purchase_id) REFERENCES purchases(id),
+  FOREIGN KEY (purchase_return_id) REFERENCES purchase_returns(id)
+);
+
+CREATE TABLE IF NOT EXISTS supplier_credit_ledger (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  supplier_credit_id BIGINT NOT NULL,
+  delta_cents BIGINT NOT NULL,
+  reference_type VARCHAR(40),
+  reference_id BIGINT NULL,
+  reason TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (supplier_credit_id) REFERENCES supplier_credits(id)
 );
 
 -- inventory counts
@@ -179,14 +290,13 @@ CREATE TABLE IF NOT EXISTS inv_count_sessions (
 CREATE TABLE IF NOT EXISTS inv_count_lines (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   session_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
+  product_code_version_id BIGINT NOT NULL,
   expected_qty DECIMAL(18,4) NOT NULL,
   counted_qty DECIMAL(18,4) NOT NULL,
-  variance DECIMAL(18,4) AS (counted_qty - expected_qty) STORED,
   status ENUM('counted','recount','resolved') DEFAULT 'counted',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (session_id) REFERENCES inv_count_sessions(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
 );
 
 -- transfers
@@ -197,6 +307,8 @@ CREATE TABLE IF NOT EXISTS inv_transfers (
   status ENUM('draft','approved','shipped','received','cancelled') DEFAULT 'draft',
   created_by BIGINT NOT NULL,
   approved_by BIGINT NULL,
+  shipped_by BIGINT NULL,
+  received_by BIGINT NULL,
   shipped_at TIMESTAMP NULL,
   received_at TIMESTAMP NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -208,23 +320,27 @@ CREATE TABLE IF NOT EXISTS inv_transfers (
 CREATE TABLE IF NOT EXISTS inv_transfer_lines (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   transfer_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
+  product_code_version_id BIGINT NOT NULL,
   qty DECIMAL(18,4) NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (transfer_id) REFERENCES inv_transfers(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
 );
 
 CREATE TABLE IF NOT EXISTS quarantine (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
+  product_code_version_id BIGINT NOT NULL,
+  qty DECIMAL(18,4) NOT NULL,
   reason TEXT,
   status ENUM('open','resolved') DEFAULT 'open',
+  outcome ENUM('return','dispose') DEFAULT 'return',
+  created_by BIGINT NULL,
+  resolved_by BIGINT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   resolved_at TIMESTAMP NULL,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
 );
 
 -- ========= POS / SALES =========
@@ -300,15 +416,33 @@ CREATE TABLE IF NOT EXISTS loans (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
   customer_id BIGINT NOT NULL,
-  ticket_no VARCHAR(64) UNIQUE,
+  ticket_number VARCHAR(64) UNIQUE,
   principal_cents BIGINT NOT NULL,
-  interest_model VARCHAR(64),
+  interest_model_id BIGINT NOT NULL,
+  interest_rate DECIMAL(5,4) NOT NULL,
   due_date DATE NOT NULL,
-  status ENUM('active','redeemed','forfeited') DEFAULT 'active',
+  status ENUM('active','redeemed','forfeited','renewed') DEFAULT 'active',
   comments TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
-  FOREIGN KEY (customer_id) REFERENCES customers(id)
+  FOREIGN KEY (customer_id) REFERENCES customers(id),
+  FOREIGN KEY (interest_model_id) REFERENCES interest_models(id)
+);
+
+CREATE TABLE IF NOT EXISTS interest_models (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  description TEXT NULL,
+  rate_type ENUM('flat','simple','compound') DEFAULT 'simple',
+  period_days INT NOT NULL DEFAULT 30,
+  interest_rate_bps INT NOT NULL,
+  grace_days INT DEFAULT 0,
+  min_principal_cents BIGINT DEFAULT 0,
+  max_principal_cents BIGINT NULL,
+  late_fee_bps INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS loan_collateral (
@@ -349,16 +483,68 @@ CREATE TABLE IF NOT EXISTS loan_forfeitures (
   FOREIGN KEY (code_id) REFERENCES product_codes(id)
 );
 
+CREATE TABLE IF NOT EXISTS instapawn_intakes (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  branch_id BIGINT NOT NULL,
+  customer_first_name VARCHAR(120) NOT NULL,
+  customer_last_name VARCHAR(120),
+  customer_phone VARCHAR(40) NOT NULL,
+  customer_email VARCHAR(190),
+  government_id VARCHAR(32),
+  item_category VARCHAR(120),
+  item_description TEXT NOT NULL,
+  collateral JSON,
+  requested_principal_cents BIGINT,
+  auto_appraised_value_cents BIGINT,
+  interest_model_id BIGINT,
+  notes TEXT,
+  status ENUM('pending','notified','converted','expired','cancelled') DEFAULT 'pending',
+  barcode_token CHAR(32) NOT NULL UNIQUE,
+  barcode_expires_at DATETIME NOT NULL,
+  barcode_scanned_at DATETIME,
+  notified_at DATETIME,
+  converted_loan_id BIGINT,
+  converted_at DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (branch_id) REFERENCES branches(id),
+  FOREIGN KEY (interest_model_id) REFERENCES interest_models(id),
+  FOREIGN KEY (converted_loan_id) REFERENCES loans(id)
+);
+
+CREATE TABLE IF NOT EXISTS notification_messages (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  intake_id BIGINT,
+  loan_id BIGINT,
+  repair_id BIGINT,
+  customer_id BIGINT,
+  channel ENUM('sms','whatsapp','email') NOT NULL,
+  recipient VARCHAR(120) NOT NULL,
+  message TEXT NOT NULL,
+  status ENUM('pending','sent','failed') DEFAULT 'pending',
+  error TEXT,
+  sent_at DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (intake_id) REFERENCES instapawn_intakes(id),
+  FOREIGN KEY (loan_id) REFERENCES loans(id),
+  FOREIGN KEY (repair_id) REFERENCES repairs(id),
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
 -- ========= LAYAWAY =========
 CREATE TABLE IF NOT EXISTS layaways (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
   customer_id BIGINT NOT NULL,
   order_id BIGINT NOT NULL,
+  total_cents BIGINT NOT NULL,
+  paid_cents BIGINT DEFAULT 0,
+  due_date DATETIME NOT NULL,
   status ENUM('active','completed','cancelled','pawned') DEFAULT 'active',
   pawn_loan_id BIGINT NULL,
   pawned_at TIMESTAMP NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
   FOREIGN KEY (customer_id) REFERENCES customers(id),
   FOREIGN KEY (order_id) REFERENCES orders(id),
@@ -370,6 +556,7 @@ CREATE TABLE IF NOT EXISTS layaway_payments (
   layaway_id BIGINT NOT NULL,
   amount_cents BIGINT NOT NULL,
   method ENUM('cash','card','transfer') NOT NULL,
+  note TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (layaway_id) REFERENCES layaways(id)
 );
@@ -416,26 +603,54 @@ CREATE TABLE IF NOT EXISTS repairs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
   customer_id BIGINT NOT NULL,
-  status ENUM('intake','waiting_approval','in_progress','ready','picked_up','cancelled') DEFAULT 'intake',
+  job_number VARCHAR(40) UNIQUE NOT NULL,
+  item_description TEXT,
+  issue_description TEXT,
   diagnosis TEXT,
-  estimate_cents BIGINT,
-  paid BOOLEAN DEFAULT FALSE,
-  approval BOOLEAN NULL,
+  estimate_cents BIGINT DEFAULT 0,
+  deposit_cents BIGINT DEFAULT 0,
+  approval_status ENUM('not_requested','pending','approved','denied') DEFAULT 'not_requested',
+  approval_requested_at TIMESTAMP NULL,
+  approval_decision_at TIMESTAMP NULL,
+  status ENUM('intake','diagnosing','waiting_approval','in_progress','qa','ready','completed','cancelled') DEFAULT 'intake',
+  promised_at TIMESTAMP NULL,
+  total_paid_cents BIGINT DEFAULT 0,
+  notes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
   FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+CREATE TABLE IF NOT EXISTS repair_photos (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  repair_id BIGINT NOT NULL,
+  storage_path VARCHAR(512) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (repair_id) REFERENCES repairs(id)
+);
+
+CREATE TABLE IF NOT EXISTS repair_payments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  repair_id BIGINT NOT NULL,
+  amount_cents BIGINT NOT NULL,
+  method ENUM('cash','card','transfer','store_credit','other') DEFAULT 'cash',
+  reference VARCHAR(120),
+  note TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (repair_id) REFERENCES repairs(id)
 );
 
 CREATE TABLE IF NOT EXISTS repair_materials (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   repair_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
-  qty_issued DECIMAL(18,4) NOT NULL,
-  qty_returned DECIMAL(18,4) DEFAULT 0,
-  issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  returned_at TIMESTAMP NULL,
+  product_code_version_id BIGINT NOT NULL,
+  qty_issued INT NOT NULL DEFAULT 0,
+  qty_returned INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (repair_id) REFERENCES repairs(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
 );
 
 -- ========= CASH / SHIFTS =========
@@ -508,133 +723,164 @@ CREATE TABLE IF NOT EXISTS credit_note_ledger (
 );
 
 -- ========= MARKETING =========
-CREATE TABLE IF NOT EXISTS mkt_templates (
+CREATE TABLE IF NOT EXISTS marketing_templates (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(160) NOT NULL,
-  channel ENUM('whatsapp','email','sms') NOT NULL,
-  content TEXT NOT NULL,
+  channel ENUM('sms','whatsapp','email') NOT NULL DEFAULT 'sms',
+  subject VARCHAR(180),
+  body TEXT NOT NULL,
   variables JSON,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_by BIGINT NOT NULL,
+  updated_by BIGINT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by) REFERENCES users(id),
+  FOREIGN KEY (updated_by) REFERENCES users(id)
 );
 
-CREATE TABLE IF NOT EXISTS mkt_segments (
+CREATE TABLE IF NOT EXISTS marketing_segments (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(160) NOT NULL,
-  filter_json JSON NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  description TEXT,
+  filters JSON,
+  created_by BIGINT NOT NULL,
+  updated_by BIGINT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by) REFERENCES users(id),
+  FOREIGN KEY (updated_by) REFERENCES users(id)
 );
 
-CREATE TABLE IF NOT EXISTS mkt_campaigns (
+CREATE TABLE IF NOT EXISTS marketing_campaigns (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   template_id BIGINT NOT NULL,
   segment_id BIGINT NOT NULL,
-  scheduled_at TIMESTAMP NULL,
-  status ENUM('draft','scheduled','sending','done','cancelled') DEFAULT 'draft',
+  name VARCHAR(160) NOT NULL,
+  scheduled_at DATETIME NULL,
+  status ENUM('draft','scheduled','sending','completed','failed') DEFAULT 'draft',
+  created_by BIGINT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (template_id) REFERENCES mkt_templates(id),
-  FOREIGN KEY (segment_id) REFERENCES mkt_segments(id)
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (template_id) REFERENCES marketing_templates(id),
+  FOREIGN KEY (segment_id) REFERENCES marketing_segments(id),
+  FOREIGN KEY (created_by) REFERENCES users(id)
 );
 
-CREATE TABLE IF NOT EXISTS mkt_sends (
+CREATE TABLE IF NOT EXISTS marketing_sends (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   campaign_id BIGINT NOT NULL,
   customer_id BIGINT NOT NULL,
-  notification_id BIGINT NULL,
-  status ENUM('queued','sent','failed') DEFAULT 'queued',
+  notification_id BIGINT,
+  channel ENUM('sms','whatsapp','email') NOT NULL,
+  status ENUM('pending','sent','failed') DEFAULT 'pending',
+  error TEXT,
+  sent_at DATETIME,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (campaign_id) REFERENCES mkt_campaigns(id),
-  FOREIGN KEY (customer_id) REFERENCES customers(id)
+  FOREIGN KEY (campaign_id) REFERENCES marketing_campaigns(id),
+  FOREIGN KEY (customer_id) REFERENCES customers(id),
+  FOREIGN KEY (notification_id) REFERENCES notification_messages(id)
 );
 
 -- ========= E-COMMERCE =========
 CREATE TABLE IF NOT EXISTS ecom_channels (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(120) NOT NULL,
-  slug VARCHAR(64) UNIQUE,
-  status ENUM('active','disabled') DEFAULT 'active',
-  last_sync TIMESTAMP NULL,
-  error_count INT DEFAULT 0,
+  provider ENUM('shopify','woocommerce','amazon','ebay','custom') NOT NULL,
+  status ENUM('disconnected','connected','error') DEFAULT 'disconnected',
   config JSON,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ecom_channel_logs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  channel_id BIGINT NOT NULL,
+  event VARCHAR(160) NOT NULL,
+  payload JSON,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id)
+);
+
+CREATE TABLE IF NOT EXISTS ecom_webhook_logs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  channel_id BIGINT NOT NULL,
+  event VARCHAR(160) NOT NULL,
+  payload JSON,
+  received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_listings (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  code_id BIGINT NOT NULL,
-  channel_id BIGINT NOT NULL,
-  published BOOLEAN DEFAULT FALSE,
-  title VARCHAR(240),
+  product_code_id BIGINT NOT NULL,
+  title VARCHAR(240) NOT NULL,
   description TEXT,
-  slug VARCHAR(190),
-  seo JSON,
-  last_synced TIMESTAMP NULL,
+  price_cents BIGINT NOT NULL,
+  status ENUM('draft','active','inactive') DEFAULT 'draft',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_listing (code_id, channel_id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id),
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_code_id) REFERENCES product_codes(id)
+);
+
+CREATE TABLE IF NOT EXISTS ecom_listing_channels (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  listing_id BIGINT NOT NULL,
+  channel_id BIGINT NOT NULL,
+  channel_listing_id VARCHAR(120),
+  last_synced_at DATETIME,
+  status ENUM('pending','synced','error') DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (listing_id) REFERENCES ecom_listings(id),
   FOREIGN KEY (channel_id) REFERENCES ecom_channels(id)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_orders (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   channel_id BIGINT NOT NULL,
-  external_id VARCHAR(190) UNIQUE,
-  customer_id BIGINT NULL,
-  status ENUM('pending','picking','packed','shipped','cancelled') DEFAULT 'pending',
-  shipping_json JSON,
+  external_id VARCHAR(160) NOT NULL,
+  customer_name VARCHAR(160) NOT NULL,
+  status ENUM('pending','paid','fulfilled','cancelled') DEFAULT 'pending',
+  shipping_address JSON,
+  total_cents BIGINT NOT NULL,
+  currency CHAR(3) DEFAULT 'DOP',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id),
-  FOREIGN KEY (customer_id) REFERENCES customers(id)
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_order_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  ecom_order_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
-  qty DECIMAL(18,4) NOT NULL,
+  order_id BIGINT NOT NULL,
+  listing_id BIGINT,
+  product_code_id BIGINT,
+  quantity INT NOT NULL,
   price_cents BIGINT NOT NULL,
-  FOREIGN KEY (ecom_order_id) REFERENCES ecom_orders(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
-);
-
-CREATE TABLE IF NOT EXISTS ecom_shipments (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  ecom_order_id BIGINT NOT NULL,
-  label_provider VARCHAR(64),
-  tracking_no VARCHAR(190),
-  status ENUM('created','shipped','delivered','cancelled') DEFAULT 'created',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (ecom_order_id) REFERENCES ecom_orders(id)
+  FOREIGN KEY (order_id) REFERENCES ecom_orders(id),
+  FOREIGN KEY (listing_id) REFERENCES ecom_listings(id),
+  FOREIGN KEY (product_code_id) REFERENCES product_codes(id)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_returns (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  ecom_order_id BIGINT NOT NULL,
-  state ENUM('requested','approved','received','refunded','denied') DEFAULT 'requested',
+  order_id BIGINT NOT NULL,
+  status ENUM('requested','approved','received','refunded','denied') DEFAULT 'requested',
   reason TEXT,
-  refund_method ENUM('card','transfer','store_credit') NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (ecom_order_id) REFERENCES ecom_orders(id)
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES ecom_orders(id)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_return_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  ecom_return_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
-  qty DECIMAL(18,4) NOT NULL,
-  condition ENUM('new','used','damaged') DEFAULT 'used',
+  return_id BIGINT NOT NULL,
+  order_item_id BIGINT NOT NULL,
+  condition ENUM('new','used','damaged') DEFAULT 'new',
+  restock BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (ecom_return_id) REFERENCES ecom_returns(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
-);
-
-CREATE TABLE IF NOT EXISTS ecom_webhook_logs (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  channel_id BIGINT NOT NULL,
-  event VARCHAR(120),
-  payload JSON,
-  status ENUM('ok','error') DEFAULT 'ok',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id)
+  FOREIGN KEY (return_id) REFERENCES ecom_returns(id),
+  FOREIGN KEY (order_item_id) REFERENCES ecom_order_items(id)
 );
 
 -- ========= NOTIFICATIONS & COMPLIANCE =========
@@ -657,14 +903,15 @@ CREATE TABLE IF NOT EXISTS compliance_stamps (
 );
 
 -- ========= AUDIT =========
-CREATE TABLE IF NOT EXISTS audit_log (
+CREATE TABLE IF NOT EXISTS audit_logs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   actor_id BIGINT,
-  action VARCHAR(64),
-  entity VARCHAR(40),
-  entity_id BIGINT,
-  details JSON,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  action VARCHAR(160) NOT NULL,
+  resource_type VARCHAR(120) NOT NULL,
+  resource_id BIGINT,
+  payload JSON,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (actor_id) REFERENCES users(id)
 );
 
 -- ========= INDEXES =========
