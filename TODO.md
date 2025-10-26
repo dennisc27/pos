@@ -24,14 +24,14 @@ BE
 - [x] Ledger: on invoice paid → `stock_ledger(reason='sale', qty negative)`; gift/credit ledgers update
 
 FE
-- [ ] Page scaffold with: scan_input, cart_table, tender_panel, receipt_preview
-- [ ] Cart state (local) -> server validate totals before finalize
-- [ ] Tender modal: handle multi-tender + change
-- [ ] Manager discount flow (prompt PIN; call approval endpoint)
+- [x] Page scaffold with: scan_input, cart_table, tender_panel, receipt_preview
+- [x] Cart state (local) -> server validate totals before finalize
+- [x] Tender modal: handle multi-tender + change
+- [x] Manager discount flow (prompt PIN; call approval endpoint)
 
 TEST/AC
-- [ ] Scan item by code → line appears with correct price
-- [ ] Apply discount beyond policy requires manager
+- [x] Scan item by code → line appears with correct price
+- [x] Apply discount beyond policy requires manager
 - [ ] Finalize cash sale kicks drawer and prints receipt
 - [ ] Stock decreases; payment + invoice persisted
 

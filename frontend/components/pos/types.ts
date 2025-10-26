@@ -1,7 +1,22 @@
 import type { LucideIcon } from "lucide-react";
 
+export type PriceOverrideApproval = {
+  approvalCode: string;
+  managerName: string;
+  reason: string | null;
+  createdAt: string | null;
+};
+
 export type CartLine = {
+  /**
+   * Unique identifier for the cart line. When the line maps to an existing
+   * product code version the identifier should match that version so we can
+   * reference it during API calls.
+   */
   id: string;
+  productCodeId?: number;
+  productCodeVersionId?: number;
+  code?: string;
   name: string;
   sku: string;
   status?: string;
@@ -11,6 +26,7 @@ export type CartLine = {
   listPrice?: number;
   taxRate?: number;
   note?: string;
+  override?: PriceOverrideApproval | null;
 };
 
 export type SaleSummary = {
@@ -21,6 +37,8 @@ export type SaleSummary = {
   balanceDue: number;
   cashDue: number;
   nonCashTendered: number;
+  tendered: number;
+  changeDue: number;
 };
 
 export type TenderBreakdown = {
@@ -66,4 +84,26 @@ export type Product = {
   highlight?: string;
   previewLabel?: string;
   variant?: string;
+};
+
+export type ProductSearchResult = {
+  id: number;
+  code: string;
+  name: string;
+  sku: string | null;
+  description: string | null;
+  versionId: number | null;
+  branchId: number | null;
+  priceCents: number | null;
+  costCents: number | null;
+  qtyOnHand: number | null;
+  qtyReserved: number | null;
+  isActive: number | null;
+};
+
+export type ValidatedOrder = {
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  discountCents: number;
 };
