@@ -10,44 +10,44 @@ The app has to folders backend an frontend.
 - AC = Acceptance Criteria
 
 ## 0) Common
-- [ ] FE: Add the missing routes on sidebar from `ui_tasks.md`.
-- [ ] FE: Make sure the money helpers are present (cents↔display) and ITBIS breakdown: `net = round(price*0.82,2); tax = price - net`.
+- [x] FE: Add the missing routes on sidebar from `ui_tasks.md`.
+- [x] FE: Make sure the money helpers are present (cents↔display) and ITBIS breakdown: `net = round(price*0.82,2); tax = price - net`.
 ## 1) POS
 ### 1.1 New Sale (/pos/sale)
 BE
-- [ ] Endpoint: `GET /api/products?q=` (search by name/sku/code)
-- [ ] Endpoint: `POST /api/cart/price-override` (manager approval)
-- [ ] Endpoint: `POST /api/orders` → creates order + items
-- [ ] Endpoint: `POST /api/invoices` → totals + tax (server truth)
-- [ ] Endpoint: `POST /api/payments` (cash/card/transfer/gift_card/credit_note)
-- [ ] Endpoint: `POST /api/receipts/:invoiceId/print` (ESC/POS)
-- [ ] Ledger: on invoice paid → `stock_ledger(reason='sale', qty negative)`; gift/credit ledgers update
+- [x] Endpoint: `GET /api/products?q=` (search by name/sku/code)
+- [x] Endpoint: `POST /api/cart/price-override` (manager approval)
+- [x] Endpoint: `POST /api/orders` → creates order + items
+- [x] Endpoint: `POST /api/invoices` → totals + tax (server truth)
+- [x] Endpoint: `POST /api/payments` (cash/card/transfer/gift_card/credit_note)
+- [x] Endpoint: `POST /api/receipts/:invoiceId/print` (ESC/POS)
+- [x] Ledger: on invoice paid → `stock_ledger(reason='sale', qty negative)`; gift/credit ledgers update
 
 FE
-- [ ] Page scaffold with: scan_input, cart_table, tender_panel, receipt_preview
-- [ ] Cart state (local) -> server validate totals before finalize
-- [ ] Tender modal: handle multi-tender + change
-- [ ] Manager discount flow (prompt PIN; call approval endpoint)
+- [x] Page scaffold with: scan_input, cart_table, tender_panel, receipt_preview
+- [x] Cart state (local) -> server validate totals before finalize
+- [x] Tender modal: handle multi-tender + change
+- [x] Manager discount flow (prompt PIN; call approval endpoint)
 
 TEST/AC
-- [ ] Scan item by code → line appears with correct price
-- [ ] Apply discount beyond policy requires manager
-- [ ] Finalize cash sale kicks drawer and prints receipt
-- [ ] Stock decreases; payment + invoice persisted
+- [x] Scan item by code → line appears with correct price
+- [x] Apply discount beyond policy requires manager
+- [x] Finalize cash sale kicks drawer and prints receipt
+- [x] Stock decreases; payment + invoice persisted
 
 ### 1.2 Refunds (/pos/refund)
 BE
-- [ ] `GET /api/invoices/:no`
-- [ ] `POST /api/refunds` → creates sales_return + items
-- [ ] Restock when condition in (new, used)
+- [x] `GET /api/invoices/:no`
+- [x] `POST /api/refunds` → creates sales_return + items
+- [x] Restock when condition in (new, used)
 
 FE
-- [ ] Invoice lookup field; selectable lines; totals_box; policy_alerts
-- [ ] Choose refund method (cash/store_credit)
+- [x] Invoice lookup field; selectable lines; totals_box; policy_alerts
+- [x] Choose refund method (cash/store_credit)
 
 AC
-- [ ] Return line restocks if not damaged
-- [ ] Credit note issued when store_credit
+- [x] Return line restocks if not damaged
+- [x] Credit note issued when store_credit
 
 ### 1.3 Buy from Customer (/pos/buy)
 BE

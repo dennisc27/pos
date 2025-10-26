@@ -8,3 +8,15 @@ const peso = new Intl.NumberFormat("es-DO", {
 export function formatCurrency(value: number) {
   return peso.format(value);
 }
+
+export function toCents(amount: number) {
+  return Math.round(Number(amount) * 100);
+}
+
+export function fromCents(amountInCents: number | null | undefined) {
+  if (!Number.isFinite(amountInCents)) {
+    return 0;
+  }
+
+  return Math.round(Number(amountInCents)) / 100;
+}

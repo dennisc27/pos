@@ -252,10 +252,22 @@ CREATE TABLE IF NOT EXISTS order_items (
   FOREIGN KEY (code_id) REFERENCES product_codes(id)
 );
 
+CREATE TABLE IF NOT EXISTS price_override_approvals (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  manager_id BIGINT NOT NULL,
+  cart_total_cents BIGINT NOT NULL,
+  override_total_cents BIGINT NOT NULL,
+  override_delta_cents BIGINT NOT NULL,
+  reason VARCHAR(255),
+  approval_code CHAR(36) NOT NULL UNIQUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (manager_id) REFERENCES users(id)
+);
+
 CREATE TABLE IF NOT EXISTS invoices (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   order_id BIGINT NOT NULL,
-  invoice_no VARCHAR(64) UNIQUE,
+  invoice_no VARCHAR(64) UNIQUE NOT NULL,
   total_cents BIGINT NOT NULL,
   tax_cents BIGINT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -281,6 +293,7 @@ CREATE TABLE IF NOT EXISTS sales_returns (
   reason TEXT,
   condition ENUM('new','used','damaged') DEFAULT 'used',
   refund_method ENUM('cash','store_credit') NOT NULL,
+  total_refund_cents BIGINT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (invoice_id) REFERENCES invoices(id)
 );
@@ -288,11 +301,14 @@ CREATE TABLE IF NOT EXISTS sales_returns (
 CREATE TABLE IF NOT EXISTS sales_return_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   sales_return_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
-  qty DECIMAL(18,4) NOT NULL,
+  order_item_id BIGINT NOT NULL,
+  product_code_version_id BIGINT NOT NULL,
+  qty INT NOT NULL,
   refund_cents BIGINT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (sales_return_id) REFERENCES sales_returns(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
+  FOREIGN KEY (order_item_id) REFERENCES order_items(id),
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
 );
 
 -- ========= LOANS / PAWNS =========
@@ -671,3 +687,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_orders_branch_created ON orders(branch_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_loans_branch_status_due ON loans(branch_id, status, due_date);
 CREATE INDEX IF NOT EXISTS idx_stock_branch_code ON stock_ledger(branch_id, code_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sales_returns_invoice ON sales_returns(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_sales_return_items_order_item ON sales_return_items(order_item_id);
+CREATE INDEX IF NOT EXISTS idx_sales_return_items_version ON sales_return_items(product_code_version_id);

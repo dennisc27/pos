@@ -3,7 +3,14 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
-import { connectDB, closeConnection, db } from './db/connection.js';
+import { connectDB, closeConnection } from './db/connection.js';
+import productsRouter from './routes/products.js';
+import cartRouter from './routes/cart.js';
+import ordersRouter from './routes/orders.js';
+import invoicesRouter from './routes/invoices.js';
+import paymentsRouter from './routes/payments.js';
+import receiptsRouter from './routes/receipts.js';
+import refundsRouter from './routes/refunds.js';
 
 // Load environment variables
 dotenv.config();
@@ -32,15 +39,31 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.get('/api', (req, res) => {
-  res.json({ 
-    message: 'POS System API', 
+  res.json({
+    message: 'POS System API',
     version: '1.0.0',
     endpoints: {
       health: '/health',
-      api: '/api'
+      api: '/api',
+      products: '/api/products?q=',
+      cartPriceOverride: '/api/cart/price-override',
+      orders: '/api/orders',
+      invoices: '/api/invoices',
+      invoiceLookup: '/api/invoices/:invoiceNo',
+      payments: '/api/payments',
+      refunds: '/api/refunds',
+      receiptsPrint: '/api/receipts/:invoiceId/print'
     }
   });
 });
+
+app.use('/api/products', productsRouter);
+app.use('/api/cart', cartRouter);
+app.use('/api/orders', ordersRouter);
+app.use('/api/invoices', invoicesRouter);
+app.use('/api/payments', paymentsRouter);
+app.use('/api/receipts', receiptsRouter);
+app.use('/api/refunds', refundsRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
