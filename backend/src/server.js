@@ -17,6 +17,7 @@ import {
   payments,
   productCodes,
   productCodeVersions,
+  shiftReports,
   shifts,
   stockLedger,
   users,
@@ -99,6 +100,17 @@ const cashMovementSelection = {
   amountCents: cashMovements.amountCents,
   reason: cashMovements.reason,
   createdAt: cashMovements.createdAt,
+};
+
+const cashMovementDirection = {
+  deposit: 1,
+  cash_to_safe: -1,
+  drop: -1,
+  paid_in: 1,
+  paid_out: -1,
+  refund: -1,
+  expense: -1,
+  income: 1,
 };
 
 function parseAmount(amount) {
@@ -378,22 +390,65 @@ app.post('/api/shifts/:id/close', async (req, res, next) => {
       return res.status(403).json({ error: 'Invalid PIN' });
     }
 
-    const expected =
-      normalizedExpected !== null
-        ? Math.round(normalizedExpected)
-        : Math.round(Number(shift.expectedCashCents ?? shift.openingCashCents ?? 0));
     const closing = Math.round(normalizedClosing);
-    const variance = closing - expected;
+    const opening = Math.round(Number(shift.openingCashCents ?? 0));
 
-    const updatedShift = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      const [paymentRows, movementRows] = await Promise.all([
+        tx
+          .select({
+            method: payments.method,
+            totalCents: sql`COALESCE(SUM(${payments.amountCents}), 0)`,
+            count: sql`COUNT(*)`,
+          })
+          .from(payments)
+          .where(eq(payments.shiftId, shiftId))
+          .groupBy(payments.method),
+        tx
+          .select({
+            kind: cashMovements.kind,
+            totalCents: sql`COALESCE(SUM(${cashMovements.amountCents}), 0)`,
+            count: sql`COUNT(*)`,
+          })
+          .from(cashMovements)
+          .where(eq(cashMovements.shiftId, shiftId))
+          .groupBy(cashMovements.kind),
+      ]);
+
+      const paymentsByMethod = paymentRows.reduce((acc, row) => {
+        const total = Number(row.totalCents ?? 0);
+        const count = Number(row.count ?? 0);
+        acc[row.method] = { totalCents: total, count };
+        return acc;
+      }, {});
+
+      const cashPaymentsCents = paymentsByMethod.cash?.totalCents ?? 0;
+
+      const movementTotals = movementRows.reduce((acc, row) => {
+        const total = Number(row.totalCents ?? 0);
+        const count = Number(row.count ?? 0);
+        acc[row.kind] = { totalCents: total, count };
+        return acc;
+      }, {});
+
+      const netMovementCents = movementRows.reduce((sum, row) => {
+        const direction = cashMovementDirection[row.kind] ?? 0;
+        const total = Number(row.totalCents ?? 0);
+        return sum + direction * total;
+      }, 0);
+
+      const computedExpected = Math.max(0, opening + cashPaymentsCents + netMovementCents);
+      const variance = closing - computedExpected;
+      const closedAt = new Date();
+
       await tx
         .update(shifts)
         .set({
           closedBy: Number(closedBy),
           closingCashCents: closing,
-          expectedCashCents: expected,
+          expectedCashCents: computedExpected,
           overShortCents: variance,
-          closedAt: new Date(),
+          closedAt,
         })
         .where(eq(shifts.id, shiftId));
 
@@ -407,10 +462,36 @@ app.post('/api/shifts/:id/close', async (req, res, next) => {
         throw new Error('FAILED_TO_CLOSE_SHIFT');
       }
 
-      return row;
+      await tx.delete(shiftReports).where(eq(shiftReports.shiftId, shiftId));
+
+      const snapshot = {
+        computedAt: closedAt.toISOString(),
+        shift: {
+          id: shiftId,
+          branchId: Number(shift.branchId),
+          openedBy: Number(shift.openedBy),
+          closedBy: Number(closedBy),
+          openedAt: shift.openedAt instanceof Date ? shift.openedAt.toISOString() : shift.openedAt,
+          closedAt: closedAt.toISOString(),
+        },
+        openingCashCents: opening,
+        closingCashCents: closing,
+        expectedCashCents: computedExpected,
+        overShortCents: variance,
+        cashPaymentsCents,
+        paymentsByMethod,
+        cashMovements: {
+          totalsByKind: movementTotals,
+          netMovementCents,
+        },
+      };
+
+      await tx.insert(shiftReports).values({ shiftId, snapshot });
+
+      return { shift: row, snapshot };
     });
 
-    res.json({ shift: updatedShift });
+    res.json(result);
   } catch (error) {
     if (error instanceof Error && error.message === 'FAILED_TO_CLOSE_SHIFT') {
       return res.status(500).json({ error: 'Unable to close shift' });
