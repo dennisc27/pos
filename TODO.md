@@ -16,8 +16,8 @@
 - [x] POS - Gift Card (/pos/gift-card) - BE - Update gift_card_ledger
 - [x] POS - Gift Card (/pos/gift-card) - FE - Issue/reload/redeem forms + balance widget
 - [x] POS - Gift Card (/pos/gift-card) - AC - Balance reflects deltas exactly; prevents overdraft
-- [x] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/open (with PIN), POST /api/shifts/:id/close
-- [x] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/:id/drop|paid-in|paid-out (kinds validated)
+- [ ] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/open (with PIN), POST /api/shifts/:id/close
+- [ ] Cash & Shifts - Shifts (/cash/shift) - BE - POST /api/shifts/:id/drop|paid-in|paid-out (kinds validated)
 - [ ] Cash & Shifts - Shifts (/cash/shift) - BE - Compute expected vs actual; persist shift_reports.snapshot
 - [ ] Cash & Shifts - Shifts (/cash/shift) - FE - Denomination counter; drawer actions; Z-report list
 - [ ] Cash & Shifts - Shifts (/cash/shift) - AC - Over/short computed; discrepancy > threshold flagged
