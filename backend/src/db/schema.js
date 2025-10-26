@@ -91,23 +91,29 @@ export const productCodeVersions = mysqlTable('product_code_versions', {
 export const shifts = mysqlTable('shifts', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   branchId: bigint('branch_id', { mode: 'number' }).notNull(),
-  userId: bigint('user_id', { mode: 'number' }).notNull(),
+  openedBy: bigint('opened_by', { mode: 'number' }).notNull(),
+  closedBy: bigint('closed_by', { mode: 'number' }),
+  openingCashCents: bigint('opening_cash_cents', { mode: 'number' }).notNull(),
+  closingCashCents: bigint('closing_cash_cents', { mode: 'number' }),
+  expectedCashCents: bigint('expected_cash_cents', { mode: 'number' }),
+  overShortCents: bigint('over_short_cents', { mode: 'number' }),
   openedAt: timestamp('opened_at').defaultNow(),
   closedAt: timestamp('closed_at'),
-  expectedCashCents: bigint('expected_cash_cents', { mode: 'number' }).default(0),
-  actualCashCents: bigint('actual_cash_cents', { mode: 'number' }),
-  varianceCents: bigint('variance_cents', { mode: 'number' }),
-  notes: text('notes'),
+});
+
+export const shiftReports = mysqlTable('shift_reports', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  shiftId: bigint('shift_id', { mode: 'number' }).notNull(),
+  snapshot: json('snapshot').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
 
 export const cashMovements = mysqlTable('cash_movements', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   shiftId: bigint('shift_id', { mode: 'number' }).notNull(),
-  kind: mysqlEnum('kind', ['deposit', 'cash_to_safe', 'drop', 'paid_in', 'paid_out', 'expense', 'income']).notNull(),
+  kind: mysqlEnum('kind', ['deposit', 'cash_to_safe', 'drop', 'paid_in', 'paid_out', 'refund', 'expense', 'income']).notNull(),
   amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
-  description: varchar('description', { length: 200 }),
+  reason: text('reason'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

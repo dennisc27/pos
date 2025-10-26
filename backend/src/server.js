@@ -3,8 +3,10 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { connectDB, closeConnection, db } from './db/connection.js';
 import {
+  cashMovements,
   creditNoteLedger,
   creditNotes,
   giftCardLedger,
@@ -15,9 +17,11 @@ import {
   payments,
   productCodes,
   productCodeVersions,
+  shifts,
   stockLedger,
+  users,
 } from './db/schema.js';
-import { and, desc, eq, like, or, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, like, or, sql } from 'drizzle-orm';
 
 // Load environment variables
 dotenv.config();
@@ -35,10 +39,196 @@ app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+const hexRegex = /^[0-9a-f]+$/i;
+
+function normalizeStoredPinHash(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Uint8Array || value instanceof Buffer) {
+    return Buffer.from(value).toString('hex');
+  }
+
+  if (typeof value === 'string') {
+    if (hexRegex.test(value)) {
+      return value.toLowerCase();
+    }
+
+    return Buffer.from(value, 'utf8').toString('hex');
+  }
+
+  return null;
+}
+
+function verifyPin(pin, storedHash) {
+  if (!pin) {
+    return false;
+  }
+
+  const hashedPin = crypto.createHash('sha256').update(pin).digest('hex');
+  const normalizedStored = normalizeStoredPinHash(storedHash);
+
+  if (normalizedStored) {
+    if (hashedPin === normalizedStored) {
+      return true;
+    }
+  }
+
+  const fallbackPin = process.env.SHIFT_MANAGER_PIN || process.env.MANAGER_OVERRIDE_PIN || null;
+  return fallbackPin ? pin === fallbackPin : false;
+}
+
+const shiftSelection = {
+  id: shifts.id,
+  branchId: shifts.branchId,
+  openedBy: shifts.openedBy,
+  closedBy: shifts.closedBy,
+  openingCashCents: shifts.openingCashCents,
+  closingCashCents: shifts.closingCashCents,
+  expectedCashCents: shifts.expectedCashCents,
+  overShortCents: shifts.overShortCents,
+  openedAt: shifts.openedAt,
+  closedAt: shifts.closedAt,
+};
+
+const cashMovementSelection = {
+  id: cashMovements.id,
+  shiftId: cashMovements.shiftId,
+  kind: cashMovements.kind,
+  amountCents: cashMovements.amountCents,
+  reason: cashMovements.reason,
+  createdAt: cashMovements.createdAt,
+};
+
+function parseAmount(amount) {
+  const normalized = Number(amount);
+
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return null;
+  }
+
+  return Math.round(normalized);
+}
+
+function createShiftMovementHandler(kind, direction) {
+  return async (req, res, next) => {
+    try {
+      const shiftId = Number(req.params.id);
+
+      if (!Number.isInteger(shiftId) || shiftId <= 0) {
+        return res.status(400).json({ error: 'Shift id must be a positive number' });
+      }
+
+      const { amountCents, performedBy, pin, reason = null } = req.body ?? {};
+
+      if (!performedBy || !pin) {
+        return res.status(400).json({ error: 'performedBy and pin are required' });
+      }
+
+      const performerId = Number(performedBy);
+
+      if (!Number.isInteger(performerId) || performerId <= 0) {
+        return res.status(400).json({ error: 'performedBy must be a positive number' });
+      }
+
+      const amount = parseAmount(amountCents);
+
+      if (amount === null) {
+        return res.status(400).json({ error: 'amountCents must be a positive number' });
+      }
+
+      const trimmedReason = typeof reason === 'string' ? reason.trim() : null;
+      const normalizedReason = trimmedReason && trimmedReason.length > 0 ? trimmedReason : null;
+
+      if (direction < 0 && !normalizedReason) {
+        return res.status(400).json({ error: 'reason is required for cash drops and paid out movements' });
+      }
+
+      const [shift] = await db
+        .select(shiftSelection)
+        .from(shifts)
+        .where(eq(shifts.id, shiftId))
+        .limit(1);
+
+      if (!shift) {
+        return res.status(404).json({ error: 'Shift not found' });
+      }
+
+      if (shift.closedAt) {
+        return res.status(409).json({ error: 'Shift is already closed' });
+      }
+
+      const [user] = await db
+        .select({ id: users.id, branchId: users.branchId, pinHash: users.pinHash })
+        .from(users)
+        .where(eq(users.id, performerId))
+        .limit(1);
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (Number(user.branchId) !== Number(shift.branchId)) {
+        return res.status(403).json({ error: 'User is not assigned to this branch' });
+      }
+
+      if (!verifyPin(pin, user.pinHash)) {
+        return res.status(403).json({ error: 'Invalid PIN' });
+      }
+
+      const baseExpected = Number(shift.expectedCashCents ?? shift.openingCashCents ?? 0);
+      const nextExpected = baseExpected + direction * amount;
+
+      if (nextExpected < 0) {
+        return res.status(400).json({ error: 'Movement would result in negative expected cash' });
+      }
+
+      const result = await db.transaction(async (tx) => {
+        await tx.insert(cashMovements).values({
+          shiftId,
+          kind,
+          amountCents: amount,
+          reason: normalizedReason,
+        });
+
+        await tx
+          .update(shifts)
+          .set({ expectedCashCents: nextExpected })
+          .where(eq(shifts.id, shiftId));
+
+        const [[updatedShift], [movement]] = await Promise.all([
+          tx.select(shiftSelection).from(shifts).where(eq(shifts.id, shiftId)).limit(1),
+          tx
+            .select(cashMovementSelection)
+            .from(cashMovements)
+            .where(eq(cashMovements.shiftId, shiftId))
+            .orderBy(desc(cashMovements.id))
+            .limit(1),
+        ]);
+
+        if (!updatedShift || !movement) {
+          throw new Error('FAILED_TO_RECORD_MOVEMENT');
+        }
+
+        return { shift: updatedShift, movement };
+      });
+
+      res.status(201).json(result);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'FAILED_TO_RECORD_MOVEMENT') {
+        return res.status(500).json({ error: 'Unable to record cash movement' });
+      }
+
+      next(error);
+    }
+  };
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     timestamp: new Date().toISOString(),
     database: 'connected'
   });
@@ -55,6 +245,184 @@ app.get('/api', (req, res) => {
     }
   });
 });
+
+app.post('/api/shifts/open', async (req, res, next) => {
+  try {
+    const { branchId, openedBy, openingCashCents, pin } = req.body ?? {};
+
+    if (!branchId || !openedBy) {
+      return res.status(400).json({ error: 'branchId and openedBy are required' });
+    }
+
+    const normalizedOpening = Number(openingCashCents);
+    if (!Number.isFinite(normalizedOpening) || normalizedOpening < 0) {
+      return res.status(400).json({ error: 'openingCashCents must be a non-negative number' });
+    }
+
+    const [user] = await db
+      .select({ id: users.id, branchId: users.branchId, pinHash: users.pinHash })
+      .from(users)
+      .where(eq(users.id, openedBy))
+      .limit(1);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (Number(user.branchId) !== Number(branchId)) {
+      return res.status(403).json({ error: 'User is not assigned to this branch' });
+    }
+
+    if (!verifyPin(pin, user.pinHash)) {
+      return res.status(403).json({ error: 'Invalid PIN' });
+    }
+
+    const [existingShift] = await db
+      .select({ id: shifts.id })
+      .from(shifts)
+      .where(and(eq(shifts.branchId, Number(branchId)), isNull(shifts.closedAt)))
+      .limit(1);
+
+    if (existingShift) {
+      return res.status(409).json({ error: 'A shift is already open for this branch' });
+    }
+
+    const createdShift = await db.transaction(async (tx) => {
+      await tx.insert(shifts).values({
+        branchId: Number(branchId),
+        openedBy: Number(openedBy),
+        openingCashCents: Math.round(normalizedOpening),
+        expectedCashCents: Math.round(normalizedOpening),
+      });
+
+      const [shiftRow] = await tx
+        .select(shiftSelection)
+        .from(shifts)
+        .orderBy(desc(shifts.id))
+        .limit(1);
+
+      if (!shiftRow) {
+        throw new Error('FAILED_TO_CREATE_SHIFT');
+      }
+
+      return shiftRow;
+    });
+
+    res.status(201).json({ shift: createdShift });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'FAILED_TO_CREATE_SHIFT') {
+      return res.status(500).json({ error: 'Unable to open shift' });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/shifts/:id/close', async (req, res, next) => {
+  try {
+    const shiftId = Number(req.params.id);
+
+    if (!Number.isFinite(shiftId) || shiftId <= 0) {
+      return res.status(400).json({ error: 'Shift id must be a positive number' });
+    }
+
+    const { closedBy, pin, closingCashCents, expectedCashCents = null } = req.body ?? {};
+
+    if (!closedBy || !pin) {
+      return res.status(400).json({ error: 'closedBy and pin are required' });
+    }
+
+    const normalizedClosing = Number(closingCashCents);
+    if (!Number.isFinite(normalizedClosing) || normalizedClosing < 0) {
+      return res.status(400).json({ error: 'closingCashCents must be a non-negative number' });
+    }
+
+    const normalizedExpected =
+      expectedCashCents === null || expectedCashCents === undefined
+        ? null
+        : Number(expectedCashCents);
+
+    if (normalizedExpected !== null && (!Number.isFinite(normalizedExpected) || normalizedExpected < 0)) {
+      return res.status(400).json({ error: 'expectedCashCents must be a non-negative number when provided' });
+    }
+
+    const [shift] = await db
+      .select(shiftSelection)
+      .from(shifts)
+      .where(eq(shifts.id, shiftId))
+      .limit(1);
+
+    if (!shift) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+
+    if (shift.closedAt) {
+      return res.status(409).json({ error: 'Shift is already closed' });
+    }
+
+    const [user] = await db
+      .select({ id: users.id, branchId: users.branchId, pinHash: users.pinHash })
+      .from(users)
+      .where(eq(users.id, closedBy))
+      .limit(1);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (Number(user.branchId) !== Number(shift.branchId)) {
+      return res.status(403).json({ error: 'User is not assigned to this branch' });
+    }
+
+    if (!verifyPin(pin, user.pinHash)) {
+      return res.status(403).json({ error: 'Invalid PIN' });
+    }
+
+    const expected =
+      normalizedExpected !== null
+        ? Math.round(normalizedExpected)
+        : Math.round(Number(shift.expectedCashCents ?? shift.openingCashCents ?? 0));
+    const closing = Math.round(normalizedClosing);
+    const variance = closing - expected;
+
+    const updatedShift = await db.transaction(async (tx) => {
+      await tx
+        .update(shifts)
+        .set({
+          closedBy: Number(closedBy),
+          closingCashCents: closing,
+          expectedCashCents: expected,
+          overShortCents: variance,
+          closedAt: new Date(),
+        })
+        .where(eq(shifts.id, shiftId));
+
+      const [row] = await tx
+        .select(shiftSelection)
+        .from(shifts)
+        .where(eq(shifts.id, shiftId))
+        .limit(1);
+
+      if (!row) {
+        throw new Error('FAILED_TO_CLOSE_SHIFT');
+      }
+
+      return row;
+    });
+
+    res.json({ shift: updatedShift });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'FAILED_TO_CLOSE_SHIFT') {
+      return res.status(500).json({ error: 'Unable to close shift' });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/shifts/:id/drop', createShiftMovementHandler('drop', -1));
+app.post('/api/shifts/:id/paid-in', createShiftMovementHandler('paid_in', 1));
+app.post('/api/shifts/:id/paid-out', createShiftMovementHandler('paid_out', -1));
 
 app.get('/api/products', async (req, res, next) => {
   try {
