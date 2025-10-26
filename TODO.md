@@ -42,8 +42,8 @@ BE
 - [x] Restock when condition in (new, used)
 
 FE
-- [ ] Invoice lookup field; selectable lines; totals_box; policy_alerts
-- [ ] Choose refund method (cash/store_credit)
+- [x] Invoice lookup field; selectable lines; totals_box; policy_alerts
+- [x] Choose refund method (cash/store_credit)
 
 AC
 - [x] Return line restocks if not damaged

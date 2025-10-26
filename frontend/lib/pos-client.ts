@@ -1,9 +1,12 @@
 import type {
   CreatedInvoice,
   CreatedOrder,
+  CreatedRefund,
+  InvoiceLookupResult,
   ProductSearchResult,
   ReceiptPrintJob,
   RecordedPayment,
+  RefundMethod,
   ValidatedOrder
 } from "@/components/pos/types";
 
@@ -223,6 +226,71 @@ export async function recordPayment(
   }
 
   const json = (await response.json()) as RecordPaymentResponse;
+  return json.data;
+}
+
+type InvoiceLookupResponse = {
+  data: InvoiceLookupResult;
+  meta: { found: boolean };
+};
+
+export async function fetchInvoiceDetails(invoiceNo: string, { signal }: { signal?: AbortSignal } = {}) {
+  const normalized = invoiceNo.trim();
+  if (!normalized) {
+    throw new Error("Invoice number is required.");
+  }
+
+  const response = await fetch(`/api/invoices/${encodeURIComponent(normalized)}`, {
+    method: "GET",
+    signal
+  });
+
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => null);
+    const message =
+      (errorPayload && typeof errorPayload.message === "string" && errorPayload.message) ||
+      `Unable to fetch invoice (status ${response.status})`;
+    throw new Error(message);
+  }
+
+  const json = (await response.json()) as InvoiceLookupResponse;
+  return json.data;
+}
+
+type CreateRefundPayload = {
+  invoiceNo: string;
+  condition: "new" | "used" | "damaged";
+  refundMethod: RefundMethod;
+  reason?: string | null;
+  items: {
+    orderItemId: number;
+    qty: number;
+    refundCents: number;
+  }[];
+};
+
+type CreateRefundResponse = {
+  data: CreatedRefund;
+  meta: { created: boolean };
+};
+
+export async function createRefund(payload: CreateRefundPayload, { signal }: { signal?: AbortSignal } = {}) {
+  const response = await fetch("/api/refunds", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(payload),
+    signal
+  });
+
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => null);
+    const message =
+      (errorPayload && typeof errorPayload.message === "string" && errorPayload.message) ||
+      `Unable to create refund (status ${response.status})`;
+    throw new Error(message);
+  }
+
+  const json = (await response.json()) as CreateRefundResponse;
   return json.data;
 }
 

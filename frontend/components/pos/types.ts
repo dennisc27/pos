@@ -228,3 +228,82 @@ export type ReceiptPrintJob = {
     escposBase64: string;
   };
 };
+
+export type RefundMethod = "cash" | "store_credit";
+
+export type InvoiceLookupItem = {
+  id: number;
+  qty: number;
+  unitPriceCents: number;
+  totalCents: number;
+  product: {
+    codeId: number;
+    code: string | null;
+    name: string | null;
+    sku: string | null;
+    versionId: number;
+  };
+  refunded: {
+    qty: number;
+    cents: number;
+  };
+  refundable: {
+    qty: number;
+    cents: number;
+  };
+};
+
+export type InvoiceLookupResult = {
+  invoice: {
+    id: number;
+    invoiceNo: string;
+    totalCents: number;
+    taxCents: number;
+    createdAt: string | null;
+  };
+  order: {
+    id: number;
+    orderNumber: string | null;
+    status: string;
+    branchId: number;
+    userId: number;
+    customerId: number | null;
+    subtotalCents: number;
+    taxCents: number;
+    totalCents: number;
+  };
+  items: InvoiceLookupItem[];
+  totals: {
+    refundableCents: number;
+    refundedCents: number;
+  };
+};
+
+export type SalesReturnLine = {
+  orderItemId: number;
+  qty: number;
+  refundCents: number;
+  remainingQty: number;
+  remainingCents: number;
+};
+
+export type CreatedRefund = {
+  salesReturn: {
+    id: number;
+    invoiceId: number;
+    condition: string;
+    refundMethod: RefundMethod;
+    totalRefundCents: number;
+    createdAt: string | null;
+    reason: string | null;
+  };
+  lines: SalesReturnLine[];
+  restocked: { productCodeVersionId: number; qty: number }[];
+  creditNote: {
+    id: number;
+    customerId: number;
+    balanceCents: number;
+    reason: string | null;
+    createdAt: string | null;
+  } | null;
+};
