@@ -527,6 +527,15 @@ app.post('/api/shifts/:id/close', async (req, res, next) => {
       return res.status(400).json({ error: 'closingCashCents must be a non-negative number' });
     }
 
+    const normalizedExpected =
+      expectedCashCents === null || expectedCashCents === undefined
+        ? null
+        : Number(expectedCashCents);
+
+    if (normalizedExpected !== null && (!Number.isFinite(normalizedExpected) || normalizedExpected < 0)) {
+      return res.status(400).json({ error: 'expectedCashCents must be a non-negative number when provided' });
+    }
+
     const [shift] = await db
       .select(shiftSelection)
       .from(shifts)
