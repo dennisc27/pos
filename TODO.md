@@ -19,8 +19,8 @@
 - [x] Cash & Shifts - Shifts (/backend/app/cash/shift) - BE - POST /api/shifts/open (with PIN), POST /api/shifts/:id/close
 - [x] Cash & Shifts - Shifts (/backend/app/cash/shift) - BE - POST /api/shifts/:id/drop|paid-in|paid-out (kinds validated)
 - [x] Cash & Shifts - Shifts (/backend/app/cash/shift) - BE - Compute expected vs actual; persist shift_reports.snapshot
-- [ ] Cash & Shifts - Shifts (/frontend/app/cash/shift) - FE - Denomination counter; drawer actions; Z-report list
-- [ ] Cash & Shifts - Shifts (/cash/shift) - AC - Over/short computed; discrepancy > threshold flagged
+- [x] Cash & Shifts - Shifts (/frontend/app/cash/shift) - FE - Denomination counter; drawer actions; Z-report list
+- [x] Cash & Shifts - Shifts (/cash/shift) - AC - Over/short computed; discrepancy > threshold flagged
 - [ ] Cash & Shifts - Movements (/backend/app/cash/movements) - BE - POST /api/cash-movements (kinds: deposit, cash_to_safe, drop, paid_in, paid_out, expense, income)
 - [ ] Cash & Shifts - Movements (/frontend/app/cash/movements) - FE - Movement form + table filtered to current shift
 - [ ] Cash & Shifts - Movements (/cash/movements) - AC - Movement appears in shift end totals
