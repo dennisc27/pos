@@ -37,17 +37,17 @@ TEST/AC
 
 ### 1.2 Refunds (/pos/refund)
 BE
-- [ ] `GET /api/invoices/:no`
-- [ ] `POST /api/refunds` → creates sales_return + items
-- [ ] Restock when condition in (new, used)
+- [x] `GET /api/invoices/:no`
+- [x] `POST /api/refunds` → creates sales_return + items
+- [x] Restock when condition in (new, used)
 
 FE
 - [ ] Invoice lookup field; selectable lines; totals_box; policy_alerts
 - [ ] Choose refund method (cash/store_credit)
 
 AC
-- [ ] Return line restocks if not damaged
-- [ ] Credit note issued when store_credit
+- [x] Return line restocks if not damaged
+- [x] Credit note issued when store_credit
 
 ### 1.3 Buy from Customer (/pos/buy)
 BE

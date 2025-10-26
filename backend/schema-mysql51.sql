@@ -168,6 +168,30 @@ CREATE TABLE IF NOT EXISTS payments (
   FOREIGN KEY (invoice_id) REFERENCES invoices(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+CREATE TABLE IF NOT EXISTS sales_returns (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  invoice_id BIGINT NOT NULL,
+  reason TEXT,
+  condition ENUM('new','used','damaged') DEFAULT 'used',
+  refund_method ENUM('cash','store_credit') NOT NULL,
+  total_refund_cents BIGINT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE IF NOT EXISTS sales_return_items (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  sales_return_id BIGINT NOT NULL,
+  order_item_id BIGINT NOT NULL,
+  product_code_version_id BIGINT NOT NULL,
+  qty INT NOT NULL,
+  refund_cents BIGINT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (sales_return_id) REFERENCES sales_returns(id),
+  FOREIGN KEY (order_item_id) REFERENCES order_items(id),
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 CREATE TABLE IF NOT EXISTS gift_cards (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   code VARCHAR(32) NOT NULL UNIQUE,
@@ -309,6 +333,9 @@ CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_customer_id ON orders(customer_id);
 CREATE INDEX idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX idx_order_items_product_code_version_id ON order_items(product_code_version_id);
+CREATE INDEX idx_sales_returns_invoice_id ON sales_returns(invoice_id);
+CREATE INDEX idx_sales_return_items_order_item_id ON sales_return_items(order_item_id);
+CREATE INDEX idx_sales_return_items_product_code_version_id ON sales_return_items(product_code_version_id);
 CREATE INDEX idx_customers_branch_id ON customers(branch_id);
 CREATE INDEX idx_loans_branch_id ON loans(branch_id);
 CREATE INDEX idx_loans_customer_id ON loans(customer_id);

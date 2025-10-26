@@ -10,6 +10,7 @@ import ordersRouter from './routes/orders.js';
 import invoicesRouter from './routes/invoices.js';
 import paymentsRouter from './routes/payments.js';
 import receiptsRouter from './routes/receipts.js';
+import refundsRouter from './routes/refunds.js';
 
 // Load environment variables
 dotenv.config();
@@ -48,7 +49,9 @@ app.get('/api', (req, res) => {
       cartPriceOverride: '/api/cart/price-override',
       orders: '/api/orders',
       invoices: '/api/invoices',
+      invoiceLookup: '/api/invoices/:invoiceNo',
       payments: '/api/payments',
+      refunds: '/api/refunds',
       receiptsPrint: '/api/receipts/:invoiceId/print'
     }
   });
@@ -60,6 +63,7 @@ app.use('/api/orders', ordersRouter);
 app.use('/api/invoices', invoicesRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/receipts', receiptsRouter);
+app.use('/api/refunds', refundsRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

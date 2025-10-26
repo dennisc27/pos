@@ -168,6 +168,26 @@ export const payments = mysqlTable('payments', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+export const salesReturns = mysqlTable('sales_returns', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  invoiceId: bigint('invoice_id', { mode: 'number' }).notNull(),
+  reason: text('reason'),
+  condition: mysqlEnum('condition', ['new', 'used', 'damaged']).default('used'),
+  refundMethod: mysqlEnum('refund_method', ['cash', 'store_credit']).notNull(),
+  totalRefundCents: bigint('total_refund_cents', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const salesReturnItems = mysqlTable('sales_return_items', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  salesReturnId: bigint('sales_return_id', { mode: 'number' }).notNull(),
+  orderItemId: bigint('order_item_id', { mode: 'number' }).notNull(),
+  productCodeVersionId: bigint('product_code_version_id', { mode: 'number' }).notNull(),
+  qty: int('qty').notNull(),
+  refundCents: bigint('refund_cents', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 export const giftCards = mysqlTable('gift_cards', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   code: varchar('code', { length: 32 }).notNull().unique(),

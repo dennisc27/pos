@@ -11,6 +11,7 @@ import {
   orderItems,
   orders,
   payments,
+  productCodeVersions,
   stockLedger,
 } from '../db/schema.js';
 import { toPositiveInteger } from '../utils/validation.js';
@@ -351,6 +352,13 @@ paymentsRouter.post('/', async (req, res, next) => {
                   })),
                 )
                 .execute();
+
+              for (const item of saleItems) {
+                await tx
+                  .update(productCodeVersions)
+                  .set({ qtyOnHand: sql`${productCodeVersions.qtyOnHand} - ${Math.abs(item.qty)}` })
+                  .where(eq(productCodeVersions.id, item.productCodeVersionId));
+              }
               stockPosted = true;
             }
           }
