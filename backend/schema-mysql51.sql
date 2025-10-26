@@ -145,6 +145,78 @@ CREATE TABLE IF NOT EXISTS order_items (
   FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+CREATE TABLE IF NOT EXISTS invoices (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  order_id BIGINT NOT NULL,
+  invoice_no VARCHAR(64) NOT NULL UNIQUE,
+  total_cents BIGINT NOT NULL,
+  tax_cents BIGINT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE IF NOT EXISTS payments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  order_id BIGINT,
+  invoice_id BIGINT,
+  shift_id BIGINT,
+  method ENUM('cash','card','transfer','gift_card','credit_note') NOT NULL,
+  amount_cents BIGINT NOT NULL,
+  meta TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(id),
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE IF NOT EXISTS gift_cards (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(32) NOT NULL UNIQUE,
+  balance_cents BIGINT NOT NULL,
+  expires_on DATE NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE IF NOT EXISTS gift_card_ledger (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  gift_card_id BIGINT NOT NULL,
+  delta_cents BIGINT NOT NULL,
+  ref_table VARCHAR(40),
+  ref_id BIGINT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (gift_card_id) REFERENCES gift_cards(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE IF NOT EXISTS credit_notes (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  customer_id BIGINT NOT NULL,
+  balance_cents BIGINT NOT NULL,
+  reason TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (customer_id) REFERENCES customers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE IF NOT EXISTS credit_note_ledger (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  credit_note_id BIGINT NOT NULL,
+  delta_cents BIGINT NOT NULL,
+  ref_table VARCHAR(40),
+  ref_id BIGINT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (credit_note_id) REFERENCES credit_notes(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE IF NOT EXISTS price_override_approvals (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  manager_id BIGINT NOT NULL,
+  cart_total_cents BIGINT NOT NULL,
+  override_total_cents BIGINT NOT NULL,
+  override_delta_cents BIGINT NOT NULL,
+  reason VARCHAR(255),
+  approval_code CHAR(36) NOT NULL UNIQUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (manager_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
 -- ========= CUSTOMERS =========
 CREATE TABLE IF NOT EXISTS customers (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

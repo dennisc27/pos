@@ -252,10 +252,22 @@ CREATE TABLE IF NOT EXISTS order_items (
   FOREIGN KEY (code_id) REFERENCES product_codes(id)
 );
 
+CREATE TABLE IF NOT EXISTS price_override_approvals (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  manager_id BIGINT NOT NULL,
+  cart_total_cents BIGINT NOT NULL,
+  override_total_cents BIGINT NOT NULL,
+  override_delta_cents BIGINT NOT NULL,
+  reason VARCHAR(255),
+  approval_code CHAR(36) NOT NULL UNIQUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (manager_id) REFERENCES users(id)
+);
+
 CREATE TABLE IF NOT EXISTS invoices (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   order_id BIGINT NOT NULL,
-  invoice_no VARCHAR(64) UNIQUE,
+  invoice_no VARCHAR(64) UNIQUE NOT NULL,
   total_cents BIGINT NOT NULL,
   tax_cents BIGINT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

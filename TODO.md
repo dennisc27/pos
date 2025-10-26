@@ -16,12 +16,12 @@ The app has to folders backend an frontend.
 ### 1.1 New Sale (/pos/sale)
 BE
 - [x] Endpoint: `GET /api/products?q=` (search by name/sku/code)
-- [ ] Endpoint: `POST /api/cart/price-override` (manager approval)
-- [ ] Endpoint: `POST /api/orders` → creates order + items
-- [ ] Endpoint: `POST /api/invoices` → totals + tax (server truth)
-- [ ] Endpoint: `POST /api/payments` (cash/card/transfer/gift_card/credit_note)
-- [ ] Endpoint: `POST /api/receipts/:invoiceId/print` (ESC/POS)
-- [ ] Ledger: on invoice paid → `stock_ledger(reason='sale', qty negative)`; gift/credit ledgers update
+- [x] Endpoint: `POST /api/cart/price-override` (manager approval)
+- [x] Endpoint: `POST /api/orders` → creates order + items
+- [x] Endpoint: `POST /api/invoices` → totals + tax (server truth)
+- [x] Endpoint: `POST /api/payments` (cash/card/transfer/gift_card/credit_note)
+- [x] Endpoint: `POST /api/receipts/:invoiceId/print` (ESC/POS)
+- [x] Ledger: on invoice paid → `stock_ledger(reason='sale', qty negative)`; gift/credit ledgers update
 
 FE
 - [ ] Page scaffold with: scan_input, cart_table, tender_panel, receipt_preview

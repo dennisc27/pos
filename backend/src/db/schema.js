@@ -1,16 +1,17 @@
-import { 
-  bigint, 
-  boolean, 
-  char, 
-  datetime, 
-  decimal, 
-  int, 
-  json, 
-  mysqlEnum, 
-  mysqlTable, 
-  text, 
-  timestamp, 
-  varchar 
+import {
+  bigint,
+  boolean,
+  char,
+  date,
+  datetime,
+  decimal,
+  int,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar
 } from 'drizzle-orm/mysql-core';
 
 // ========= ORG & AUTH =========
@@ -133,6 +134,71 @@ export const orderItems = mysqlTable('order_items', {
   qty: int('qty').notNull(),
   unitPriceCents: bigint('unit_price_cents', { mode: 'number' }).notNull(),
   totalCents: bigint('total_cents', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const priceOverrideApprovals = mysqlTable('price_override_approvals', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  managerId: bigint('manager_id', { mode: 'number' }).notNull(),
+  cartTotalCents: bigint('cart_total_cents', { mode: 'number' }).notNull(),
+  overrideTotalCents: bigint('override_total_cents', { mode: 'number' }).notNull(),
+  overrideDeltaCents: bigint('override_delta_cents', { mode: 'number' }).notNull(),
+  reason: varchar('reason', { length: 255 }),
+  approvalCode: char('approval_code', { length: 36 }).notNull().unique(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const invoices = mysqlTable('invoices', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  orderId: bigint('order_id', { mode: 'number' }).notNull(),
+  invoiceNo: varchar('invoice_no', { length: 64 }).notNull().unique(),
+  totalCents: bigint('total_cents', { mode: 'number' }).notNull(),
+  taxCents: bigint('tax_cents', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const payments = mysqlTable('payments', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  orderId: bigint('order_id', { mode: 'number' }),
+  invoiceId: bigint('invoice_id', { mode: 'number' }),
+  shiftId: bigint('shift_id', { mode: 'number' }),
+  method: mysqlEnum('method', ['cash', 'card', 'transfer', 'gift_card', 'credit_note']).notNull(),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  meta: json('meta'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const giftCards = mysqlTable('gift_cards', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  code: varchar('code', { length: 32 }).notNull().unique(),
+  balanceCents: bigint('balance_cents', { mode: 'number' }).notNull(),
+  expiresOn: date('expires_on'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const giftCardLedger = mysqlTable('gift_card_ledger', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  giftCardId: bigint('gift_card_id', { mode: 'number' }).notNull(),
+  deltaCents: bigint('delta_cents', { mode: 'number' }).notNull(),
+  refTable: varchar('ref_table', { length: 40 }),
+  refId: bigint('ref_id', { mode: 'number' }),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const creditNotes = mysqlTable('credit_notes', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  customerId: bigint('customer_id', { mode: 'number' }).notNull(),
+  balanceCents: bigint('balance_cents', { mode: 'number' }).notNull(),
+  reason: text('reason'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const creditNoteLedger = mysqlTable('credit_note_ledger', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  creditNoteId: bigint('credit_note_id', { mode: 'number' }).notNull(),
+  deltaCents: bigint('delta_cents', { mode: 'number' }).notNull(),
+  refTable: varchar('ref_table', { length: 40 }),
+  refId: bigint('ref_id', { mode: 'number' }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

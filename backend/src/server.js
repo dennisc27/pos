@@ -5,6 +5,11 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { connectDB, closeConnection } from './db/connection.js';
 import productsRouter from './routes/products.js';
+import cartRouter from './routes/cart.js';
+import ordersRouter from './routes/orders.js';
+import invoicesRouter from './routes/invoices.js';
+import paymentsRouter from './routes/payments.js';
+import receiptsRouter from './routes/receipts.js';
 
 // Load environment variables
 dotenv.config();
@@ -39,12 +44,22 @@ app.get('/api', (req, res) => {
     endpoints: {
       health: '/health',
       api: '/api',
-      products: '/api/products?q='
+      products: '/api/products?q=',
+      cartPriceOverride: '/api/cart/price-override',
+      orders: '/api/orders',
+      invoices: '/api/invoices',
+      payments: '/api/payments',
+      receiptsPrint: '/api/receipts/:invoiceId/print'
     }
   });
 });
 
 app.use('/api/products', productsRouter);
+app.use('/api/cart', cartRouter);
+app.use('/api/orders', ordersRouter);
+app.use('/api/invoices', invoicesRouter);
+app.use('/api/payments', paymentsRouter);
+app.use('/api/receipts', receiptsRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
