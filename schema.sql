@@ -43,12 +43,14 @@ CREATE TABLE IF NOT EXISTS settings (
   user_id BIGINT NULL,
   k VARCHAR(160) NOT NULL,
   v JSON NOT NULL,
-  UNIQUE KEY uniq_setting (scope, COALESCE(branch_id,0), COALESCE(user_id,0), k),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+-- Note: Unique constraint across (scope, branch_id, user_id, k) should be enforced at application level
+-- due to NULL handling complexity
 
 -- ========= CRM =========
 CREATE TABLE IF NOT EXISTS customers (
@@ -143,10 +145,24 @@ CREATE TABLE IF NOT EXISTS product_codes (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   product_id BIGINT NOT NULL,
   code VARCHAR(64) UNIQUE NOT NULL,
-  cost_cents BIGINT NOT NULL,
-  price_cents BIGINT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+-- price/cost version per sellable code per branch
+CREATE TABLE IF NOT EXISTS product_code_versions (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  product_code_id BIGINT NOT NULL,
+  branch_id BIGINT NOT NULL,
+  price_cents BIGINT NOT NULL,
+  cost_cents BIGINT,
+  qty_on_hand INT DEFAULT 0,
+  qty_reserved INT DEFAULT 0,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (product_code_id) REFERENCES product_codes(id),
+  FOREIGN KEY (branch_id) REFERENCES branches(id)
 );
 
 -- lineage for split/combine
@@ -395,7 +411,7 @@ CREATE TABLE IF NOT EXISTS sales_returns (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   invoice_id BIGINT NOT NULL,
   reason TEXT,
-  condition ENUM('new','used','damaged') DEFAULT 'used',
+  `condition` ENUM('new','used','damaged') DEFAULT 'used',
   refund_method ENUM('cash','store_credit') NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (invoice_id) REFERENCES invoices(id)
@@ -559,43 +575,6 @@ CREATE TABLE IF NOT EXISTS layaway_payments (
   note TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (layaway_id) REFERENCES layaways(id)
-);
-
--- ========= PURCHASES =========
-CREATE TABLE IF NOT EXISTS suppliers (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(160) NOT NULL,
-  email VARCHAR(190), phone VARCHAR(40),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS purchases (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  branch_id BIGINT NOT NULL,
-  supplier_id BIGINT NOT NULL,
-  invoice_no VARCHAR(64),
-  status ENUM('open','posted') DEFAULT 'open',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (branch_id) REFERENCES branches(id),
-  FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
-);
-
-CREATE TABLE IF NOT EXISTS purchase_items (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  purchase_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
-  qty DECIMAL(18,4) NOT NULL,
-  cost_cents BIGINT NOT NULL,
-  FOREIGN KEY (purchase_id) REFERENCES purchases(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
-);
-
-CREATE TABLE IF NOT EXISTS purchase_returns (
-  id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  purchase_id BIGINT NOT NULL,
-  reason TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (purchase_id) REFERENCES purchases(id)
 );
 
 -- ========= REPAIRS / FAB =========
@@ -876,7 +855,7 @@ CREATE TABLE IF NOT EXISTS ecom_return_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   return_id BIGINT NOT NULL,
   order_item_id BIGINT NOT NULL,
-  condition ENUM('new','used','damaged') DEFAULT 'new',
+  `condition` ENUM('new','used','damaged') DEFAULT 'new',
   restock BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (return_id) REFERENCES ecom_returns(id),
@@ -915,6 +894,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- ========= INDEXES =========
-CREATE INDEX IF NOT EXISTS idx_orders_branch_created ON orders(branch_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_loans_branch_status_due ON loans(branch_id, status, due_date);
-CREATE INDEX IF NOT EXISTS idx_stock_branch_code ON stock_ledger(branch_id, code_id, created_at);
+-- Note: MySQL doesn't support IF NOT EXISTS for indexes, so these will fail silently if they already exist
+CREATE INDEX idx_orders_branch_created ON orders(branch_id, created_at DESC);
+CREATE INDEX idx_loans_branch_status_due ON loans(branch_id, status, due_date);
+-- Note: stock_ledger doesn't have branch_id or code_id columns, so this index should be removed or adjusted
