@@ -68,7 +68,6 @@ import {
   stockLedger,
   users,
 } from './db/schema.js';
-import { alias } from 'drizzle-orm/mysql-core';
 import {
   and,
   asc,
@@ -846,12 +845,7 @@ function combineConditions(conditions) {
   return and(...filtered);
 }
 
-const fromBranchAlias = alias(branches, 'inventory_from_branches');
-const toBranchAlias = alias(branches, 'inventory_to_branches');
-const componentParentCodes = alias(productCodes, 'component_parent_codes');
-const componentChildCodes = alias(productCodes, 'component_child_codes');
-const shiftOpenedByUsers = alias(users, 'shift_opened_by_users');
-const shiftClosedByUsers = alias(users, 'shift_closed_by_users');
+// Table aliases are imported from schema.js
 
 async function getCountSessionWithLines(executor, sessionId) {
   const numericSessionId = Number(sessionId);
@@ -14132,7 +14126,7 @@ app.use((err, req, res, next) => {
 });
 
 // 404 handler
-app.use('*', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 

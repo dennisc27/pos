@@ -779,6 +779,15 @@ export const auditLogs = mysqlTable('audit_logs', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// ========= TABLE ALIASES FOR SELF-JOINS =========
+// Using table references (Drizzle handles aliasing internally)
+export const fromBranchAlias = branches;
+export const toBranchAlias = branches;
+export const componentParentCodes = productCodes;
+export const componentChildCodes = productCodes;
+export const shiftOpenedByUsers = users;
+export const shiftClosedByUsers = users;
+
 // Export all relations
 export const relations = {
   // Add relations here as needed
