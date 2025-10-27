@@ -53,126 +53,22 @@ const PAYMENT_METHOD_MAP: Record<TenderBreakdown["method"], "cash" | "card" | "t
   gift: "gift_card",
 };
 
-const productCategories: ProductCategory[] = [
-  { id: "all", label: "All categories", icon: AppWindow },
-  { id: "phones", label: "Mobiles", icon: Smartphone },
-  { id: "watches", label: "Watches", icon: Watch },
-  { id: "audio", label: "Headphones", icon: Headphones },
-  { id: "laptops", label: "Laptops", icon: Laptop },
-  { id: "cameras", label: "Cameras", icon: Camera },
-  { id: "fashion", label: "Accessories", icon: Shirt }
+const CATEGORY_ICON_SEQUENCE = [
+  Smartphone,
+  Watch,
+  Headphones,
+  Laptop,
+  Camera,
+  Shirt,
+  Landmark,
+  CreditCard
 ];
 
-const catalogProducts: Product[] = [
-  {
-    id: "prod-1",
-    name: "Red Note Laser",
-    sku: "MB-2100",
-    categoryId: "phones",
-    price: 18500,
-    stock: 6,
-    highlight: "Top seller",
-    previewLabel: "RN",
-    variant: "128GB · Dual SIM · Azul"
-  },
-  {
-    id: "prod-2",
-    name: "Times Track Silver",
-    sku: "WT-4413",
-    categoryId: "watches",
-    price: 14500,
-    stock: 3,
-    previewLabel: "TT",
-    variant: "Sapphire glass · Leather band"
-  },
-  {
-    id: "prod-3",
-    name: "Retro Wave Headphones",
-    sku: "HD-3019",
-    categoryId: "audio",
-    price: 9200,
-    stock: 9,
-    highlight: "Bundle price",
-    previewLabel: "RW",
-    variant: "Noise cancelling · Bluetooth"
-  },
-  {
-    id: "prod-4",
-    name: "Ultrabook Air 14",
-    sku: "LP-8801",
-    categoryId: "laptops",
-    price: 58900,
-    stock: 2,
-    previewLabel: "UA",
-    variant: "Core i7 · 16GB · 512GB SSD"
-  },
-  {
-    id: "prod-5",
-    name: "Mirrorless Cam Pro",
-    sku: "CM-7330",
-    categoryId: "cameras",
-    price: 46800,
-    stock: 4,
-    previewLabel: "MC",
-    variant: "24MP · Dual lens kit"
-  },
-  {
-    id: "prod-6",
-    name: "Neon Pulse Sneakers",
-    sku: "AC-9925",
-    categoryId: "fashion",
-    price: 7200,
-    stock: 12,
-    previewLabel: "NP",
-    variant: "Size run 37-43"
-  }
-];
+const DEFAULT_CATEGORY: ProductCategory = { id: "all", label: "All products", icon: AppWindow };
 
-const initialCartLines: CartLine[] = [
-  {
-    id: "prod-1",
-    name: "Red Note Laser",
-    sku: "MB-2100",
-    status: "featured",
-    variant: "128GB · Dual SIM · Azul",
-    qty: 1,
-    price: 18500,
-    listPrice: 19000,
-    taxRate: DEFAULT_TAX_RATE
-  },
-  {
-    id: "prod-2",
-    name: "Times Track Silver",
-    sku: "WT-4413",
-    variant: "Sapphire glass · Leather band",
-    qty: 1,
-    price: 14500,
-    listPrice: 15200,
-    taxRate: DEFAULT_TAX_RATE
-  },
-  {
-    id: "prod-3",
-    name: "Retro Wave Headphones",
-    sku: "HD-3019",
-    status: "bundle",
-    qty: 1,
-    price: 9200,
-    listPrice: 9900,
-    taxRate: DEFAULT_TAX_RATE,
-    note: "Bundle with mic stand for RD$9,900"
-  }
-];
+const initialCartLines: CartLine[] = [];
 
-const initialTenderBreakdown: TenderBreakdown[] = [
-  {
-    id: "tender-1",
-    method: "card",
-    label: TENDER_LABELS.card,
-    amount: 15000,
-    reference: "AUTH-783202",
-    status: "pending"
-  }
-];
+const initialTenderBreakdown: TenderBreakdown[] = [];
 
 function buildSummary(items: CartLine[], tenders: TenderBreakdown[]): SaleSummary {
   const subtotal = items.reduce(
@@ -229,7 +125,11 @@ function parseAmount(input: string): number | null {
 }
 
 export default function PosPage() {
-  const [activeCategoryId, setActiveCategoryId] = useState<string>(productCategories[0].id);
+  const [categories, setCategories] = useState<ProductCategory[]>([DEFAULT_CATEGORY]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+  const [productError, setProductError] = useState<string | null>(null);
+  const [activeCategoryId, setActiveCategoryId] = useState<string>(DEFAULT_CATEGORY.id);
   const [searchTerm, setSearchTerm] = useState("");
   const [cartLines, setCartLines] = useState<CartLine[]>(initialCartLines);
   const [tenderBreakdown, setTenderBreakdown] = useState<TenderBreakdown[]>(initialTenderBreakdown);
@@ -246,8 +146,101 @@ export default function PosPage() {
   const [finalizeMessage, setFinalizeMessage] = useState<string | null>(null);
 
   const resolveProductVersionId = useCallback((productId: string) => {
-    const numeric = Number.parseInt(productId.replace(/\D/g, ""), 10);
+    const numeric = Number(productId);
     return Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInventory() {
+      try {
+        setIsLoadingProducts(true);
+        setProductError(null);
+        const params = new URLSearchParams({
+          page: "1",
+          pageSize: "60",
+          status: "active",
+          availability: "in_stock",
+        });
+        const response = await fetch(`${API_BASE_URL}/api/inventory?${params.toString()}`);
+
+        if (!response.ok) {
+          throw new Error(`Failed to load inventory (${response.status})`);
+        }
+
+        const payload: {
+          items?: Array<{
+            productCodeId: number;
+            productCodeVersionId: number;
+            code: string | null;
+            name: string | null;
+            sku: string | null;
+            description: string | null;
+            categoryId: number | null;
+            priceCents: number | null;
+            availableQty: number | null;
+            qtyOnHand: number | null;
+          }>;
+          categoryOptions?: Array<{ id: number | null; name: string | null }>;
+        } = await response.json();
+
+        if (cancelled) {
+          return;
+        }
+
+        const mappedProducts: Product[] = (payload.items ?? []).map((item) => {
+          const versionId = item.productCodeVersionId ?? item.productCodeId;
+          const availableQty = Number(item.availableQty ?? item.qtyOnHand ?? 0);
+          return {
+            id: String(versionId ?? 0),
+            name: item.name ?? item.code ?? "Unnamed product",
+            sku: item.sku ?? item.code ?? `SKU-${versionId ?? "0"}`,
+            categoryId: item.categoryId != null ? String(item.categoryId) : "uncategorized",
+            price: Math.max(0, Number(item.priceCents ?? 0)) / 100,
+            stock: availableQty,
+            highlight: availableQty <= 1 ? "Low stock" : undefined,
+            previewLabel: (item.code ?? item.name ?? "").slice(0, 2).toUpperCase(),
+            variant: item.description ?? undefined,
+          };
+        });
+
+        setProducts(mappedProducts);
+
+        const backendCategories = payload.categoryOptions ?? [];
+        const mappedCategories: ProductCategory[] = [DEFAULT_CATEGORY];
+
+        backendCategories.forEach((category, index) => {
+          const id = category.id != null ? String(category.id) : `cat-${index + 1}`;
+          if (mappedCategories.some((entry) => entry.id === id)) {
+            return;
+          }
+          const Icon = CATEGORY_ICON_SEQUENCE[index % CATEGORY_ICON_SEQUENCE.length] ?? AppWindow;
+          mappedCategories.push({
+            id,
+            label: category.name ?? `Category ${index + 1}`,
+            icon: Icon,
+          });
+        });
+
+        setCategories(mappedCategories);
+      } catch (error) {
+        console.error("Failed to load inventory for POS", error);
+        if (!cancelled) {
+          setProductError("Unable to load inventory from the server.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingProducts(false);
+        }
+      }
+    }
+
+    loadInventory();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const createLineFromProduct = useCallback((product: Product): CartLine => ({
@@ -280,7 +273,7 @@ export default function PosPage() {
 
   const filteredProducts = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    return catalogProducts.filter((product) => {
+    return products.filter((product) => {
       const matchesCategory = activeCategoryId === "all" || product.categoryId === activeCategoryId;
       if (!matchesCategory) {
         return false;
@@ -293,7 +286,7 @@ export default function PosPage() {
       const haystack = `${product.name} ${product.sku} ${product.variant ?? ""}`.toLowerCase();
       return haystack.includes(query);
     });
-  }, [activeCategoryId, searchTerm]);
+  }, [activeCategoryId, products, searchTerm]);
 
   const saleSummary = useMemo(() => buildSummary(cartLines, tenderBreakdown), [cartLines, tenderBreakdown]);
   const nonCashTenderTotal = useMemo(
@@ -467,13 +460,13 @@ export default function PosPage() {
       return;
     }
 
-    const exactMatch = catalogProducts.find(
+    const exactMatch = products.find(
       (product) => product.sku.toLowerCase() === query || product.id.toLowerCase() === query
     );
 
     const match = exactMatch
       ? exactMatch
-      : catalogProducts.find((product) => {
+      : products.find((product) => {
           const haystack = `${product.sku} ${product.name}`.toLowerCase();
           return haystack.includes(query);
         });
@@ -486,7 +479,7 @@ export default function PosPage() {
     }
 
     setScanInput("");
-  }, [addProductToCart, scanInput]);
+  }, [addProductToCart, products, scanInput]);
 
   const handleScanKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -840,8 +833,15 @@ export default function PosPage() {
                 ) : null}
               </div>
             </div>
+            {productError ? (
+              <div className="rounded-xl border border-red-500/40 bg-red-50 px-4 py-2 text-xs text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                {productError}
+              </div>
+            ) : isLoadingProducts ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400">Loading inventory...</p>
+            ) : null}
             <ProductGallery
-              categories={productCategories}
+              categories={categories}
               products={filteredProducts}
               activeCategoryId={activeCategoryId}
               searchTerm={searchTerm}
