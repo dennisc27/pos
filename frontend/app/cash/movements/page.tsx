@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   AlertTriangle,
@@ -15,6 +15,8 @@ import {
 import { formatCurrency } from "@/components/cash/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const rawDefaultBranchId = Number(process.env.NEXT_PUBLIC_DEFAULT_BRANCH_ID ?? 1);
+const DEFAULT_BRANCH_ID = Number.isInteger(rawDefaultBranchId) && rawDefaultBranchId > 0 ? rawDefaultBranchId : null;
 
 const dateTimeFormatter = new Intl.DateTimeFormat("es-DO", {
   dateStyle: "medium",
@@ -175,7 +177,10 @@ const formatDate = (value: string | null | undefined) => {
 export default function CashMovementsPage() {
   const [status, setStatus] = useState<StatusMessage>(null);
   const [isLoading, setIsLoading] = useState({ load: false, submit: false });
-  const [shiftLookup, setShiftLookup] = useState({ branchId: "", shiftId: "" });
+  const [shiftLookup, setShiftLookup] = useState({
+    branchId: DEFAULT_BRANCH_ID ? String(DEFAULT_BRANCH_ID) : "",
+    shiftId: "",
+  });
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [movementForm, setMovementForm] = useState({
@@ -207,10 +212,11 @@ export default function CashMovementsPage() {
     return { totalsByKind, netMovementCents };
   }, [movements]);
 
-  const resetState = () => {
+  const resetState = useCallback(() => {
     setActiveShift(null);
     setMovements([]);
-  };
+    setShiftLookup((state) => ({ ...state, shiftId: "" }));
+  }, []);
 
   const loadShiftById = async (shiftId: number, successMessage?: string) => {
     setIsLoading((state) => ({ ...state, load: true }));
@@ -220,7 +226,10 @@ export default function CashMovementsPage() {
       const data = await getJson<ShiftMovementsResponse>(`/api/cash-movements?shiftId=${shiftId}`);
       setActiveShift(data.shift);
       setMovements(data.movements);
-      setShiftLookup((state) => ({ ...state, shiftId: String(data.shift.id) }));
+      setShiftLookup((state) => ({
+        branchId: data.shift.branchId ? String(data.shift.branchId) : state.branchId,
+        shiftId: String(data.shift.id),
+      }));
       if (successMessage) {
         setStatus({ tone: "success", message: successMessage });
       }
@@ -235,27 +244,38 @@ export default function CashMovementsPage() {
     }
   };
 
-  const loadActiveShiftForBranch = async (branchId: number) => {
-    setIsLoading((state) => ({ ...state, load: true }));
-    setStatus(null);
+  const loadActiveShiftForBranch = useCallback(
+    async (branchId: number, options: { quiet?: boolean } = {}) => {
+      const { quiet = false } = options;
 
-    try {
-      const data = await getJson<ShiftMovementsResponse>(`/api/shifts/active?branchId=${branchId}`);
-      setActiveShift(data.shift);
-      setMovements(data.movements);
-      setShiftLookup({ branchId: String(branchId), shiftId: String(data.shift.id) });
-      setStatus({
-        tone: "success",
-        message: `Turno activo #${data.shift.id} para la sucursal ${branchId} listo para registrar movimientos.`,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se encontró un turno activo.";
-      resetState();
-      setStatus({ tone: "error", message });
-    } finally {
-      setIsLoading((state) => ({ ...state, load: false }));
-    }
-  };
+      setIsLoading((state) => ({ ...state, load: true }));
+      if (!quiet) {
+        setStatus(null);
+      }
+
+      try {
+        const data = await getJson<ShiftMovementsResponse>(`/api/shifts/active?branchId=${branchId}`);
+        setActiveShift(data.shift);
+        setMovements(data.movements);
+        setShiftLookup({ branchId: String(branchId), shiftId: String(data.shift.id) });
+        if (!quiet) {
+          setStatus({
+            tone: "success",
+            message: `Turno activo #${data.shift.id} para la sucursal ${branchId} listo para registrar movimientos.`,
+          });
+        }
+      } catch (error) {
+        resetState();
+        if (!quiet) {
+          const message = error instanceof Error ? error.message : "No se encontró un turno activo.";
+          setStatus({ tone: "error", message });
+        }
+      } finally {
+        setIsLoading((state) => ({ ...state, load: false }));
+      }
+    },
+    [resetState],
+  );
 
   const handleLoadActiveShift = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -286,6 +306,12 @@ export default function CashMovementsPage() {
 
     await loadShiftById(shiftId, `Turno #${shiftId} cargado.`);
   };
+
+  useEffect(() => {
+    if (DEFAULT_BRANCH_ID) {
+      void loadActiveShiftForBranch(DEFAULT_BRANCH_ID, { quiet: true });
+    }
+  }, [loadActiveShiftForBranch]);
 
   const handleMovementSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 
 import { LayawaySummary } from "@/components/layaways/layaway-summary";
 import { LayawayQueue } from "@/components/layaways/layaway-queue";
@@ -15,252 +16,203 @@ import type {
 } from "@/components/layaways/types";
 import { formatContactTimestamp, formatCurrency, formatPercent } from "@/components/layaways/utils";
 
-const summaryBaselines = {
-  activePlans: 326,
-  overduePlans: 42,
-  settledToday: 18,
-  paymentsToday: 184_500,
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+
+type DashboardSummary = {
+  activeCount: number;
+  overdueCount: number;
+  completedToday: number;
+  paymentsTodayCents: number;
+  paymentsTodayCount: number;
+  outstandingCents: number;
+  overdueOutstandingCents: number;
+  autopayCount: number;
+  autopayRatio: number;
 };
 
-const INITIAL_ACTIVE_PLANS: LayawayPlan[] = [
-  {
-    id: "lay-1",
-    planNumber: "LA-5480",
-    customer: "Camila Reyes",
-    item: "Anillo compromiso 18K · 1.0ct",
-    branch: "Santo Domingo Centro",
-    total: 64_500,
-    balance: 35_800,
-    deposit: 15_000,
-    nextPaymentDate: "20 jun · 4:00 p. m.",
-    nextPaymentAmount: 5_850,
-    status: "active",
-    autopay: true,
-    lastPayment: "05 jun",
-    contactPreference: "WhatsApp",
-    risk: "low",
-    lastContactAt: "2024-06-17T09:45:00-04:00",
-    lastContactChannel: "WhatsApp",
-    contactNotes: "Confirmó cobro automático",
-  },
-  {
-    id: "lay-2",
-    planNumber: "LA-5476",
-    customer: "Edgar Morales",
-    item: "PlayStation 5 + 2 mandos",
-    branch: "Santo Domingo Oeste",
-    total: 48_900,
-    balance: 21_400,
-    deposit: 9_500,
-    nextPaymentDate: "22 jun · 6:30 p. m.",
-    nextPaymentAmount: 4_950,
-    status: "active",
-    autopay: false,
-    lastPayment: "02 jun",
-    contactPreference: "SMS",
-    risk: "medium",
-    promiseToPay: "21 jun",
-  },
-  {
-    id: "lay-3",
-    planNumber: "LA-5464",
-    customer: "Ivonne Cabrera",
-    item: "MacBook Air 15\" M3",
-    branch: "Santiago",
-    total: 98_500,
-    balance: 58_900,
-    deposit: 20_000,
-    nextPaymentDate: "24 jun · 11:00 a. m.",
-    nextPaymentAmount: 7_250,
-    status: "active",
-    autopay: true,
-    lastPayment: "09 jun",
-    contactPreference: "Email",
-    risk: "low",
-  },
-  {
-    id: "lay-4",
-    planNumber: "LA-5450",
-    customer: "Samuel Hernández",
-    item: "Set herramientas Milwaukee",
-    branch: "La Romana",
-    total: 34_200,
-    balance: 12_800,
-    deposit: 6_500,
-    nextPaymentDate: "25 jun · 5:00 p. m.",
-    nextPaymentAmount: 3_200,
-    status: "active",
-    autopay: false,
-    lastPayment: "10 jun",
-    contactPreference: "Call",
-    risk: "medium",
-  },
-];
+type DashboardPlan = {
+  id: number;
+  orderId: number;
+  planNumber: string;
+  branchId: number;
+  branchName: string;
+  customerId: number;
+  customerName: string;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  totalCents: number;
+  paidCents: number;
+  balanceCents: number;
+  dueDate: string | null;
+  status: "active" | "overdue" | "completed";
+  autopay: boolean;
+  risk: "low" | "medium" | "high";
+  nextPaymentCents: number;
+  contactPreference: "WhatsApp" | "Email" | "Call";
+  lastContactAt: string | null;
+  lastContactChannel: string | null;
+  contactNotes: string | null;
+  lastPayment: {
+    amountCents: number;
+    method: string;
+    note: string | null;
+    createdAt: string | null;
+  } | null;
+  itemSummary: string;
+};
 
-const INITIAL_OVERDUE_PLANS: LayawayPlan[] = [
-  {
-    id: "over-1",
-    planNumber: "LA-5312",
-    customer: "Yulissa Fernández",
-    item: "Collar esmeralda 14K",
-    branch: "Santo Domingo Centro",
-    total: 72_800,
-    balance: 21_750,
-    deposit: 18_000,
-    nextPaymentDate: "Vencido · 15 jun",
-    nextPaymentAmount: 6_250,
-    status: "overdue",
-    autopay: false,
-    lastPayment: "28 may",
-    contactPreference: "WhatsApp",
-    risk: "high",
-    promiseToPay: "Hoy 6:00 p. m.",
-    lastContactAt: "2024-06-17T16:15:00-04:00",
-    lastContactChannel: "WhatsApp",
-    contactNotes: "Promesa confirmada",
-  },
-  {
-    id: "over-2",
-    planNumber: "LA-5298",
-    customer: "Luis Ángel Bautista",
-    item: "Televisor Samsung 75\"",
-    branch: "San Cristóbal",
-    total: 89_900,
-    balance: 32_400,
-    deposit: 12_500,
-    nextPaymentDate: "Vencido · 12 jun",
-    nextPaymentAmount: 5_900,
-    status: "overdue",
-    autopay: false,
-    lastPayment: "24 may",
-    contactPreference: "Call",
-    risk: "high",
-  },
-  {
-    id: "over-3",
-    planNumber: "LA-5287",
-    customer: "María López",
-    item: "Set aros diamante 0.75ct",
-    branch: "Santiago",
-    total: 58_400,
-    balance: 14_600,
-    deposit: 16_000,
-    nextPaymentDate: "Vencido · 10 jun",
-    nextPaymentAmount: 4_200,
-    status: "overdue",
-    autopay: true,
-    lastPayment: "16 may",
-    contactPreference: "SMS",
-    risk: "medium",
-    promiseToPay: "20 jun",
-  },
-];
+type DashboardScheduleEntry = {
+  id: string;
+  layawayId: number;
+  planNumber: string;
+  customerName: string;
+  dueDate: string | null;
+  amountCents: number;
+  channel: "cash" | "card" | "transfer" | "auto";
+  status: "scheduled" | "processing" | "completed" | "overdue";
+  notes: string | null;
+};
 
-const INITIAL_SCHEDULE: PaymentScheduleItem[] = [
-  {
-    id: "sched-1",
-    dueDate: "19 jun",
-    customer: "José Montero",
-    planNumber: "LA-5478",
-    amount: 3_450,
-    channel: "auto",
-    status: "processing",
-    notes: "Tarjeta AZUL terminación 4021",
-  },
-  {
-    id: "sched-2",
-    dueDate: "20 jun",
-    customer: "Camila Reyes",
-    planNumber: "LA-5480",
-    amount: 5_850,
-    channel: "auto",
-    status: "scheduled",
-    notes: "Se notificó recordatorio 24 h",
-  },
-  {
-    id: "sched-3",
-    dueDate: "21 jun",
-    customer: "Edgar Morales",
-    planNumber: "LA-5476",
-    amount: 4_950,
-    channel: "cash",
-    status: "scheduled",
-    notes: "Prometió pasar por sucursal Oeste",
-  },
-  {
-    id: "sched-4",
-    dueDate: "22 jun",
-    customer: "Génesis Tejada",
-    planNumber: "LA-5462",
-    amount: 2_750,
-    channel: "transfer",
-    status: "completed",
-    notes: "Transferencia Banco Popular confirmada",
-  },
-];
+type DashboardReminder = {
+  id: string;
+  planNumber: string;
+  customerName: string;
+  message: string;
+  channel: "SMS" | "WhatsApp" | "Email";
+  status: "scheduled" | "sent" | "queued";
+  scheduledFor: string | null;
+};
 
-const INITIAL_COMPLETED_COUNT = INITIAL_SCHEDULE.filter((item) => item.status === "completed").length;
-const INITIAL_COMPLETED_AMOUNT = INITIAL_SCHEDULE.filter((item) => item.status === "completed").reduce(
-  (sum, item) => sum + item.amount,
-  0,
-);
+type DashboardInsight = {
+  id: string;
+  title: string;
+  description: string;
+  impact: "high" | "medium" | "low";
+};
 
-const INITIAL_REMINDERS: EngagementReminder[] = [
-  {
-    id: "rem-1",
-    planNumber: "LA-5298",
-    customer: "Luis Ángel Bautista",
-    message:
-      "Tu cuota RD$5,900 está vencida. Responde este WhatsApp para coordinar pago y evitar cancelación.",
-    channel: "WhatsApp",
-    scheduledFor: "Hoy · 2:00 p. m.",
-    status: "scheduled",
-  },
-  {
-    id: "rem-2",
-    planNumber: "LA-5476",
-    customer: "Edgar Morales",
-    message:
-      "Recordatorio de cuota RD$4,950. Tenemos pick-up express disponible mañana hasta las 8 p. m.",
-    channel: "SMS",
-    scheduledFor: "Hoy · 5:30 p. m.",
-    status: "queued",
-  },
-  {
-    id: "rem-3",
-    planNumber: "LA-5480",
-    customer: "Camila Reyes",
-    message:
-      "Confirmamos AutoCobro mañana. Puedes ver tu recibo digital desde el portal de clientes.",
-    channel: "Email",
-    scheduledFor: "19 jun · 8:00 a. m.",
-    status: "sent",
-  },
-];
+type DashboardResponse = {
+  generatedAt: string;
+  summary: DashboardSummary;
+  activePlans: DashboardPlan[];
+  overduePlans: DashboardPlan[];
+  schedule: DashboardScheduleEntry[];
+  reminders: DashboardReminder[];
+  insights: DashboardInsight[];
+};
 
-const INITIAL_INSIGHTS: UpsellInsight[] = [
-  {
-    id: "ins-1",
-    title: "Activa autopago para los planes con mora recurrente",
-    description:
-      "9 clientes en mora 2+ veces aún pagan en efectivo. Incentiva AutoCobro con 5% de descuento en cuota final.",
-    impact: "high",
-  },
-  {
-    id: "ins-2",
-    title: "Ofrece cross-sell a clientes con plan completado",
-    description:
-      "28 planes cerrados este mes: envía cupón de 10% en ventas al contado o upgrade de garantía extendida.",
-    impact: "medium",
-  },
-  {
-    id: "ins-3",
-    title: "Optimiza inventario reservado",
-    description:
-      "RD$1.2M en joyería comprometida >45 días. Coordina reposición en vitrinas secundarias para evitar rotación lenta.",
-    impact: "medium",
-  },
-];
+function centsToAmount(value: number | null | undefined) {
+  return Math.max(0, Number(value ?? 0)) / 100;
+}
+
+function formatPlanDateLabel(value: string | null) {
+  if (!value) {
+    return "Sin fecha";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const datePart = date.toLocaleDateString("es-DO", { day: "2-digit", month: "short" });
+  const timePart = date.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" });
+  return `${datePart} · ${timePart}`;
+}
+
+function formatShortDateLabel(value: string | null) {
+  if (!value) {
+    return "—";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString("es-DO", { day: "2-digit", month: "short" });
+}
+
+function formatReminderTimestamp(value: string | null) {
+  if (!value) {
+    return "Sin fecha";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const now = new Date();
+  const sameDay = now.toDateString() === date.toDateString();
+  const timePart = date.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" });
+  if (sameDay) {
+    return `Hoy · ${timePart}`;
+  }
+  const datePart = date.toLocaleDateString("es-DO", { day: "2-digit", month: "short" });
+  return `${datePart} · ${timePart}`;
+}
+
+function toLayawayPlan(plan: DashboardPlan): LayawayPlan {
+  return {
+    id: `lay-${plan.id}`,
+    planNumber: plan.planNumber,
+    customer: plan.customerName,
+    item: plan.itemSummary,
+    branch: plan.branchName,
+    total: centsToAmount(plan.totalCents),
+    balance: centsToAmount(plan.balanceCents),
+    deposit: centsToAmount(plan.paidCents),
+    nextPaymentDate: formatPlanDateLabel(plan.dueDate),
+    nextPaymentAmount: centsToAmount(plan.nextPaymentCents),
+    status: plan.status === "completed" ? "completed" : plan.status,
+    autopay: plan.autopay,
+    lastPayment: plan.lastPayment?.createdAt ? formatShortDateLabel(plan.lastPayment.createdAt) : "—",
+    contactPreference:
+      plan.contactPreference === "WhatsApp"
+        ? "WhatsApp"
+        : plan.contactPreference === "Email"
+        ? "Email"
+        : "Call",
+    risk: plan.risk,
+    promiseToPay: undefined,
+    lastContactAt: plan.lastContactAt ?? undefined,
+    lastContactChannel: plan.lastContactChannel ?? undefined,
+    contactNotes: plan.contactNotes ?? undefined,
+  };
+}
+
+function toScheduleItem(entry: DashboardScheduleEntry): PaymentScheduleItem {
+  const formattedDate = entry.dueDate ? new Date(entry.dueDate) : null;
+  const dateLabel = formattedDate && !Number.isNaN(formattedDate.getTime())
+    ? formattedDate.toLocaleDateString("es-DO", { day: "2-digit", month: "short" })
+    : entry.dueDate ?? "Sin fecha";
+
+  return {
+    id: entry.id,
+    dueDate: dateLabel,
+    customer: entry.customerName,
+    planNumber: entry.planNumber,
+    amount: centsToAmount(entry.amountCents),
+    channel: entry.channel,
+    status: entry.status,
+    notes: entry.notes ?? undefined,
+  };
+}
+
+function toReminder(entry: DashboardReminder): EngagementReminder {
+  return {
+    id: entry.id,
+    planNumber: entry.planNumber,
+    customer: entry.customerName,
+    message: entry.message,
+    channel: entry.channel,
+    scheduledFor: formatReminderTimestamp(entry.scheduledFor),
+    status: entry.status,
+  };
+}
+
+function toUpsellInsight(entry: DashboardInsight): UpsellInsight {
+  return {
+    id: entry.id,
+    title: entry.title,
+    description: entry.description,
+    impact: entry.impact,
+  };
+}
 
 type LayawayFilters = {
   search: string;
@@ -317,8 +269,8 @@ function createReminderFromInsight(insight: UpsellInsight): EngagementReminder {
 }
 
 export default function LayawaysPage() {
-  const [activePlans, setActivePlans] = useState(INITIAL_ACTIVE_PLANS);
-  const [overduePlans, setOverduePlans] = useState(INITIAL_OVERDUE_PLANS);
+  const [activePlans, setActivePlans] = useState<LayawayPlan[]>([]);
+  const [overduePlans, setOverduePlans] = useState<LayawayPlan[]>([]);
   const [selectedActive, setSelectedActive] = useState<string[]>([]);
   const [selectedOverdue, setSelectedOverdue] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<LayawayFilters>({
@@ -333,9 +285,56 @@ export default function LayawaysPage() {
     autopay: "all",
     risk: "all",
   });
-  const [schedule, setSchedule] = useState(INITIAL_SCHEDULE);
-  const [reminders, setReminders] = useState(INITIAL_REMINDERS);
-  const [insights, setInsights] = useState(INITIAL_INSIGHTS);
+  const [schedule, setSchedule] = useState<PaymentScheduleItem[]>([]);
+  const [reminders, setReminders] = useState<EngagementReminder[]>([]);
+  const [insights, setInsights] = useState<UpsellInsight[]>([]);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/layaways/dashboard`, {
+        headers: { Accept: "application/json" },
+      });
+      const payload = (await response.json().catch(() => ({}))) as Partial<DashboardResponse> & {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "No se pudo cargar el resumen de layaway");
+      }
+
+      const active = (payload.activePlans ?? []).map(toLayawayPlan);
+      const overdue = (payload.overduePlans ?? []).map(toLayawayPlan);
+      const scheduleItems = (payload.schedule ?? []).map(toScheduleItem);
+      const reminderItems = (payload.reminders ?? []).map(toReminder);
+      const insightItems = (payload.insights ?? []).map(toUpsellInsight);
+
+      setActivePlans(active);
+      setOverduePlans(overdue);
+      setSchedule(scheduleItems);
+      setReminders(reminderItems);
+      setInsights(insightItems);
+      setSummary(payload.summary ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cargar el resumen de layaway");
+      setActivePlans([]);
+      setOverduePlans([]);
+      setSchedule([]);
+      setReminders([]);
+      setInsights([]);
+      setSummary(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
   const branches = useMemo(() => {
     const unique = new Set([...activePlans, ...overduePlans].map((plan) => plan.branch));
@@ -351,52 +350,85 @@ export default function LayawaysPage() {
     [overduePlans, overdueFilters],
   );
 
-  const completedToday = useMemo(
-    () => schedule.filter((item) => item.status === "completed").length,
-    [schedule],
-  );
-  const completedAmount = useMemo(
-    () =>
-      schedule
-        .filter((item) => item.status === "completed")
-        .reduce((sum, item) => sum + item.amount, 0),
-    [schedule],
-  );
+  const summaryMetrics: LayawaySummaryMetric[] = useMemo(() => {
+    if (!summary) {
+      return [
+        {
+          label: "Activos",
+          value: `${activePlans.length} planes`,
+          accent: "text-emerald-600 dark:text-emerald-300",
+          change: { direction: "flat", label: "Cargando..." },
+        },
+        {
+          label: "Vencidos (cantidad)",
+          value: `${overduePlans.length} planes`,
+          accent: "text-amber-600 dark:text-amber-300",
+          change: { direction: "flat", label: "Cargando..." },
+        },
+        {
+          label: "Saldados hoy",
+          value: "0 planes",
+          accent: "text-sky-600 dark:text-sky-300",
+          change: { direction: "flat", label: "Cargando..." },
+        },
+        {
+          label: "Abonos hoy",
+          value: formatCurrency(0),
+          accent: "text-emerald-600 dark:text-emerald-300",
+          change: { direction: "flat", label: "Cargando..." },
+        },
+      ];
+    }
 
-  const summaryMetrics: LayawaySummaryMetric[] = [
-    {
-      label: "Activos",
-      value: `${summaryBaselines.activePlans + activePlans.length - INITIAL_ACTIVE_PLANS.length} planes`,
-      accent: "text-emerald-600 dark:text-emerald-300",
-      change: { direction: "up", label: "+12 vs. semana pasada" },
-    },
-    {
-      label: "Vencidos (cantidad)",
-      value: `${summaryBaselines.overduePlans + overduePlans.length - INITIAL_OVERDUE_PLANS.length} planes`,
-      accent: "text-amber-600 dark:text-amber-300",
-      change: { direction: "down", label: "-3 vs. semana pasada" },
-    },
-    {
-      label: "Saldados hoy",
-      value: `${summaryBaselines.settledToday + completedToday - INITIAL_COMPLETED_COUNT} planes`,
-      accent: "text-sky-600 dark:text-sky-300",
-      change: { direction: "up", label: "+3 vs. ayer" },
-    },
-    {
-      label: "Abonos hoy",
-      value: formatCurrency(
-        summaryBaselines.paymentsToday + completedAmount - INITIAL_COMPLETED_AMOUNT,
-      ),
-      accent: "text-emerald-600 dark:text-emerald-300",
-      change: { direction: "up", label: "+RD$85K" },
-    },
-  ];
+    return [
+      {
+        label: "Activos",
+        value: `${summary.activeCount} planes`,
+        accent: "text-emerald-600 dark:text-emerald-300",
+        change: {
+          direction: summary.autopayCount > 0 ? "up" : "flat",
+          label: `${summary.autopayCount} con AutoCobro`,
+        },
+      },
+      {
+        label: "Vencidos (cantidad)",
+        value: `${summary.overdueCount} planes`,
+        accent: "text-amber-600 dark:text-amber-300",
+        change: {
+          direction: summary.overdueOutstandingCents > 0 ? "up" : "flat",
+          label: summary.overdueOutstandingCents > 0
+            ? formatCurrency(summary.overdueOutstandingCents / 100)
+            : "Sin saldo",
+        },
+      },
+      {
+        label: "Saldados hoy",
+        value: `${summary.completedToday} planes`,
+        accent: "text-sky-600 dark:text-sky-300",
+        change: {
+          direction: summary.completedToday > 0 ? "up" : "flat",
+          label: summary.completedToday > 0 ? "Cobros confirmados" : "Aún sin cierres",
+        },
+      },
+      {
+        label: "Abonos hoy",
+        value: formatCurrency(summary.paymentsTodayCents / 100),
+        accent: "text-emerald-600 dark:text-emerald-300",
+        change: {
+          direction: summary.paymentsTodayCount > 0 ? "up" : "flat",
+          label: `${summary.paymentsTodayCount} transacción(es)`,
+        },
+      },
+    ];
+  }, [summary, activePlans.length, overduePlans.length]);
 
   const autopayPenetration = useMemo(() => {
-    if (!schedule.length) return 0;
-    const auto = schedule.filter((item) => item.channel === "auto").length;
-    return auto / schedule.length;
-  }, [schedule]);
+    if (schedule.length) {
+      const auto = schedule.filter((item) => item.channel === "auto").length;
+      return auto / schedule.length;
+    }
+    return summary?.autopayRatio ?? 0;
+  }, [schedule, summary]);
 
   const handleToggleSelection = (queue: "active" | "overdue", id: string) => {
     if (queue === "active") {
@@ -570,6 +602,26 @@ export default function LayawaysPage() {
           Controla los planes de apartado activos, pagos programados y seguimientos automáticos.
         </p>
       </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+          Cargando datos de layaway...
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 shadow-sm dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => void loadDashboard()}
+            className="inline-flex items-center gap-1 rounded-md border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-100 dark:border-rose-500/50 dark:bg-transparent dark:text-rose-200"
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : null}
 
       <LayawaySummary metrics={summaryMetrics} />
 
