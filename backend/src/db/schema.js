@@ -95,7 +95,7 @@ export const productCodeComponents = mysqlTable(
     id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
     parentCodeId: bigint('parent_code_id', { mode: 'number' }).notNull(),
     childCodeId: bigint('child_code_id', { mode: 'number' }).notNull(),
-    qtyRatio: decimal('qty_ratio', { precision: 18, scale: 6 }).notNull().$type<number>(),
+    qtyRatio: decimal('qty_ratio', { precision: 18, scale: 6 }).notNull(),
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
   },
@@ -121,8 +121,8 @@ export const inventoryCountLines = mysqlTable('inv_count_lines', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   sessionId: bigint('session_id', { mode: 'number' }).notNull(),
   productCodeVersionId: bigint('product_code_version_id', { mode: 'number' }).notNull(),
-  expectedQty: decimal('expected_qty', { precision: 18, scale: 4 }).notNull().$type<number>(),
-  countedQty: decimal('counted_qty', { precision: 18, scale: 4 }).notNull().$type<number>(),
+  expectedQty: decimal('expected_qty', { precision: 18, scale: 4 }).notNull(),
+  countedQty: decimal('counted_qty', { precision: 18, scale: 4 }).notNull(),
   status: mysqlEnum('status', ['counted', 'recount', 'resolved']).notNull().default('counted'),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -146,7 +146,7 @@ export const inventoryTransferLines = mysqlTable('inv_transfer_lines', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   transferId: bigint('transfer_id', { mode: 'number' }).notNull(),
   productCodeVersionId: bigint('product_code_version_id', { mode: 'number' }).notNull(),
-  qty: decimal('qty', { precision: 18, scale: 4 }).notNull().$type<number>(),
+  qty: decimal('qty', { precision: 18, scale: 4 }).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -154,7 +154,7 @@ export const inventoryQuarantines = mysqlTable('quarantine', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   branchId: bigint('branch_id', { mode: 'number' }).notNull(),
   productCodeVersionId: bigint('product_code_version_id', { mode: 'number' }).notNull(),
-  qty: decimal('qty', { precision: 18, scale: 4 }).notNull().$type<number>(),
+  qty: decimal('qty', { precision: 18, scale: 4 }).notNull(),
   reason: text('reason'),
   status: mysqlEnum('status', ['open', 'resolved']).notNull().default('open'),
   outcome: mysqlEnum('outcome', ['return', 'dispose']).default('return'),

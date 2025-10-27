@@ -27,7 +27,7 @@ const statusLabels: Record<string, string> = {
 
 const statusTone: Record<string, string> = {
   pending: "bg-amber-500/10 text-amber-300 border border-amber-500/40",
-  paid: "bg-sky-500/10 text-sky-300 border border-sky-500/40",
+  paid: "bg-primary/10 text-sky-300 border border-sky-500/40",
   fulfilled: "bg-emerald-500/10 text-emerald-300 border border-emerald-500/40",
   cancelled: "bg-rose-500/10 text-rose-300 border border-rose-500/40",
 };
@@ -247,12 +247,12 @@ export default function EcommerceOrdersPage() {
   return (
     <div className="space-y-8">
       <header className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-sky-400">
+        <div className="flex items-center gap-2 text-primary">
           <ClipboardList className="h-5 w-5" />
           <span className="text-xs font-semibold uppercase tracking-wide">Pedidos en línea</span>
         </div>
-        <h1 className="text-3xl font-semibold text-white">E-Commerce · Gestión de órdenes</h1>
-        <p className="max-w-3xl text-sm text-slate-400">
+        <h1 className="text-3xl font-semibold text-foreground dark:text-white">E-Commerce · Gestión de órdenes</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground dark:text-slate-400">
           Controla el flujo pick/pack/ship, registra etiquetas y cancela pedidos con trazabilidad total.
         </p>
       </header>
@@ -270,35 +270,35 @@ export default function EcommerceOrdersPage() {
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Object.entries(orderSummary).map(([key, value]) => (
-          <div key={key} className="rounded-lg border border-slate-800 bg-slate-900/70 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-400">{statusLabels[key] ?? key}</p>
-            <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+          <div key={key} className="rounded-lg border border-border dark:border-slate-800 bg-card dark:bg-slate-900/70 p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground dark:text-slate-400">{statusLabels[key] ?? key}</p>
+            <p className="mt-2 text-2xl font-semibold text-foreground dark:text-white">{value}</p>
           </div>
         ))}
       </section>
 
-      <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-lg shadow-slate-950/40">
+      <section className="rounded-lg border border-border dark:border-slate-800 bg-card dark:bg-slate-900/70 p-5 shadow-lg shadow-slate-950/40">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-wrap gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300" htmlFor="filter-search">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="filter-search">
                 Buscar
               </label>
               <input
                 id="filter-search"
-                className="w-56 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-56 rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 placeholder="Ticket o cliente"
                 value={filters.search}
                 onChange={(event) => setFilters((state) => ({ ...state, search: event.target.value }))}
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300" htmlFor="filter-status">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="filter-status">
                 Estado
               </label>
               <select
                 id="filter-status"
-                className="w-40 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-40 rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 value={filters.status}
                 onChange={(event) => setFilters((state) => ({ ...state, status: event.target.value as FiltersState["status"] }))}
               >
@@ -310,12 +310,12 @@ export default function EcommerceOrdersPage() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300" htmlFor="filter-channel">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="filter-channel">
                 Canal
               </label>
               <select
                 id="filter-channel"
-                className="w-48 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-48 rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 value={filters.channelId}
                 onChange={(event) =>
                   setFilters((state) => ({
@@ -334,7 +334,7 @@ export default function EcommerceOrdersPage() {
             </div>
           </div>
           <button
-            className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
             onClick={() => fetchOrders(filters)}
             disabled={loading}
           >
@@ -342,9 +342,9 @@ export default function EcommerceOrdersPage() {
           </button>
         </div>
 
-        <div className="mt-4 overflow-hidden rounded-md border border-slate-800">
+        <div className="mt-4 overflow-hidden rounded-md border border-border dark:border-slate-800">
           <table className="min-w-full divide-y divide-slate-800">
-            <thead className="bg-slate-950/60 text-left text-xs uppercase tracking-wide text-slate-400">
+            <thead className="bg-muted dark:bg-slate-950/60 text-left text-xs uppercase tracking-wide text-muted-foreground dark:text-slate-400">
               <tr>
                 <th className="px-3 py-2">Pedido</th>
                 <th className="px-3 py-2">Cliente</th>
@@ -355,10 +355,10 @@ export default function EcommerceOrdersPage() {
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800 bg-slate-950/40 text-sm text-slate-200">
+            <tbody className="divide-y divide-slate-800 bg-muted dark:bg-slate-950/40 text-sm text-foreground dark:text-slate-200">
               {orders.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground dark:text-slate-500">
                     No se encontraron órdenes con los filtros aplicados.
                   </td>
                 </tr>
@@ -367,14 +367,14 @@ export default function EcommerceOrdersPage() {
               {orders.map((order) => (
                 <tr key={order.id}>
                   <td className="px-3 py-3 align-top">
-                    <div className="font-medium text-white">{order.externalId}</div>
-                    <div className="text-xs text-slate-400">{order.channelName ?? `Canal #${order.channelId}`}</div>
+                    <div className="font-medium text-foreground dark:text-white">{order.externalId}</div>
+                    <div className="text-xs text-muted-foreground dark:text-slate-400">{order.channelName ?? `Canal #${order.channelId}`}</div>
                   </td>
                   <td className="px-3 py-3 align-top">{order.customerName}</td>
                   <td className="px-3 py-3 align-top">{statusBadge(order.status)}</td>
                   <td className="px-3 py-3 align-top">{formatCurrencyFromCents(order.totalCents)}</td>
                   <td className="px-3 py-3 align-top">
-                    <ul className="space-y-1 text-xs text-slate-400">
+                    <ul className="space-y-1 text-xs text-muted-foreground dark:text-slate-400">
                       {order.items.map((item, index) => (
                         <li key={`${order.id}-${index}`}>
                           {item.quantity} × RD${" "}
@@ -384,7 +384,7 @@ export default function EcommerceOrdersPage() {
                     </ul>
                   </td>
                   <td className="px-3 py-3 align-top">
-                    <pre className="max-h-24 overflow-auto rounded-md bg-slate-950/80 p-2 text-[11px] leading-snug text-slate-400">
+                    <pre className="max-h-24 overflow-auto rounded-md bg-background dark:bg-slate-950/80 p-2 text-[11px] leading-snug text-muted-foreground dark:text-slate-400">
                       {formatAddress(order.shippingAddress)}
                     </pre>
                   </td>
@@ -397,7 +397,7 @@ export default function EcommerceOrdersPage() {
                         return (
                           <button
                             key={action}
-                            className="inline-flex items-center gap-1 rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-2.5 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                             onClick={() => runOrderAction(order, action)}
                             disabled={disabled}
                           >
@@ -414,21 +414,21 @@ export default function EcommerceOrdersPage() {
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-5">
-        <h2 className="text-lg font-semibold text-white">Importar órdenes desde marketplace</h2>
-        <p className="text-xs text-slate-400">
+      <section className="rounded-lg border border-border dark:border-slate-800 bg-card dark:bg-slate-900/70 p-5">
+        <h2 className="text-lg font-semibold text-foreground dark:text-white">Importar órdenes desde marketplace</h2>
+        <p className="text-xs text-muted-foreground dark:text-slate-400">
           Pega el payload recibido del marketplace (array JSON) y asigna el canal correspondiente. El backend deduplica por
           externalId.
         </p>
 
         <form className="mt-4 grid gap-4 md:grid-cols-2" onSubmit={submitImport}>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-300" htmlFor="import-channel">
+            <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="import-channel">
               Canal destino
             </label>
             <select
               id="import-channel"
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+              className="w-full rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
               value={importForm.channelId}
               onChange={(event) => setImportForm((state) => ({ ...state, channelId: event.target.value }))}
               required
@@ -442,12 +442,12 @@ export default function EcommerceOrdersPage() {
             </select>
           </div>
           <div className="space-y-1 md:col-span-2">
-            <label className="text-xs font-medium text-slate-300" htmlFor="import-json">
+            <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="import-json">
               Payload JSON
             </label>
             <textarea
               id="import-json"
-              className="min-h-[180px] w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
+              className="min-h-[180px] w-full rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-slate-100 focus:border-sky-500 focus:outline-none"
               placeholder='[{ "externalId": "1001", "customerName": "Cliente", "total": 1500, "items": [...] }]'
               value={importForm.payload}
               onChange={(event) => setImportForm((state) => ({ ...state, payload: event.target.value }))}
@@ -457,7 +457,7 @@ export default function EcommerceOrdersPage() {
           <div className="md:col-span-2 flex justify-end gap-3">
             <button
               type="submit"
-              className="inline-flex items-center gap-2 rounded-md bg-sky-500 px-3 py-2 text-sm font-medium text-white hover:bg-sky-400"
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground dark:text-white hover:bg-primary/90"
               disabled={loading}
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />} Importar órdenes

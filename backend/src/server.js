@@ -68,6 +68,7 @@ import {
   stockLedger,
   users,
 } from './db/schema.js';
+import { alias } from 'drizzle-orm/mysql-core';
 import {
   and,
   asc,
@@ -832,12 +833,25 @@ function parseReceivedAt(value) {
   return fallback;
 }
 
-const fromBranchAlias = branches.as('inventory_from_branches');
-const toBranchAlias = branches.as('inventory_to_branches');
-const componentParentCodes = productCodes.as('component_parent_codes');
-const componentChildCodes = productCodes.as('component_child_codes');
-const shiftOpenedByUsers = users.as('shift_opened_by_users');
-const shiftClosedByUsers = users.as('shift_closed_by_users');
+function combineConditions(conditions) {
+  const filtered = conditions.filter(Boolean);
+  if (filtered.length === 0) {
+    return undefined;
+  }
+
+  if (filtered.length === 1) {
+    return filtered[0];
+  }
+
+  return and(...filtered);
+}
+
+const fromBranchAlias = alias(branches, 'inventory_from_branches');
+const toBranchAlias = alias(branches, 'inventory_to_branches');
+const componentParentCodes = alias(productCodes, 'component_parent_codes');
+const componentChildCodes = alias(productCodes, 'component_child_codes');
+const shiftOpenedByUsers = alias(users, 'shift_opened_by_users');
+const shiftClosedByUsers = alias(users, 'shift_closed_by_users');
 
 async function getCountSessionWithLines(executor, sessionId) {
   const numericSessionId = Number(sessionId);
@@ -7089,6 +7103,175 @@ app.get('/api/inventory/component-tree', async (req, res, next) => {
   try {
     const snapshot = await getInventoryComponentSnapshot();
     res.json(snapshot);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/purchases/overview', async (req, res, next) => {
+  try {
+    const branchCandidate = req.query?.branchId ?? req.query?.branch_id;
+    let branchId = null;
+
+    if (branchCandidate !== undefined && branchCandidate !== null && String(branchCandidate).trim() !== '') {
+      branchId = parsePositiveInteger(branchCandidate, 'branchId');
+    }
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfWeek.getDate() - 6);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const ninetyDaysAgo = new Date(startOfToday);
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 89);
+
+    const purchaseConditions = [gte(purchases.createdAt, ninetyDaysAgo)];
+    if (branchId != null) {
+      purchaseConditions.push(eq(purchases.branchId, branchId));
+    }
+
+    const purchaseRows = await db
+      .select({
+        id: purchases.id,
+        branchId: purchases.branchId,
+        supplierName: purchases.supplierName,
+        supplierInvoice: purchases.supplierInvoice,
+        referenceNo: purchases.referenceNo,
+        receivedAt: purchases.receivedAt,
+        createdAt: purchases.createdAt,
+        totalCostCents: purchases.totalCostCents,
+        totalQuantity: purchases.totalQuantity,
+      })
+      .from(purchases)
+      .where(combineConditions(purchaseConditions))
+      .orderBy(desc(purchases.createdAt))
+      .limit(500);
+
+    const metrics = {
+      today: { totalCostCents: 0, totalQuantity: 0, count: 0 },
+      week: { totalCostCents: 0, totalQuantity: 0, count: 0 },
+      month: { totalCostCents: 0, totalQuantity: 0, count: 0 },
+    };
+
+    const supplierTotals = new Map();
+
+    for (const row of purchaseRows) {
+      const recordedAt = row.receivedAt ?? row.createdAt;
+      if (!(recordedAt instanceof Date) || Number.isNaN(recordedAt.getTime())) {
+        continue;
+      }
+
+      const amount = Number(row.totalCostCents ?? 0);
+      const quantity = Number(row.totalQuantity ?? 0);
+
+      if (recordedAt >= startOfToday) {
+        metrics.today.totalCostCents += amount;
+        metrics.today.totalQuantity += quantity;
+        metrics.today.count += 1;
+      }
+
+      if (recordedAt >= startOfWeek) {
+        metrics.week.totalCostCents += amount;
+        metrics.week.totalQuantity += quantity;
+        metrics.week.count += 1;
+      }
+
+      if (recordedAt >= startOfMonth) {
+        metrics.month.totalCostCents += amount;
+        metrics.month.totalQuantity += quantity;
+        metrics.month.count += 1;
+      }
+
+      const supplierKey = (row.supplierName ?? '').trim() || 'Sin proveedor';
+      const entry = supplierTotals.get(supplierKey) ?? {
+        supplierName: supplierKey,
+        totalCostCents: 0,
+        purchaseCount: 0,
+        totalQuantity: 0,
+      };
+      entry.totalCostCents += amount;
+      entry.purchaseCount += 1;
+      entry.totalQuantity += quantity;
+      supplierTotals.set(supplierKey, entry);
+    }
+
+    const topSuppliers = Array.from(supplierTotals.values())
+      .sort((a, b) => b.totalCostCents - a.totalCostCents)
+      .slice(0, 5)
+      .map((entry) => ({
+        supplierName: entry.supplierName,
+        totalCostCents: entry.totalCostCents,
+        purchaseCount: entry.purchaseCount,
+        totalQuantity: entry.totalQuantity,
+      }));
+
+    const recentPurchases = purchaseRows.slice(0, 5).map((row) => ({
+      id: Number(row.id),
+      branchId: Number(row.branchId),
+      supplierName: row.supplierName ?? null,
+      supplierInvoice: row.supplierInvoice ?? null,
+      referenceNo: row.referenceNo ?? null,
+      receivedAt: row.receivedAt ? row.receivedAt.toISOString() : null,
+      createdAt: row.createdAt ? row.createdAt.toISOString() : null,
+      totalCostCents: Number(row.totalCostCents ?? 0),
+      totalQuantity: Number(row.totalQuantity ?? 0),
+    }));
+
+    const returnConditions = [gte(purchaseReturns.createdAt, ninetyDaysAgo)];
+    if (branchId != null) {
+      returnConditions.push(eq(purchaseReturns.branchId, branchId));
+    }
+
+    const recentReturns = await db
+      .select({
+        id: purchaseReturns.id,
+        purchaseId: purchaseReturns.purchaseId,
+        supplierName: purchaseReturns.supplierName,
+        totalCostCents: purchaseReturns.totalCostCents,
+        totalQuantity: purchaseReturns.totalQuantity,
+        createdAt: purchaseReturns.createdAt,
+      })
+      .from(purchaseReturns)
+      .where(combineConditions(returnConditions))
+      .orderBy(desc(purchaseReturns.createdAt))
+      .limit(5);
+
+    const creditConditions = [];
+    if (branchId != null) {
+      creditConditions.push(eq(supplierCredits.branchId, branchId));
+    }
+
+    let creditsQuery = db
+      .select({
+        totalOutstandingCents: sql`COALESCE(SUM(${supplierCredits.balanceCents}), 0)`,
+        creditCount: sql`COUNT(*)`,
+      })
+      .from(supplierCredits);
+
+    const creditFilter = combineConditions(creditConditions);
+    if (creditFilter) {
+      creditsQuery = creditsQuery.where(creditFilter);
+    }
+
+    const [creditsRow] = await creditsQuery;
+
+    res.json({
+      metrics,
+      recentPurchases,
+      topSuppliers,
+      recentReturns: recentReturns.map((row) => ({
+        id: Number(row.id),
+        purchaseId: Number(row.purchaseId),
+        supplierName: row.supplierName ?? null,
+        totalCostCents: Number(row.totalCostCents ?? 0),
+        totalQuantity: Number(row.totalQuantity ?? 0),
+        createdAt: row.createdAt ? row.createdAt.toISOString() : null,
+      })),
+      credits: {
+        totalOutstandingCents: Number(creditsRow?.totalOutstandingCents ?? 0),
+        creditCount: Number(creditsRow?.creditCount ?? 0),
+      },
+    });
   } catch (error) {
     next(error);
   }

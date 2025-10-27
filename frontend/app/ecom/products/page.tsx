@@ -27,7 +27,7 @@ const statusLabels: Record<string, string> = {
 const statusTone: Record<string, string> = {
   draft: "bg-amber-500/10 text-amber-300 border border-amber-500/40",
   active: "bg-emerald-500/10 text-emerald-300 border border-emerald-500/40",
-  inactive: "bg-slate-500/10 text-slate-300 border border-slate-500/40",
+  inactive: "bg-slate-500/10 text-muted-foreground dark:text-slate-300 border border-slate-500/40",
 };
 
 type StatusMessage = { tone: "success" | "error"; message: string } | null;
@@ -278,12 +278,12 @@ export default function EcommerceListingsPage() {
   return (
     <div className="space-y-8">
       <header className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 text-sky-400">
+        <div className="flex items-center gap-2 text-primary">
           <PackageSearch className="h-5 w-5" />
           <span className="text-xs font-semibold uppercase tracking-wide">Catálogo online</span>
         </div>
-        <h1 className="text-3xl font-semibold text-white">E-Commerce · Listados publicados</h1>
-        <p className="max-w-3xl text-sm text-slate-400">
+        <h1 className="text-3xl font-semibold text-foreground dark:text-white">E-Commerce · Listados publicados</h1>
+        <p className="max-w-3xl text-sm text-muted-foreground dark:text-slate-400">
           Gestiona precios, estado y sincronización de cada listado asociado a tus marketplaces. Las acciones se registran en el
           backend para mantener auditoría completa.
         </p>
@@ -301,40 +301,40 @@ export default function EcommerceListingsPage() {
       )}
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-4">
-          <p className="text-xs uppercase tracking-wide text-slate-400">Total listados</p>
-          <p className="mt-2 text-2xl font-semibold text-white">{summary.total}</p>
+        <div className="rounded-lg border border-border dark:border-slate-800 bg-card dark:bg-slate-900/70 p-4">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground dark:text-slate-400">Total listados</p>
+          <p className="mt-2 text-2xl font-semibold text-foreground dark:text-white">{summary.total}</p>
         </div>
         {Object.entries(summary.byStatus ?? {}).map(([key, count]) => (
-          <div key={key} className="rounded-lg border border-slate-800 bg-slate-900/70 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-400">{statusLabels[key] ?? key}</p>
-            <p className="mt-2 text-2xl font-semibold text-white">{count}</p>
+          <div key={key} className="rounded-lg border border-border dark:border-slate-800 bg-card dark:bg-slate-900/70 p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground dark:text-slate-400">{statusLabels[key] ?? key}</p>
+            <p className="mt-2 text-2xl font-semibold text-foreground dark:text-white">{count}</p>
           </div>
         ))}
       </section>
 
-      <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-lg shadow-slate-950/40">
+      <section className="rounded-lg border border-border dark:border-slate-800 bg-card dark:bg-slate-900/70 p-5 shadow-lg shadow-slate-950/40">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-wrap gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300" htmlFor="filter-search">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="filter-search">
                 Buscar
               </label>
               <input
                 id="filter-search"
-                className="w-60 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-60 rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 placeholder="Título o SKU"
                 value={filters.search}
                 onChange={(event) => setFilters((state) => ({ ...state, search: event.target.value }))}
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300" htmlFor="filter-status">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="filter-status">
                 Estado
               </label>
               <select
                 id="filter-status"
-                className="w-36 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-36 rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 value={filters.status}
                 onChange={(event) => setFilters((state) => ({ ...state, status: event.target.value as FiltersState["status"] }))}
               >
@@ -346,12 +346,12 @@ export default function EcommerceListingsPage() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300" htmlFor="filter-channel">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="filter-channel">
                 Canal
               </label>
               <select
                 id="filter-channel"
-                className="w-48 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-48 rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 value={filters.channelId}
                 onChange={(event) =>
                   setFilters((state) => ({
@@ -370,7 +370,7 @@ export default function EcommerceListingsPage() {
             </div>
           </div>
           <button
-            className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
             onClick={() => fetchListings(filters)}
             disabled={loading}
           >
@@ -378,14 +378,14 @@ export default function EcommerceListingsPage() {
           </button>
         </div>
 
-        <div className="mt-4 overflow-hidden rounded-md border border-slate-800">
+        <div className="mt-4 overflow-hidden rounded-md border border-border dark:border-slate-800">
           <table className="min-w-full divide-y divide-slate-800">
-            <thead className="bg-slate-950/60">
-              <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
+            <thead className="bg-muted dark:bg-slate-950/60">
+              <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground dark:text-slate-400">
                 <th className="px-3 py-2">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-950"
+                    className="h-4 w-4 rounded border-slate-600 bg-background dark:bg-slate-950"
                     checked={selectedIds.size > 0 && selectedIds.size === listings.length}
                     onChange={(event) => {
                       if (event.target.checked) {
@@ -403,27 +403,27 @@ export default function EcommerceListingsPage() {
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800 bg-slate-950/40 text-sm text-slate-200">
+            <tbody className="divide-y divide-slate-800 bg-muted dark:bg-slate-950/40 text-sm text-foreground dark:text-slate-200">
               {listings.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground dark:text-slate-500">
                     No se encontraron listados con los filtros aplicados.
                   </td>
                 </tr>
               )}
               {listings.map((listing) => (
-                <tr key={listing.id} className={focusedId === listing.id ? "bg-sky-500/10" : undefined}>
+                <tr key={listing.id} className={focusedId === listing.id ? "bg-primary/10" : undefined}>
                   <td className="px-3 py-3 align-top">
                     <input
                       type="checkbox"
-                      className="h-4 w-4 rounded border-slate-600 bg-slate-950"
+                      className="h-4 w-4 rounded border-slate-600 bg-background dark:bg-slate-950"
                       checked={selectedIds.has(listing.id)}
                       onChange={() => toggleSelection(listing.id)}
                     />
                   </td>
                   <td className="px-3 py-3 align-top">
-                    <div className="font-medium text-white">{listing.title}</div>
-                    <div className="text-xs text-slate-400">
+                    <div className="font-medium text-foreground dark:text-white">{listing.title}</div>
+                    <div className="text-xs text-muted-foreground dark:text-slate-400">
                       {listing.code ? `${listing.code} · ${listing.name ?? ""}` : listing.name ?? "Sin SKU"}
                     </div>
                   </td>
@@ -433,11 +433,11 @@ export default function EcommerceListingsPage() {
                   <td className="px-3 py-3 align-top">{statusBadge(listing.status)}</td>
                   <td className="px-3 py-3 align-top">
                     <div className="flex flex-wrap gap-2">
-                      {listing.channels.length === 0 && <span className="text-xs text-slate-500">Sin publicar</span>}
+                      {listing.channels.length === 0 && <span className="text-xs text-muted-foreground dark:text-slate-500">Sin publicar</span>}
                       {listing.channels.map((channel) => (
                         <span
                           key={`${listing.id}-${channel.channelId}`}
-                          className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-300"
+                          className="inline-flex items-center gap-1 rounded-full border border-input dark:border-slate-700 bg-card dark:bg-slate-900/80 px-2 py-1 text-[11px] text-muted-foreground dark:text-slate-300"
                         >
                           <Store className="h-3 w-3" /> {channel.channelName ?? `#${channel.channelId}`}
                         </span>
@@ -446,7 +446,7 @@ export default function EcommerceListingsPage() {
                   </td>
                   <td className="px-3 py-3 text-right align-top">
                     <button
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                      className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-3 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
                       onClick={() => setFocusedId(listing.id)}
                     >
                       <Edit3 className="h-3 w-3" /> Editar
@@ -458,14 +458,14 @@ export default function EcommerceListingsPage() {
           </table>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4 text-xs text-slate-400">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border dark:border-slate-800 pt-4 text-xs text-muted-foreground dark:text-slate-400">
           <div>
             Página {pagination.page} · {listings.length} elementos
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex items-center gap-2">
               <select
-                className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-100 focus:border-sky-500 focus:outline-none"
+                className="rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-1.5 text-xs text-foreground dark:text-slate-100 focus:border-sky-500 focus:outline-none"
                 value={bulkChannelId}
                 onChange={(event) => setBulkChannelId(event.target.value === "" ? "" : Number(event.target.value))}
               >
@@ -477,21 +477,21 @@ export default function EcommerceListingsPage() {
                 ))}
               </select>
               <button
-                className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                className="rounded-md border border-input dark:border-slate-700 px-3 py-1.5 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
                 onClick={() => submitBulkAction("publish")}
                 disabled={loading}
               >
                 Publicar
               </button>
               <button
-                className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                className="rounded-md border border-input dark:border-slate-700 px-3 py-1.5 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
                 onClick={() => submitBulkAction("unpublish")}
                 disabled={loading}
               >
                 Despublicar
               </button>
               <button
-                className="rounded-md bg-sky-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground dark:text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => submitBulkAction("sync")}
                 disabled={loading}
               >
@@ -503,14 +503,14 @@ export default function EcommerceListingsPage() {
       </section>
 
       {focusedListing && (
-        <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-5">
+        <section className="rounded-lg border border-border dark:border-slate-800 bg-card dark:bg-slate-900/70 p-5">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-white">Edición rápida</h2>
-              <p className="text-xs text-slate-400">Actualiza título, precio o estado y vuelve a sincronizar cuando sea necesario.</p>
+              <h2 className="text-lg font-semibold text-foreground dark:text-white">Edición rápida</h2>
+              <p className="text-xs text-muted-foreground dark:text-slate-400">Actualiza título, precio o estado y vuelve a sincronizar cuando sea necesario.</p>
             </div>
             <button
-              className="text-xs text-slate-400 hover:text-slate-200"
+              className="text-xs text-muted-foreground dark:text-slate-400 hover:text-foreground dark:text-slate-200"
               onClick={() => resetFocus()}
             >
               Cerrar
@@ -519,35 +519,35 @@ export default function EcommerceListingsPage() {
 
           <form className="mt-4 grid gap-4 md:grid-cols-2" onSubmit={submitEdit}>
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-slate-300" htmlFor="edit-title">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="edit-title">
                 Título
               </label>
               <input
                 id="edit-title"
-                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-full rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 value={editForm.title}
                 onChange={(event) => setEditForm((state) => ({ ...state, title: event.target.value }))}
                 required
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300" htmlFor="edit-price">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="edit-price">
                 Precio (RD$)
               </label>
               <input
                 id="edit-price"
-                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-full rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 value={editForm.price}
                 onChange={(event) => setEditForm((state) => ({ ...state, price: event.target.value }))}
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300" htmlFor="edit-status">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="edit-status">
                 Estado
               </label>
               <select
                 id="edit-status"
-                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                className="w-full rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
                 value={editForm.status}
                 onChange={(event) => setEditForm((state) => ({ ...state, status: event.target.value }))}
               >
@@ -557,12 +557,12 @@ export default function EcommerceListingsPage() {
               </select>
             </div>
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-slate-300" htmlFor="edit-description">
+              <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="edit-description">
                 Descripción
               </label>
               <textarea
                 id="edit-description"
-                className="min-h-[120px] w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
+                className="min-h-[120px] w-full rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-slate-100 focus:border-sky-500 focus:outline-none"
                 value={editForm.description}
                 onChange={(event) => setEditForm((state) => ({ ...state, description: event.target.value }))}
               />
@@ -570,14 +570,14 @@ export default function EcommerceListingsPage() {
             <div className="md:col-span-2 flex items-center justify-end gap-3">
               <button
                 type="button"
-                className="rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"
+                className="rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
                 onClick={() => resetFocus()}
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 rounded-md bg-sky-500 px-3 py-2 text-sm font-medium text-white hover:bg-sky-400"
+                className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground dark:text-white hover:bg-primary/90"
                 disabled={loading}
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Edit3 className="h-4 w-4" />} Guardar cambios
