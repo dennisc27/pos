@@ -16,7 +16,7 @@ const trendColor: Record<NonNullable<Metric["trend"]>["direction"], string> = {
 
 export function MetricList({ metrics }: { metrics: Metric[] }) {
   return (
-    <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {metrics.map((metric) => (
         <div
           key={metric.label}

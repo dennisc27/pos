@@ -13,9 +13,7 @@ export async function InventoryHealthCard() {
       <MetricList
         metrics={[
           { label: "Low Stock", value: data.lowStock.toString(), emphasis: true },
-          { label: "Aging (90+ days)", value: data.aging.toString(), trend: { label: "+3 vs last week", direction: "up" } },
-          { label: "Listed Online", value: data.listedOnline.toString() },
-          { label: "Quarantined", value: data.quarantined.toString(), trend: { label: "QC Review", direction: "flat" } }
+          { label: "Aging (90+ days)", value: data.aging.toString() }
         ]}
       />
     </DashboardCard>

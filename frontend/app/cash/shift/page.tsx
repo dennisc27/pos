@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
   AlertTriangle,
@@ -146,6 +147,7 @@ export default function CashShiftPage() {
     reason: "",
     type: "drop" as MovementType,
   });
+  const denominationRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const countedTotal = useMemo(() => {
     return DENOMINATIONS.reduce((sum, denom) => {
@@ -165,6 +167,41 @@ export default function CashShiftPage() {
   const handleDenominationChange = (value: number, next: string) => {
     if (/^\d*$/.test(next.trim())) {
       setDenominations((state) => ({ ...state, [denominationKey(value)]: next }));
+    }
+  };
+
+  const focusDenominationAt = (index: number) => {
+    if (index < 0 || index >= DENOMINATIONS.length) {
+      return;
+    }
+
+    const key = denominationKey(DENOMINATIONS[index].value);
+    const target = denominationRefs.current[key];
+    if (target) {
+      target.focus();
+      target.select();
+    }
+  };
+
+  const handleDenominationKeyDown = (
+    event: ReactKeyboardEvent<HTMLInputElement>,
+    index: number
+  ) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      focusDenominationAt(index + 1);
+      return;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      event.preventDefault();
+      focusDenominationAt(index + 1);
+      return;
+    }
+
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      focusDenominationAt(index - 1);
     }
   };
 
@@ -380,7 +417,7 @@ export default function CashShiftPage() {
             <div className="grid gap-6 px-6 pb-6 pt-4 lg:grid-cols-[1.4fr,1fr]">
               <div className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-2">
-                  {DENOMINATIONS.map((denom) => {
+                  {DENOMINATIONS.map((denom, index) => {
                     const key = denominationKey(denom.value);
                     return (
                       <label
@@ -399,7 +436,11 @@ export default function CashShiftPage() {
                           inputMode="numeric"
                           value={denominations[key]}
                           onChange={(event) => handleDenominationChange(denom.value, event.target.value)}
+                          onKeyDown={(event) => handleDenominationKeyDown(event, index)}
                           placeholder="0"
+                          ref={(element) => {
+                            denominationRefs.current[key] = element;
+                          }}
                           className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
                         />
                         <span className="mt-2 text-xs text-slate-500 dark:text-slate-400">

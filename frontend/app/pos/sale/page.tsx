@@ -20,7 +20,6 @@ import {
 import { ProductGallery } from "@/components/pos/product-gallery";
 import { OrderPanel } from "@/components/pos/order-panel";
 import { ReceiptPreview } from "@/components/pos/receipt-preview";
-import { TenderPanel } from "@/components/pos/tender-panel";
 import { formatCurrency } from "@/components/pos/utils";
 import type { CartLine, SaleSummary, TenderBreakdown, Product, ProductCategory } from "@/components/pos/types";
 
@@ -241,7 +240,7 @@ export default function PosPage() {
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [validationState, setValidationState] = useState<"idle" | "validating" | "success" | "error">("idle");
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
-  const [isTenderModalOpen, setTenderModalOpen] = useState(false);
+  const [isPaymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [cashTenderInput, setCashTenderInput] = useState("");
   const [finalizeState, setFinalizeState] = useState<"idle" | "processing" | "success" | "error">("idle");
   const [finalizeMessage, setFinalizeMessage] = useState<string | null>(null);
@@ -560,16 +559,16 @@ export default function PosPage() {
     setFinalizeMessage(null);
   }, [cartLines, tenderBreakdown]);
 
-  const handleOpenTenderModal = useCallback(() => {
+  const handleOpenPaymentDialog = useCallback(() => {
     setCashTenderInput(cashRequired.toFixed(2));
-    setTenderModalOpen(true);
+    setPaymentDialogOpen(true);
   }, [cashRequired]);
 
-  const handleCloseTenderModal = useCallback(() => {
-    setTenderModalOpen(false);
+  const handleClosePaymentDialog = useCallback(() => {
+    setPaymentDialogOpen(false);
   }, []);
 
-  const handleConfirmTenderModal = useCallback(
+  const handleConfirmPaymentDialog = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const parsed = parseAmount(cashTenderInput);
@@ -597,7 +596,7 @@ export default function PosPage() {
         ];
       });
 
-      setTenderModalOpen(false);
+      setPaymentDialogOpen(false);
     },
     [cashRequired, cashTenderInput]
   );
@@ -851,6 +850,8 @@ export default function PosPage() {
               selectedProductIds={selectedProductIds}
               onToggleProduct={handleToggleProduct}
             />
+          </div>
+          <div className="space-y-6">
             <OrderPanel
               items={cartLines}
               summary={saleSummary}
@@ -891,7 +892,7 @@ export default function PosPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={handleOpenTenderModal}
+                    onClick={handleOpenPaymentDialog}
                     disabled={cartLines.length === 0}
                     className="inline-flex items-center justify-center rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
                   >
@@ -931,10 +932,6 @@ export default function PosPage() {
               </div>
             </div>
           </div>
-          <div className="space-y-6">
-            <TenderPanel summary={saleSummary} tenders={tenderBreakdown} />
-            <ReceiptPreview items={cartLines} summary={saleSummary} tenders={tenderBreakdown} />
-          </div>
         </div>
       </div>
       <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/90">
@@ -948,7 +945,10 @@ export default function PosPage() {
               <ShieldX className="h-4 w-4" />
               Void
             </button>
-            <button className="flex items-center justify-center gap-2 rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white">
+            <button
+              onClick={handleOpenPaymentDialog}
+              className="flex items-center justify-center gap-2 rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+            >
               <CreditCard className="h-4 w-4" />
               Payment
             </button>
@@ -1025,17 +1025,17 @@ export default function PosPage() {
           </form>
         </div>
       ) : null}
-      {isTenderModalOpen ? (
+      {isPaymentDialogOpen ? (
         <div
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
-          onClick={handleCloseTenderModal}
+          onClick={handleClosePaymentDialog}
         >
           <form
-            className="w-full max-w-lg space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            className="w-full max-w-4xl space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
             onClick={(event) => event.stopPropagation()}
-            onSubmit={handleConfirmTenderModal}
+            onSubmit={handleConfirmPaymentDialog}
           >
             <div className="flex items-start justify-between">
               <div>
@@ -1046,15 +1046,16 @@ export default function PosPage() {
               </div>
               <button
                 type="button"
-                onClick={handleCloseTenderModal}
+                onClick={handleClosePaymentDialog}
                 className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
                 aria-label="Close tender modal"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-4">
-              <div className="space-y-2 rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/60 dark:text-slate-200">
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+              <ReceiptPreview items={cartLines} summary={saleSummary} tenders={tenderBreakdown} />
+              <div className="space-y-4 rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/60 dark:text-slate-200">
                 <div className="flex items-center justify-between">
                   <span>Total due</span>
                   <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(saleSummary.total)}</span>
@@ -1097,7 +1098,7 @@ export default function PosPage() {
             <div className="flex items-center justify-end gap-3">
               <button
                 type="button"
-                onClick={handleCloseTenderModal}
+                onClick={handleClosePaymentDialog}
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
               >
                 Cancel

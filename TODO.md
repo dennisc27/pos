@@ -133,12 +133,12 @@
 - [x] Security & Audit - BE - Error redaction (do not leak SQL/stack)
 - [x] Seed & E2E - BE - Seed: branches, users, roles, categories, sample products, sample codes, gift cards, credit notes
 - [x] Seed & E2E - BE - E2E Paths: POS: sale → receipt, refund → restock; Loans: new → renew → redeem, forfeit → inventory; Layaway: new → payment → overdue → pawn link
-- [ ] dasboard: The text "command center" on the dashboard is white on light mode and it can't be seen.
-- [ ] dashboard: modify the dashboard to match ui_tasks.md description and metrics, and make it fit in one page.
-- [ ] pos -> new sale: remove the tender container and just leave the payment method as it already divides how the pay is divided. put the new order on the right column and make the receipt preview appear in a popup dialog when the payment button or the pay button is pressed.
-- [ ] pos -> new sale:  organize the right column to properly have in this order new order.
-- [ ] cash -> shift: when the enter button is pressed on one of the denomination move to the next denomination. Also allow the use of the arrows to move through the denominations.
-- [ ] modify the implementation of system to include a left with the options and a right panel with the settings to configure. it must include what's in this paraenthesis (Settings
+- [x] dasboard: The text "command center" on the dashboard is white on light mode and it can't be seen.
+- [x] dashboard: modify the dashboard to match ui_tasks.md description and metrics, and make it fit in one page.
+- [x] pos -> new sale: remove the tender container and just leave the payment method as it already divides how the pay is divided. put the new order on the right column and make the receipt preview appear in a popup dialog when the payment button or the pay button is pressed.
+- [x] pos -> new sale:  organize the right column to properly have in this order new order.
+- [x] cash -> shift: when the enter button is pressed on one of the denomination move to the next denomination. Also allow the use of the arrows to move through the denominations.
+- [x] modify the implementation of system to include a left with the options and a right panel with the settings to configure. it must include what's in this paraenthesis (Settings
 * System Settings (Pawn toggle button, date)
 * Company Settings (company info, icon, address)
 * Localization (symbol RD$/$)
@@ -174,4 +174,4 @@ o Log Viewer
 o Camera view, transaction stamping
 o Block id
 )
-- [ ] make sure the settings pages for each settings option is implemented.
+- [x] make sure the settings pages for each settings option is implemented.

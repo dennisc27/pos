@@ -12,9 +12,7 @@ export async function RepairsFabricationsCard() {
       <MetricList
         metrics={[
           { label: "In Progress", value: data.inProgress.toString(), emphasis: true },
-          { label: "Waiting Approval", value: data.waitingApproval.toString() },
-          { label: "Ready for Pickup", value: data.readyForPickup.toString(), trend: { label: "+1 vs yesterday", direction: "up" } },
-          { label: "Turnaround", value: `${data.avgTurnaround.toFixed(1)} days`, trend: data.trend }
+          { label: "Ready for Pickup", value: data.readyForPickup.toString() }
         ]}
       />
     </DashboardCard>

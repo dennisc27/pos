@@ -11,10 +11,8 @@ export async function MarketingEngagementCard() {
     >
       <MetricList
         metrics={[
-          { label: "Campaigns Sent", value: data.campaignsSent.toString(), emphasis: true },
-          { label: "Messages Pending", value: data.messagesPending.toString(), trend: { label: "Queue", direction: "flat" } },
-          { label: "New Reviews", value: data.newReviews.toString() },
-          { label: "Responses Needed", value: data.responsesRequired.toString(), trend: { label: "Handle today", direction: "up" } }
+          { label: "Messages Pending", value: data.messagesPending.toString(), emphasis: true },
+          { label: "New Reviews", value: data.newReviews.toString() }
         ]}
       />
     </DashboardCard>
