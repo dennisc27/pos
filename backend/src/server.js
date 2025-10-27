@@ -47,6 +47,7 @@ import {
   auditLogs,
   layawayPayments,
   layaways,
+  loans,
   repairMaterials,
   repairPayments,
   repairPhotos,
