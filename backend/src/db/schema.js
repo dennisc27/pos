@@ -312,6 +312,16 @@ export const customerNotes = mysqlTable('customer_notes', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+export const reviews = mysqlTable('reviews', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  source: mysqlEnum('source', ['google', 'facebook', 'internal', 'other']).default('other'),
+  author: varchar('author', { length: 160 }),
+  rating: int('rating').notNull(),
+  comment: text('comment'),
+  status: mysqlEnum('status', ['new', 'approved', 'hidden']).default('new'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 export const loyaltyLedger = mysqlTable('loyalty_ledger', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   customerId: bigint('customer_id', { mode: 'number' }).notNull(),
