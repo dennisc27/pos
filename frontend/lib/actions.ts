@@ -14,36 +14,28 @@ type Trend = {
 
 export async function fetchLoansOverview() {
   return {
-    newLoans: 8,
-    activeLoans: 312,
-    dueToday: 27,
-    pastDue: 54,
-    redemptions: 19,
-    renewals: 11,
     principalOut: { amount: 482000, currency: "DOP" as Currency },
-    trend: { direction: "up", label: "+6% vs yesterday" } as Trend
+    loansToday: 18,
+    pawnsPastDue: 54,
+    renewalsToday: 11,
+    renewalsTrend: { direction: "up", label: "+2 vs yesterday" } as Trend
   };
 }
 
 export async function fetchLayawayMetrics() {
   return {
-    active: 64,
-    paid: 12,
-    overdue: 9,
-    depositsToday: { amount: 72000, currency: "DOP" as Currency },
-    remindersSent: 18
+    newToday: 9,
+    paymentsToday: { amount: 72000, currency: "DOP" as Currency },
+    paymentsCount: 18
   };
 }
 
 export async function fetchSalesAndPurchases() {
   return {
-    netSales: { amount: 156000, currency: "DOP" as Currency },
-    transactions: 93,
-    avgTicket: { amount: 1677, currency: "DOP" as Currency },
-    topCategory: "Gold Jewelry",
-    buysFromCustomers: { amount: 42000, currency: "DOP" as Currency },
-    refunds: 2,
-    trend: { direction: "up", label: "+12% vs last week" } as Trend
+    salesQtyToday: 93,
+    salesTotalToday: { amount: 156000, currency: "DOP" as Currency },
+    salesTrend: { direction: "up", label: "+12% vs last week" } as Trend,
+    purchasesToday: { amount: 42000, currency: "DOP" as Currency }
   };
 }
 
@@ -62,8 +54,6 @@ export async function fetchInventoryHealth() {
   return {
     lowStock: 18,
     aging: 42,
-    listedOnline: 120,
-    quarantined: 5,
     totalValue: { amount: 3920000, currency: "DOP" as Currency },
     transfersPending: 6
   };
@@ -72,17 +62,14 @@ export async function fetchInventoryHealth() {
 export async function fetchRepairsAndFabrications() {
   return {
     inProgress: 23,
-    waitingApproval: 7,
     readyForPickup: 4,
-    diagnosticsToday: 6,
     avgTurnaround: 3.8,
-    trend: { direction: "down", label: "-1 day vs last month" } as Trend
+    diagnosticsToday: 6
   };
 }
 
 export async function fetchMarketingEngagement() {
   return {
-    campaignsSent: 3,
     messagesPending: 45,
     newReviews: 5,
     averageRating: 4.7,

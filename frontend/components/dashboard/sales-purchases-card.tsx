@@ -8,15 +8,17 @@ export async function SalesPurchasesCard() {
   return (
     <DashboardCard
       title="Sales & Purchases"
-      subtitle={`Net sales ${formatCurrency(data.netSales)} · ${data.trend.label}`}
+      subtitle={`Sales total ${formatCurrency(data.salesTotalToday)} · ${data.salesTrend.label}`}
     >
       <MetricList
         metrics={[
-          { label: "Transactions", value: data.transactions.toString(), emphasis: true },
-          { label: "Avg Ticket", value: formatCurrency(data.avgTicket) },
-          { label: "Top Category", value: data.topCategory },
-          { label: "Buys From Customers", value: formatCurrency(data.buysFromCustomers) },
-          { label: "Refunds", value: data.refunds.toString(), trend: { label: "No change", direction: "flat" } }
+          { label: "Sales Qty Today", value: data.salesQtyToday.toString(), emphasis: true },
+          {
+            label: "Sales Total Today",
+            value: formatCurrency(data.salesTotalToday),
+            trend: { label: data.salesTrend.label, direction: data.salesTrend.direction }
+          },
+          { label: "Purchases Today", value: formatCurrency(data.purchasesToday) }
         ]}
       />
     </DashboardCard>

@@ -8,14 +8,12 @@ export async function LayawaysCard() {
   return (
     <DashboardCard
       title="Layaways"
-      subtitle={`Deposits today: ${formatCurrency(data.depositsToday)} · Reminders sent ${data.remindersSent}`}
+      subtitle={`Payments posted: ${data.paymentsCount} · Total ${formatCurrency(data.paymentsToday)}`}
     >
       <MetricList
         metrics={[
-          { label: "Active", value: data.active.toString(), emphasis: true },
-          { label: "Paid", value: data.paid.toString() },
-          { label: "Overdue", value: data.overdue.toString(), trend: { label: "-2 vs yesterday", direction: "down" } },
-          { label: "Reminders", value: data.remindersSent.toString() }
+          { label: "New Today", value: data.newToday.toString(), emphasis: true },
+          { label: "Payments Today", value: formatCurrency(data.paymentsToday) }
         ]}
       />
     </DashboardCard>
