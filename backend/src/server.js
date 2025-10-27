@@ -30,6 +30,7 @@ import {
   notificationMessages,
   customerNotes,
   loyaltyLedger,
+  reviews,
   marketingTemplates,
   marketingSegments,
   marketingCampaigns,
@@ -46,6 +47,7 @@ import {
   auditLogs,
   layawayPayments,
   layaways,
+  loans,
   repairMaterials,
   repairPayments,
   repairPhotos,
@@ -61,6 +63,8 @@ import {
   productCodes,
   productCodeComponents,
   productCodeVersions,
+  salesReturnItems,
+  salesReturns,
   supplierCreditLedger,
   supplierCredits,
   shiftReports,
@@ -164,6 +168,16 @@ const cashMovementSelection = {
   reason: cashMovements.reason,
   createdAt: cashMovements.createdAt,
 };
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function startOfTomorrow(date) {
+  const next = startOfDay(date);
+  next.setDate(next.getDate() + 1);
+  return next;
+}
 
 const purchaseSelection = {
   id: purchases.id,
@@ -741,6 +755,222 @@ function normalizePurchaseLines(rawLines) {
     totalCostCents,
     totalLabels,
   };
+}
+
+function buildInvoicePolicyFlags(invoiceRow) {
+  const flags = [];
+
+  if (invoiceRow?.createdAt) {
+    const createdAt = invoiceRow.createdAt instanceof Date
+      ? invoiceRow.createdAt
+      : new Date(invoiceRow.createdAt);
+    const diffMs = Date.now() - createdAt.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (Number.isFinite(diffDays) && diffDays <= 15) {
+      flags.push('Within 15 day window');
+    } else {
+      flags.push('Outside 15 day window');
+    }
+  }
+
+  flags.push('Receipt includes ITBIS');
+
+  return flags;
+}
+
+async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = null }) {
+  if (!invoiceId && !invoiceNo) {
+    throw new HttpError(400, 'invoiceId or invoiceNo is required');
+  }
+
+  const whereClause = invoiceId
+    ? eq(invoices.id, invoiceId)
+    : eq(invoices.invoiceNo, invoiceNo);
+
+  const [invoiceRow] = await client
+    .select({
+      id: invoices.id,
+      invoiceNo: invoices.invoiceNo,
+      orderId: invoices.orderId,
+      totalCents: invoices.totalCents,
+      taxCents: invoices.taxCents,
+      createdAt: invoices.createdAt,
+      branchId: orders.branchId,
+      userId: orders.userId,
+      customerId: orders.customerId,
+      subtotalCents: orders.subtotalCents,
+      orderStatus: orders.status,
+      customerFirstName: customers.firstName,
+      customerLastName: customers.lastName,
+    })
+    .from(invoices)
+    .innerJoin(orders, eq(invoices.orderId, orders.id))
+    .leftJoin(customers, eq(orders.customerId, customers.id))
+    .where(whereClause)
+    .limit(1);
+
+  if (!invoiceRow) {
+    throw new HttpError(404, 'Invoice not found');
+  }
+
+  const lineRows = await client
+    .select({
+      id: orderItems.id,
+      productCodeVersionId: orderItems.productCodeVersionId,
+      qty: orderItems.qty,
+      unitPriceCents: orderItems.unitPriceCents,
+      totalCents: orderItems.totalCents,
+      code: productCodes.code,
+      sku: productCodes.sku,
+      name: productCodes.name,
+      description: productCodes.description,
+      isActive: productCodeVersions.isActive,
+    })
+    .from(orderItems)
+    .innerJoin(productCodeVersions, eq(orderItems.productCodeVersionId, productCodeVersions.id))
+    .innerJoin(productCodes, eq(productCodeVersions.productCodeId, productCodes.id))
+    .where(eq(orderItems.orderId, invoiceRow.orderId))
+    .orderBy(asc(orderItems.id));
+
+  const subtotalCents = Number(invoiceRow.subtotalCents ?? 0);
+  const taxCents = Number(invoiceRow.taxCents ?? 0);
+  const taxRatio = subtotalCents > 0 ? taxCents / subtotalCents : 0;
+
+  const lines = lineRows.map((row) => {
+    const qty = Number(row.qty ?? 0);
+    const unitPriceCents = Number(row.unitPriceCents ?? 0);
+    const lineSubtotalCents = Math.max(0, unitPriceCents * qty);
+    const lineTaxCents = Math.round(lineSubtotalCents * taxRatio);
+    const lineTotalCents = lineSubtotalCents + lineTaxCents;
+    const taxPerUnitCents = qty > 0 ? Math.round(lineTaxCents / qty) : 0;
+
+    return {
+      id: Number(row.id),
+      orderItemId: Number(row.id),
+      productCodeVersionId: Number(row.productCodeVersionId),
+      sku: row.sku ?? row.code ?? null,
+      code: row.code ?? null,
+      description: row.name ?? 'Product',
+      qty,
+      unitPriceCents,
+      subtotalCents: lineSubtotalCents,
+      taxCents: lineTaxCents,
+      taxPerUnitCents,
+      totalCents: lineTotalCents,
+      restockable: Boolean(row.isActive ?? true),
+    };
+  });
+
+  const paymentRows = await client
+    .select({
+      id: payments.id,
+      method: payments.method,
+      amountCents: payments.amountCents,
+      meta: payments.meta,
+      createdAt: payments.createdAt,
+    })
+    .from(payments)
+    .where(eq(payments.invoiceId, invoiceRow.id))
+    .orderBy(asc(payments.id));
+
+  const paymentsList = paymentRows.map((row) => {
+    const meta = row.meta && typeof row.meta === 'object' ? row.meta : null;
+    return {
+      id: Number(row.id),
+      method: row.method,
+      amountCents: Number(row.amountCents ?? 0),
+      reference: typeof meta?.reference === 'string' ? meta.reference : null,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : toIsoString(row.createdAt),
+    };
+  });
+
+  const customerName = [invoiceRow.customerFirstName, invoiceRow.customerLastName]
+    .filter((part) => typeof part === 'string' && part.trim().length > 0)
+    .join(' ');
+
+  return {
+    invoice: {
+      id: Number(invoiceRow.id),
+      invoiceNo: invoiceRow.invoiceNo ?? null,
+      orderId: Number(invoiceRow.orderId),
+      branchId: Number(invoiceRow.branchId),
+      userId: Number(invoiceRow.userId),
+      customerId: invoiceRow.customerId == null ? null : Number(invoiceRow.customerId),
+      subtotalCents,
+      taxCents,
+      totalCents: Number(invoiceRow.totalCents ?? subtotalCents + taxCents),
+      createdAt: invoiceRow.createdAt instanceof Date
+        ? invoiceRow.createdAt.toISOString()
+        : toIsoString(invoiceRow.createdAt),
+      status: invoiceRow.orderStatus,
+      customerName: customerName || 'Walk-in customer',
+    },
+    lines,
+    payments: paymentsList,
+    policyFlags: buildInvoicePolicyFlags(invoiceRow),
+  };
+}
+
+function normalizeGiftCardCode(code) {
+  if (typeof code !== 'string') {
+    return null;
+  }
+
+  const trimmed = code.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.toUpperCase();
+}
+
+async function getGiftCardByIdentifier(client, { cardId = null, code = null }) {
+  const normalizedCode = normalizeGiftCardCode(code);
+
+  if (!cardId && !normalizedCode) {
+    throw new HttpError(400, 'cardId or code is required');
+  }
+
+  let statement = client
+    .select({
+      id: giftCards.id,
+      code: giftCards.code,
+      balanceCents: giftCards.balanceCents,
+      expiresOn: giftCards.expiresOn,
+      createdAt: giftCards.createdAt,
+    })
+    .from(giftCards);
+
+  if (cardId) {
+    const numericId = parsePositiveInteger(cardId, 'cardId');
+    statement = statement.where(eq(giftCards.id, numericId));
+  } else if (normalizedCode) {
+    statement = statement.where(eq(giftCards.code, normalizedCode));
+  }
+
+  const [row] = await statement.limit(1);
+
+  if (!row) {
+    throw new HttpError(404, 'Gift card not found');
+  }
+
+  return row;
+}
+
+function serializeGiftCardRow(row) {
+  return {
+    id: Number(row.id),
+    code: row.code,
+    balanceCents: Number(row.balanceCents ?? 0),
+    expiresOn: row.expiresOn instanceof Date ? row.expiresOn.toISOString() : toIsoString(row.expiresOn),
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : toIsoString(row.createdAt),
+  };
+}
+
+function generateCustomerBuyCode(index) {
+  const random = crypto.randomUUID().split('-')[0]?.toUpperCase() ?? 'NEW';
+  return `BUY-${random}-${String(index + 1).padStart(2, '0')}`.slice(0, 32);
 }
 
 function normalizePurchaseReturnLines(rawLines, purchaseLineMap) {
@@ -1897,6 +2127,366 @@ async function fulfillLayawayInventory(executor, layawayId, orderId) {
       notes: 'Layaway completion',
     });
   }
+}
+
+async function buildLayawayDashboardSnapshot(referenceDate = new Date()) {
+  const now = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
+  const todayStart = startOfDay(now);
+  const tomorrowStart = startOfTomorrow(now);
+
+  const activeRows = await db
+    .select({
+      id: layaways.id,
+      branchId: layaways.branchId,
+      branchName: branches.name,
+      customerId: layaways.customerId,
+      customerFirstName: customers.firstName,
+      customerLastName: customers.lastName,
+      customerPhone: customers.phone,
+      customerEmail: customers.email,
+      orderId: layaways.orderId,
+      orderNumber: orders.orderNumber,
+      totalCents: layaways.totalCents,
+      paidCents: layaways.paidCents,
+      dueDate: layaways.dueDate,
+      createdAt: layaways.createdAt,
+      updatedAt: layaways.updatedAt,
+    })
+    .from(layaways)
+    .leftJoin(branches, eq(branches.id, layaways.branchId))
+    .leftJoin(customers, eq(customers.id, layaways.customerId))
+    .leftJoin(orders, eq(orders.id, layaways.orderId))
+    .where(eq(layaways.status, 'active'))
+    .orderBy(asc(layaways.dueDate), asc(layaways.id));
+
+  const layawayIds = Array.from(new Set(activeRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id))));
+  const orderIds = Array.from(new Set(activeRows.map((row) => Number(row.orderId)).filter((id) => Number.isFinite(id))));
+  const customerIds = Array.from(new Set(activeRows.map((row) => Number(row.customerId)).filter((id) => Number.isFinite(id))));
+
+  const firstItemByOrder = new Map();
+  if (orderIds.length > 0) {
+    const orderItemRows = await db
+      .select({
+        orderId: orderItems.orderId,
+        qty: orderItems.qty,
+        productName: productCodes.name,
+        productCode: productCodes.code,
+      })
+      .from(orderItems)
+      .leftJoin(productCodeVersions, eq(productCodeVersions.id, orderItems.productCodeVersionId))
+      .leftJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+      .where(inArray(orderItems.orderId, orderIds))
+      .orderBy(orderItems.orderId, asc(orderItems.id));
+
+    for (const item of orderItemRows) {
+      const id = Number(item.orderId);
+      if (!Number.isFinite(id) || firstItemByOrder.has(id)) {
+        continue;
+      }
+
+      const qty = Number(item.qty ?? 0);
+      const labelParts = [];
+      if (Number.isFinite(qty) && qty > 1) {
+        labelParts.push(`${qty}×`);
+      }
+      labelParts.push(item.productName ?? item.productCode ?? 'Artículo reservado');
+      firstItemByOrder.set(id, labelParts.join(' '));
+    }
+  }
+
+  const lastPaymentByLayaway = new Map();
+  if (layawayIds.length > 0) {
+    const paymentRows = await db
+      .select({
+        layawayId: layawayPayments.layawayId,
+        amountCents: layawayPayments.amountCents,
+        method: layawayPayments.method,
+        note: layawayPayments.note,
+        createdAt: layawayPayments.createdAt,
+      })
+      .from(layawayPayments)
+      .where(inArray(layawayPayments.layawayId, layawayIds))
+      .orderBy(desc(layawayPayments.createdAt), desc(layawayPayments.id));
+
+    for (const row of paymentRows) {
+      const id = Number(row.layawayId);
+      if (!Number.isFinite(id) || lastPaymentByLayaway.has(id)) {
+        continue;
+      }
+
+      const createdAt = row.createdAt instanceof Date
+        ? row.createdAt.toISOString()
+        : row.createdAt
+        ? new Date(row.createdAt).toISOString()
+        : null;
+
+      lastPaymentByLayaway.set(id, {
+        amountCents: Number(row.amountCents ?? 0),
+        method: row.method ?? 'cash',
+        note: row.note ?? null,
+        createdAt,
+      });
+    }
+  }
+
+  let notificationRows = [];
+  if (customerIds.length > 0) {
+    notificationRows = await db
+      .select({
+        id: notificationMessages.id,
+        customerId: notificationMessages.customerId,
+        channel: notificationMessages.channel,
+        status: notificationMessages.status,
+        message: notificationMessages.message,
+        createdAt: notificationMessages.createdAt,
+        sentAt: notificationMessages.sentAt,
+      })
+      .from(notificationMessages)
+      .where(inArray(notificationMessages.customerId, customerIds))
+      .orderBy(desc(notificationMessages.createdAt), desc(notificationMessages.id))
+      .limit(40);
+  }
+
+  const lastNotificationByCustomer = new Map();
+  for (const row of notificationRows) {
+    const id = Number(row.customerId);
+    if (!Number.isFinite(id) || lastNotificationByCustomer.has(id)) {
+      continue;
+    }
+    lastNotificationByCustomer.set(id, row);
+  }
+
+  const [paymentsTodayRow] = await db
+    .select({
+      totalCents: sql`COALESCE(SUM(${layawayPayments.amountCents}), 0)`,
+      count: sql`COUNT(*)`,
+    })
+    .from(layawayPayments)
+    .where(and(gte(layawayPayments.createdAt, todayStart), lt(layawayPayments.createdAt, tomorrowStart)));
+
+  const paymentsTodayCents = Number(paymentsTodayRow?.totalCents ?? 0);
+  const paymentsTodayCount = Number(paymentsTodayRow?.count ?? 0);
+
+  const [completedTodayRow] = await db
+    .select({ count: sql`COUNT(*)` })
+    .from(layaways)
+    .where(
+      and(
+        eq(layaways.status, 'completed'),
+        gte(layaways.updatedAt, todayStart),
+        lt(layaways.updatedAt, tomorrowStart),
+      ),
+    );
+
+  const completedToday = Number(completedTodayRow?.count ?? 0);
+
+  const activePlans = [];
+  const overduePlans = [];
+
+  for (const row of activeRows) {
+    const dueDateValue = row.dueDate instanceof Date
+      ? row.dueDate
+      : row.dueDate
+      ? new Date(row.dueDate)
+      : null;
+    const dueDateIso = dueDateValue?.toISOString?.() ?? (typeof row.dueDate === 'string' ? row.dueDate : null);
+    const totalCents = Number(row.totalCents ?? 0);
+    const paidCents = Number(row.paidCents ?? 0);
+    const balanceCents = Math.max(totalCents - paidCents, 0);
+    const lastPayment = lastPaymentByLayaway.get(Number(row.id)) ?? null;
+    const autopay = lastPayment?.method === 'card';
+    const customerName = [row.customerFirstName, row.customerLastName]
+      .map((part) => (part ?? '').trim())
+      .filter(Boolean)
+      .join(' ') || `Cliente #${row.customerId}`;
+    const branchName = row.branchName ?? `Sucursal ${row.branchId}`;
+    const notification = lastNotificationByCustomer.get(Number(row.customerId)) ?? null;
+    const contactDate = notification?.sentAt ?? notification?.createdAt ?? null;
+    const contactIso = contactDate instanceof Date
+      ? contactDate.toISOString()
+      : contactDate
+      ? new Date(contactDate).toISOString()
+      : null;
+    const status = dueDateValue && !Number.isNaN(dueDateValue.getTime()) && dueDateValue.getTime() < now.getTime()
+      ? 'overdue'
+      : 'active';
+    const millisDiff = dueDateValue && !Number.isNaN(dueDateValue.getTime())
+      ? dueDateValue.getTime() - now.getTime()
+      : Infinity;
+    let risk = 'low';
+    if (millisDiff < 0) {
+      risk = 'high';
+    } else if (millisDiff <= 5 * 86400000) {
+      risk = 'medium';
+    }
+
+    const plan = {
+      id: Number(row.id),
+      orderId: Number(row.orderId),
+      planNumber: row.orderNumber ?? `LAY-${row.id}`,
+      branchId: Number(row.branchId),
+      branchName,
+      customerId: Number(row.customerId),
+      customerName,
+      customerPhone: row.customerPhone ?? null,
+      customerEmail: row.customerEmail ?? null,
+      totalCents,
+      paidCents,
+      balanceCents,
+      dueDate: dueDateIso,
+      status,
+      autopay,
+      risk,
+      nextPaymentCents: balanceCents,
+      contactPreference: row.customerPhone ? 'WhatsApp' : row.customerEmail ? 'Email' : 'Call',
+      lastContactAt: contactIso,
+      lastContactChannel: notification?.channel ?? null,
+      contactNotes: notification?.message ?? null,
+      lastPayment,
+      itemSummary: firstItemByOrder.get(Number(row.orderId)) ?? 'Artículos reservados',
+    };
+
+    activePlans.push(plan);
+    if (status === 'overdue') {
+      overduePlans.push(plan);
+    }
+  }
+
+  const autopayCount = activePlans.filter((plan) => plan.autopay).length;
+  const outstandingTotalCents = activePlans.reduce((sum, plan) => sum + Math.max(0, Number(plan.balanceCents ?? 0)), 0);
+  const overdueOutstandingCents = overduePlans.reduce((sum, plan) => sum + Math.max(0, Number(plan.balanceCents ?? 0)), 0);
+  const autopayRatio = activePlans.length > 0 ? autopayCount / activePlans.length : 0;
+
+  const schedule = activePlans
+    .filter((plan) => plan.balanceCents > 0)
+    .map((plan) => {
+      const due = plan.dueDate ? new Date(plan.dueDate) : null;
+      const dueTime = due && !Number.isNaN(due.getTime()) ? due.getTime() : null;
+      let status = 'scheduled';
+      if (plan.balanceCents <= 0) {
+        status = 'completed';
+      } else if (dueTime != null && dueTime < now.getTime()) {
+        status = 'overdue';
+      } else if (plan.autopay && dueTime != null && Math.abs(dueTime - now.getTime()) <= 86400000) {
+        status = 'processing';
+      }
+
+      const lastPaymentDate = plan.lastPayment?.createdAt
+        ? new Date(plan.lastPayment.createdAt)
+        : null;
+      const note = lastPaymentDate && !Number.isNaN(lastPaymentDate.getTime())
+        ? `Último ${plan.lastPayment?.method ?? 'pago'} el ${lastPaymentDate.toISOString().slice(0, 10)}`
+        : null;
+
+      return {
+        id: `schedule-${plan.id}`,
+        layawayId: plan.id,
+        planNumber: plan.planNumber,
+        customerName: plan.customerName,
+        dueDate: dueTime != null ? new Date(dueTime).toISOString() : plan.dueDate,
+        amountCents: Number(plan.nextPaymentCents ?? 0),
+        channel: plan.autopay ? 'auto' : plan.lastPayment?.method ?? 'cash',
+        status,
+        notes: note,
+      };
+    })
+    .sort((a, b) => {
+      const dateA = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+      const dateB = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+      return dateA - dateB;
+    })
+    .slice(0, 12);
+
+  const channelLabelMap = {
+    sms: 'SMS',
+    whatsapp: 'WhatsApp',
+    email: 'Email',
+  };
+  const reminderStatusMap = {
+    pending: 'queued',
+    sent: 'sent',
+    failed: 'scheduled',
+  };
+
+  const reminders = notificationRows
+    .filter((row) => Boolean(row.message))
+    .slice(0, 12)
+    .map((row) => {
+      const plan = activePlans.find((item) => item.customerId === Number(row.customerId));
+      const scheduledAtRaw = row.sentAt ?? row.createdAt ?? null;
+      const scheduledAt = scheduledAtRaw instanceof Date
+        ? scheduledAtRaw
+        : scheduledAtRaw
+        ? new Date(scheduledAtRaw)
+        : null;
+
+      return {
+        id: `reminder-${row.id}`,
+        planNumber: plan?.planNumber ?? 'Layaway',
+        customerName: plan?.customerName ?? `Cliente #${row.customerId ?? ''}`,
+        message: row.message ?? '',
+        channel: channelLabelMap[row.channel] ?? 'SMS',
+        status: reminderStatusMap[row.status] ?? 'scheduled',
+        scheduledFor: scheduledAt && !Number.isNaN(scheduledAt.getTime()) ? scheduledAt.toISOString() : null,
+      };
+    });
+
+  const pesoFormatter = new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' });
+  const insights = [];
+
+  if (overduePlans.length > 0) {
+    insights.push({
+      id: 'overdue-focus',
+      title: 'Priorizar planes en mora',
+      description: `Hay ${overduePlans.length} plan(es) con saldo pendiente de ${pesoFormatter.format(overdueOutstandingCents / 100)}.`,
+      impact: overdueOutstandingCents > 250000 ? 'high' : 'medium',
+    });
+  }
+
+  if (autopayRatio < 0.3 && activePlans.length > 0) {
+    insights.push({
+      id: 'increase-autopay',
+      title: 'Incrementa los cobros automáticos',
+      description: 'Menos del 30% de los planes activos utilizan AutoCobro. Ofrece incentivos para migrarlos y reducir mora.',
+      impact: 'medium',
+    });
+  }
+
+  if (paymentsTodayCount === 0 && activePlans.length > 0) {
+    insights.push({
+      id: 'no-payments-today',
+      title: 'Sin abonos registrados hoy',
+      description: 'Programa contactos para asegurar al menos un abono diario y mantener el flujo de caja estable.',
+      impact: 'low',
+    });
+  } else if (paymentsTodayCount > 0) {
+    insights.push({
+      id: 'payments-today',
+      title: 'Cobros registrados hoy',
+      description: `Se han aplicado ${paymentsTodayCount} pago(s) por ${pesoFormatter.format(paymentsTodayCents / 100)} en total.`,
+      impact: 'low',
+    });
+  }
+
+  return {
+    generatedAt: now.toISOString(),
+    summary: {
+      activeCount: activePlans.length,
+      overdueCount: overduePlans.length,
+      completedToday,
+      paymentsTodayCents,
+      paymentsTodayCount,
+      outstandingCents: outstandingTotalCents,
+      overdueOutstandingCents,
+      autopayCount,
+      autopayRatio,
+    },
+    activePlans,
+    overduePlans,
+    schedule,
+    reminders,
+    insights,
+  };
 }
 
 async function getLayawayDetail(layawayId) {
@@ -3715,6 +4305,29 @@ app.get('/api', (req, res) => {
       api: '/api'
     }
   });
+});
+
+app.get('/api/branches', async (req, res, next) => {
+  try {
+    const rows = await db
+      .select({
+        id: branches.id,
+        code: branches.code,
+        name: branches.name,
+      })
+      .from(branches)
+      .orderBy(asc(branches.name));
+
+    res.json({
+      branches: rows.map((row) => ({
+        id: Number(row.id),
+        code: row.code,
+        name: row.name,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/shifts/open', async (req, res, next) => {
@@ -7102,6 +7715,238 @@ app.get('/api/inventory/component-tree', async (req, res, next) => {
   }
 });
 
+app.get('/api/dashboard/summary', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const tomorrowStart = startOfTomorrow(now);
+    const yesterdayStart = new Date(todayStart);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    const sevenDaysAgo = new Date(todayStart);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    const ninetyDaysAgo = new Date(todayStart);
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const thirtyDaysAgo = new Date(todayStart);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const openLoanStatuses = ['active', 'renewed'];
+
+    const [
+      [principalOutRow],
+      [loansTodayRow],
+      [pawnsPastDueRow],
+      [renewalsTodayRow],
+      [renewalsYesterdayRow],
+      [layawaysTodayRow],
+      [layawayPaymentsRow],
+      [salesTotalTodayRow],
+      [salesTotalYesterdayRow],
+      [salesQtyTodayRow],
+      [purchasesTodayRow],
+      [lowStockRow],
+      [agingRow],
+      [inventoryValueRow],
+      [transfersPendingRow],
+      [repairsInProgressRow],
+      [repairsReadyRow],
+      [avgTurnaroundRow],
+      [diagnosticsTodayRow],
+      [messagesPendingRow],
+      [newReviewsRow],
+      [averageRatingRow],
+      [responsesRequiredRow],
+    ] = await Promise.all([
+      db
+        .select({ total: sql`COALESCE(SUM(${loans.principalCents}), 0)` })
+        .from(loans)
+        .where(inArray(loans.status, openLoanStatuses)),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(loans)
+        .where(and(gte(loans.createdAt, todayStart), lt(loans.createdAt, tomorrowStart))),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(loans)
+        .where(and(inArray(loans.status, openLoanStatuses), lt(loans.dueDate, todayStart))),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(loanPayments)
+        .where(
+          and(
+            eq(loanPayments.kind, 'renew'),
+            gte(loanPayments.createdAt, todayStart),
+            lt(loanPayments.createdAt, tomorrowStart),
+          ),
+        ),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(loanPayments)
+        .where(
+          and(
+            eq(loanPayments.kind, 'renew'),
+            gte(loanPayments.createdAt, yesterdayStart),
+            lt(loanPayments.createdAt, todayStart),
+          ),
+        ),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(layaways)
+        .where(and(gte(layaways.createdAt, todayStart), lt(layaways.createdAt, tomorrowStart))),
+      db
+        .select({
+          total: sql`COALESCE(SUM(${layawayPayments.amountCents}), 0)`,
+          count: sql`COUNT(*)`,
+        })
+        .from(layawayPayments)
+        .where(
+          and(
+            gte(layawayPayments.createdAt, todayStart),
+            lt(layawayPayments.createdAt, tomorrowStart),
+          ),
+        ),
+      db
+        .select({ total: sql`COALESCE(SUM(${orders.totalCents}), 0)` })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.status, 'completed'),
+            gte(orders.createdAt, todayStart),
+            lt(orders.createdAt, tomorrowStart),
+          ),
+        ),
+      db
+        .select({ total: sql`COALESCE(SUM(${orders.totalCents}), 0)` })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.status, 'completed'),
+            gte(orders.createdAt, yesterdayStart),
+            lt(orders.createdAt, todayStart),
+          ),
+        ),
+      db
+        .select({ total: sql`COALESCE(SUM(${orderItems.qty}), 0)` })
+        .from(orderItems)
+        .innerJoin(orders, eq(orderItems.orderId, orders.id))
+        .where(
+          and(
+            eq(orders.status, 'completed'),
+            gte(orders.createdAt, todayStart),
+            lt(orders.createdAt, tomorrowStart),
+          ),
+        ),
+      db
+        .select({ total: sql`COALESCE(SUM(${purchases.totalCostCents}), 0)` })
+        .from(purchases)
+        .where(and(gte(purchases.createdAt, todayStart), lt(purchases.createdAt, tomorrowStart))),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(productCodeVersions)
+        .where(and(eq(productCodeVersions.isActive, true), lt(productCodeVersions.qtyOnHand, 3))),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(productCodeVersions)
+        .where(
+          and(
+            eq(productCodeVersions.isActive, true),
+            gt(productCodeVersions.qtyOnHand, 0),
+            lt(productCodeVersions.updatedAt, ninetyDaysAgo),
+          ),
+        ),
+      db
+        .select({
+          total: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand} * COALESCE(${productCodeVersions.costCents}, ${productCodeVersions.priceCents}, 0)), 0)`,
+        })
+        .from(productCodeVersions)
+        .where(eq(productCodeVersions.isActive, true)),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(inventoryTransfers)
+        .where(inArray(inventoryTransfers.status, ['approved', 'shipped'])),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(repairs)
+        .where(inArray(repairs.status, ['diagnosing', 'waiting_approval', 'in_progress', 'qa'])),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(repairs)
+        .where(eq(repairs.status, 'ready')),
+      db
+        .select({
+          avgHours: sql`COALESCE(AVG(TIMESTAMPDIFF(HOUR, ${repairs.createdAt}, COALESCE(${repairs.updatedAt}, ${repairs.createdAt}))), 0)`,
+        })
+        .from(repairs)
+        .where(and(eq(repairs.status, 'completed'), gte(repairs.updatedAt, thirtyDaysAgo))),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(repairs)
+        .where(
+          and(
+            eq(repairs.status, 'diagnosing'),
+            gte(repairs.updatedAt, todayStart),
+            lt(repairs.updatedAt, tomorrowStart),
+          ),
+        ),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(notificationMessages)
+        .where(eq(notificationMessages.status, 'pending')),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(reviews)
+        .where(gte(reviews.createdAt, sevenDaysAgo)),
+      db.select({ avgRating: sql`COALESCE(AVG(${reviews.rating}), 0)` }).from(reviews),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(reviews)
+        .where(eq(reviews.status, 'new')),
+    ]);
+
+    const summary = {
+      loans: {
+        principalOutCents: Number(principalOutRow?.total ?? 0),
+        loansToday: Number(loansTodayRow?.count ?? 0),
+        pawnsPastDue: Number(pawnsPastDueRow?.count ?? 0),
+        renewalsToday: Number(renewalsTodayRow?.count ?? 0),
+        renewalsYesterday: Number(renewalsYesterdayRow?.count ?? 0),
+      },
+      layaways: {
+        newToday: Number(layawaysTodayRow?.count ?? 0),
+        paymentsTodayCents: Number(layawayPaymentsRow?.total ?? 0),
+        paymentsCount: Number(layawayPaymentsRow?.count ?? 0),
+      },
+      sales: {
+        salesTotalTodayCents: Number(salesTotalTodayRow?.total ?? 0),
+        salesTotalYesterdayCents: Number(salesTotalYesterdayRow?.total ?? 0),
+        salesQtyToday: Number(salesQtyTodayRow?.total ?? 0),
+        purchasesTodayCents: Number(purchasesTodayRow?.total ?? 0),
+      },
+      inventory: {
+        lowStock: Number(lowStockRow?.count ?? 0),
+        aging: Number(agingRow?.count ?? 0),
+        totalValueCents: Number(inventoryValueRow?.total ?? 0),
+        transfersPending: Number(transfersPendingRow?.count ?? 0),
+      },
+      repairs: {
+        inProgress: Number(repairsInProgressRow?.count ?? 0),
+        readyForPickup: Number(repairsReadyRow?.count ?? 0),
+        avgTurnaroundHours: Number(avgTurnaroundRow?.avgHours ?? 0),
+        diagnosticsToday: Number(diagnosticsTodayRow?.count ?? 0),
+      },
+      marketing: {
+        messagesPending: Number(messagesPendingRow?.count ?? 0),
+        newReviews: Number(newReviewsRow?.count ?? 0),
+        averageRating: Number(averageRatingRow?.avgRating ?? 0),
+        responsesRequired: Number(responsesRequiredRow?.count ?? 0),
+      },
+    };
+
+    res.json(summary);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/purchases/overview', async (req, res, next) => {
   try {
     const branchCandidate = req.query?.branchId ?? req.query?.branch_id;
@@ -9220,6 +10065,408 @@ app.post(
   }
 );
 
+app.get('/api/invoices/:invoiceNo', async (req, res, next) => {
+  try {
+    const invoiceNo = req.params.invoiceNo?.trim();
+
+    if (!invoiceNo) {
+      return res.status(400).json({ error: 'invoiceNo is required' });
+    }
+
+    const detail = await loadInvoiceWithDetails(db, { invoiceNo });
+
+    res.json({
+      invoice: detail.invoice,
+      lines: detail.lines,
+      payments: detail.payments,
+      policyFlags: detail.policyFlags,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/gift-cards/issue', async (req, res, next) => {
+  try {
+    const amountCentsRaw =
+      req.body?.amountCents ?? req.body?.amount_cents ?? req.body?.amount ?? req.body?.value ?? null;
+
+    let amountCents;
+    if (amountCentsRaw === null || amountCentsRaw === undefined || amountCentsRaw === '') {
+      throw new HttpError(400, 'amountCents is required');
+    }
+
+    if (typeof amountCentsRaw === 'string' && amountCentsRaw.includes('.')) {
+      amountCents = parseMoneyToCents(amountCentsRaw, 'amount');
+    } else {
+      amountCents = parsePositiveInteger(amountCentsRaw, 'amountCents');
+    }
+
+    if (amountCents <= 0) {
+      throw new HttpError(400, 'amountCents must be greater than zero');
+    }
+
+    let requestedCode = normalizeGiftCardCode(req.body?.code ?? req.body?.giftCode ?? null);
+    const expiresOn = parseOptionalDate(req.body?.expiresOn ?? req.body?.expires_on, 'expiresOn');
+
+    if (requestedCode) {
+      const [existing] = await db
+        .select({ id: giftCards.id })
+        .from(giftCards)
+        .where(eq(giftCards.code, requestedCode))
+        .limit(1);
+
+      if (existing) {
+        return res.status(409).json({ error: 'Gift card code already exists' });
+      }
+    } else {
+      requestedCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+    }
+
+    const cardRow = await db.transaction(async (tx) => {
+      await tx.insert(giftCards).values({
+        code: requestedCode,
+        balanceCents: amountCents,
+        expiresOn: expiresOn ?? null,
+      });
+
+      const card = await getGiftCardByIdentifier(tx, { code: requestedCode });
+
+      await tx.insert(giftCardLedger).values({
+        giftCardId: Number(card.id),
+        deltaCents: amountCents,
+        refTable: 'gift_card_issue',
+        refId: Number(card.id),
+      });
+
+      return card;
+    });
+
+    res.status(201).json(serializeGiftCardRow(cardRow));
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/gift-cards/reload', async (req, res, next) => {
+  try {
+    const amountCentsRaw =
+      req.body?.amountCents ?? req.body?.amount_cents ?? req.body?.amount ?? req.body?.value ?? null;
+
+    if (amountCentsRaw === null || amountCentsRaw === undefined || amountCentsRaw === '') {
+      throw new HttpError(400, 'amountCents is required');
+    }
+
+    const amountCents = parsePositiveInteger(amountCentsRaw, 'amountCents');
+
+    const cardId = req.body?.cardId ?? req.body?.id ?? null;
+    const code = req.body?.code ?? null;
+
+    const updatedCard = await db.transaction(async (tx) => {
+      const card = await getGiftCardByIdentifier(tx, { cardId, code });
+
+      await tx
+        .update(giftCards)
+        .set({ balanceCents: sql`${giftCards.balanceCents} + ${amountCents}` })
+        .where(eq(giftCards.id, card.id));
+
+      await tx.insert(giftCardLedger).values({
+        giftCardId: Number(card.id),
+        deltaCents: amountCents,
+        refTable: 'gift_card_reload',
+        refId: Number(card.id),
+      });
+
+      return getGiftCardByIdentifier(tx, { cardId: card.id });
+    });
+
+    res.json(serializeGiftCardRow(updatedCard));
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/gift-cards/redeem', async (req, res, next) => {
+  try {
+    const amountCentsRaw =
+      req.body?.amountCents ?? req.body?.amount_cents ?? req.body?.amount ?? req.body?.value ?? null;
+
+    if (amountCentsRaw === null || amountCentsRaw === undefined || amountCentsRaw === '') {
+      throw new HttpError(400, 'amountCents is required');
+    }
+
+    const amountCents = parsePositiveInteger(amountCentsRaw, 'amountCents');
+
+    const cardId = req.body?.cardId ?? req.body?.id ?? null;
+    const code = req.body?.code ?? null;
+
+    const updatedCard = await db.transaction(async (tx) => {
+      const card = await getGiftCardByIdentifier(tx, { cardId, code });
+
+      if (Number(card.balanceCents ?? 0) < amountCents) {
+        throw new HttpError(400, 'Gift card has insufficient balance');
+      }
+
+      await tx
+        .update(giftCards)
+        .set({ balanceCents: sql`${giftCards.balanceCents} - ${amountCents}` })
+        .where(eq(giftCards.id, card.id));
+
+      await tx.insert(giftCardLedger).values({
+        giftCardId: Number(card.id),
+        deltaCents: -amountCents,
+        refTable: 'gift_card_redeem',
+        refId: Number(card.id),
+      });
+
+      return getGiftCardByIdentifier(tx, { cardId: card.id });
+    });
+
+    res.json(serializeGiftCardRow(updatedCard));
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/pos/buys', async (req, res, next) => {
+  try {
+    const branchId = parsePositiveInteger(req.body?.branchId ?? req.body?.branch_id ?? 0, 'branchId');
+    const userIdRaw = req.body?.userId ?? req.body?.user_id ?? null;
+    const userId =
+      userIdRaw === null || userIdRaw === undefined || userIdRaw === ''
+        ? null
+        : parsePositiveInteger(userIdRaw, 'userId');
+    const shiftIdRaw = req.body?.shiftId ?? req.body?.shift_id ?? null;
+    const shiftId =
+      shiftIdRaw === null || shiftIdRaw === undefined || shiftIdRaw === ''
+        ? null
+        : parsePositiveInteger(shiftIdRaw, 'shiftId');
+
+    const payoutMethod = req.body?.payoutMethod === 'transfer' ? 'transfer' : 'cash';
+
+    const seller = req.body?.seller ?? {};
+    const sellerNameRaw = typeof seller?.name === 'string' ? seller.name.trim() : '';
+    const sellerName = sellerNameRaw || 'Walk-in seller';
+    const sellerDocument = typeof seller?.document === 'string' ? seller.document.trim() : null;
+    const sellerPhone = typeof seller?.phone === 'string' ? seller.phone.trim() : null;
+    const sellerNotes = typeof seller?.notes === 'string' ? seller.notes.trim() : null;
+    const managerNotes = typeof req.body?.managerNotes === 'string' ? req.body.managerNotes.trim() : null;
+
+    const itemsInput = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (itemsInput.length === 0) {
+      throw new HttpError(400, 'items must be a non-empty array');
+    }
+
+    const normalizedItems = itemsInput.map((item, index) => {
+      if (item == null || typeof item !== 'object') {
+        throw new HttpError(400, `items[${index}] must be an object`);
+      }
+
+      const descriptionRaw = typeof item.description === 'string' ? item.description.trim() : '';
+      if (!descriptionRaw) {
+        throw new HttpError(400, `items[${index}].description is required`);
+      }
+
+      const resaleValue = Number(item.resaleValue ?? item.resale_value ?? 0);
+      if (!Number.isFinite(resaleValue) || resaleValue <= 0) {
+        throw new HttpError(400, `items[${index}].resaleValue must be greater than zero`);
+      }
+
+      const targetMargin = Number(item.targetMargin ?? item.target_margin ?? 0);
+      const normalizedMargin = Number.isFinite(targetMargin) ? Math.min(Math.max(targetMargin, 0), 95) : 0;
+
+      const resaleValueCents = Math.round(resaleValue * 100);
+      const offerCents = Math.max(0, Math.round(resaleValueCents * (1 - normalizedMargin / 100)));
+
+      const accessories = typeof item.accessories === 'string' ? item.accessories.trim() : null;
+      const notes = typeof item.notes === 'string' ? item.notes.trim() : null;
+      const serial = typeof item.serial === 'string' ? item.serial.trim() : null;
+      const condition = typeof item.condition === 'string' ? item.condition.trim() : null;
+      const photos = Array.isArray(item.photos)
+        ? item.photos.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+        : [];
+
+      return {
+        description: descriptionRaw,
+        resaleValueCents,
+        offerCents,
+        accessories,
+        notes,
+        serial,
+        condition,
+        photos,
+      };
+    });
+
+    const totalCostCents = normalizedItems.reduce((sum, item) => sum + item.offerCents, 0);
+    const totalQuantity = normalizedItems.length;
+
+    const payoutNotes = {
+      payoutMethod,
+      seller: {
+        name: sellerName,
+        document: sellerDocument,
+        phone: sellerPhone,
+        notes: sellerNotes,
+      },
+      managerNotes,
+    };
+
+    const result = await db.transaction(async (tx) => {
+      await tx.insert(purchases).values({
+        branchId,
+        supplierName: sellerName,
+        createdBy: userId,
+        totalCostCents,
+        totalQuantity,
+        notes: JSON.stringify(payoutNotes),
+      });
+
+      const [purchaseRow] = await tx
+        .select({
+          id: purchases.id,
+          totalCostCents: purchases.totalCostCents,
+          totalQuantity: purchases.totalQuantity,
+          createdAt: purchases.createdAt,
+        })
+        .from(purchases)
+        .orderBy(desc(purchases.id))
+        .limit(1);
+
+      if (!purchaseRow) {
+        throw new HttpError(500, 'FAILED_TO_CREATE_PURCHASE');
+      }
+
+      const lineSummaries = [];
+
+      for (let index = 0; index < normalizedItems.length; index += 1) {
+        const item = normalizedItems[index];
+        const code = generateCustomerBuyCode(index);
+
+        await tx.insert(productCodes).values({
+          code,
+          name: item.description,
+          description: item.notes,
+        });
+
+        const [codeRow] = await tx
+          .select({ id: productCodes.id })
+          .from(productCodes)
+          .where(eq(productCodes.code, code))
+          .orderBy(desc(productCodes.id))
+          .limit(1);
+
+        if (!codeRow) {
+          throw new HttpError(500, 'FAILED_TO_CREATE_PRODUCT_CODE');
+        }
+
+        await tx.insert(productCodeVersions).values({
+          productCodeId: Number(codeRow.id),
+          branchId,
+          priceCents: item.resaleValueCents,
+          costCents: item.offerCents,
+          qtyOnHand: 1,
+          qtyReserved: 0,
+        });
+
+        const [versionRow] = await tx
+          .select({ id: productCodeVersions.id })
+          .from(productCodeVersions)
+          .where(eq(productCodeVersions.productCodeId, Number(codeRow.id)))
+          .orderBy(desc(productCodeVersions.id))
+          .limit(1);
+
+        if (!versionRow) {
+          throw new HttpError(500, 'FAILED_TO_CREATE_PRODUCT_VERSION');
+        }
+
+        await tx.insert(purchaseLines).values({
+          purchaseId: Number(purchaseRow.id),
+          productCodeVersionId: Number(versionRow.id),
+          quantity: 1,
+          unitCostCents: item.offerCents,
+          lineTotalCents: item.offerCents,
+          labelQuantity: 1,
+          notes: item.notes,
+        });
+
+        await tx.insert(stockLedger).values({
+          productCodeVersionId: Number(versionRow.id),
+          reason: 'purchase',
+          qtyChange: 1,
+          referenceType: 'purchase',
+          referenceId: Number(purchaseRow.id),
+          notes: `Customer buy intake ${code}`,
+        });
+
+        lineSummaries.push({
+          productCodeId: Number(codeRow.id),
+          productCodeVersionId: Number(versionRow.id),
+          code,
+          description: item.description,
+          resaleValueCents: item.resaleValueCents,
+          offerCents: item.offerCents,
+          serial: item.serial,
+          accessories: item.accessories,
+          condition: item.condition,
+          photos: item.photos,
+        });
+      }
+
+      if (payoutMethod === 'cash' && shiftId != null) {
+        await tx.insert(cashMovements).values({
+          shiftId,
+          kind: 'paid_out',
+          amountCents: totalCostCents,
+          reason: `Customer buy payout for purchase #${purchaseRow.id}`,
+        });
+      }
+
+      return {
+        purchase: purchaseRow,
+        lines: lineSummaries,
+      };
+    });
+
+    res.status(201).json({
+      purchase: {
+        id: Number(result.purchase.id),
+        totalCostCents: Number(result.purchase.totalCostCents ?? totalCostCents),
+        totalQuantity: Number(result.purchase.totalQuantity ?? totalQuantity),
+        createdAt:
+          result.purchase.createdAt instanceof Date
+            ? result.purchase.createdAt.toISOString()
+            : toIsoString(result.purchase.createdAt),
+        supplierName: sellerName,
+        payoutMethod,
+      },
+      items: result.lines,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
 app.post('/api/orders/validate', (req, res) => {
   const { items = [], taxRate = 0.18 } = req.body ?? {};
 
@@ -9674,6 +10921,280 @@ app.post('/api/payments', async (req, res, next) => {
       if (error.message === 'CREDIT_NOTE_INSUFFICIENT') {
         return res.status(400).json({ error: 'Credit note has insufficient balance' });
       }
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/refunds', async (req, res, next) => {
+  try {
+    const {
+      invoiceNo = null,
+      invoiceId = null,
+      method,
+      lines: rawLines = [],
+      shiftId = null,
+      createdBy = null,
+      reason = null,
+      notes = null,
+    } = req.body ?? {};
+
+    const normalizedMethod = typeof method === 'string' ? method.toLowerCase() : '';
+    if (!['cash', 'store_credit'].includes(normalizedMethod)) {
+      return res.status(400).json({ error: 'method must be cash or store_credit' });
+    }
+
+    if (!Array.isArray(rawLines) || rawLines.length === 0) {
+      return res.status(400).json({ error: 'lines must be a non-empty array' });
+    }
+
+    const detail = await loadInvoiceWithDetails(db, { invoiceId, invoiceNo });
+
+    const lineMap = new Map(detail.lines.map((line) => [Number(line.orderItemId), line]));
+    const normalizedLines = [];
+
+    rawLines.forEach((entry, index) => {
+      if (entry == null || typeof entry !== 'object') {
+        throw new HttpError(400, `lines[${index}] must be an object`);
+      }
+
+      const idCandidate = entry.orderItemId ?? entry.order_item_id ?? entry.id;
+      const orderItemId = parsePositiveInteger(idCandidate, `lines[${index}].orderItemId`);
+      const source = lineMap.get(orderItemId);
+
+      if (!source) {
+        throw new HttpError(404, `Order item ${orderItemId} not found on invoice`);
+      }
+
+      const qtyValue = entry.qty ?? entry.quantity ?? source.qty;
+      const qty = parsePositiveInteger(qtyValue, `lines[${index}].qty`);
+
+      if (qty > source.qty) {
+        throw new HttpError(400, `lines[${index}].qty cannot exceed original quantity`);
+      }
+
+      const restock = entry.restock === undefined ? source.restockable : Boolean(entry.restock);
+      const unitPriceCents = Number(source.unitPriceCents ?? 0);
+      const subtotalCents = unitPriceCents * qty;
+      const taxPerUnitCents = Number(source.taxPerUnitCents ?? 0);
+      const taxCents = taxPerUnitCents * qty;
+      const totalCents = subtotalCents + taxCents;
+
+      normalizedLines.push({
+        orderItemId,
+        productCodeVersionId: Number(source.productCodeVersionId),
+        qty,
+        unitPriceCents,
+        subtotalCents,
+        taxCents,
+        totalCents,
+        restock,
+      });
+    });
+
+    const subtotalRefundCents = normalizedLines.reduce((sum, line) => sum + line.subtotalCents, 0);
+    const taxRefundCents = normalizedLines.reduce((sum, line) => sum + line.taxCents, 0);
+    const totalRefundCents = subtotalRefundCents + taxRefundCents;
+    const restockValueCents = normalizedLines.reduce(
+      (sum, line) => sum + (line.restock ? line.subtotalCents : 0),
+      0,
+    );
+
+    if (totalRefundCents <= 0) {
+      return res.status(400).json({ error: 'No refundable value selected' });
+    }
+
+    const createdById =
+      createdBy === null || createdBy === undefined || createdBy === ''
+        ? null
+        : parsePositiveInteger(createdBy, 'createdBy');
+
+    const shiftIdValue =
+      shiftId === null || shiftId === undefined || shiftId === ''
+        ? null
+        : parsePositiveInteger(shiftId, 'shiftId');
+
+    const normalizedReason = typeof reason === 'string' && reason.trim().length > 0 ? reason.trim() : null;
+    const normalizedNotes = typeof notes === 'string' && notes.trim().length > 0 ? notes.trim() : null;
+
+    const result = await db.transaction(async (tx) => {
+      await tx.insert(salesReturns).values({
+        invoiceId: detail.invoice.id,
+        orderId: detail.invoice.orderId,
+        branchId: detail.invoice.branchId,
+        customerId: detail.invoice.customerId,
+        createdBy: createdById,
+        refundMethod: normalizedMethod,
+        totalRefundCents,
+        restockValueCents,
+        reason: normalizedReason,
+        notes: normalizedNotes,
+      });
+
+      const [salesReturnRow] = await tx
+        .select({
+          id: salesReturns.id,
+          invoiceId: salesReturns.invoiceId,
+          orderId: salesReturns.orderId,
+          refundMethod: salesReturns.refundMethod,
+          totalRefundCents: salesReturns.totalRefundCents,
+          restockValueCents: salesReturns.restockValueCents,
+          createdAt: salesReturns.createdAt,
+        })
+        .from(salesReturns)
+        .where(eq(salesReturns.invoiceId, detail.invoice.id))
+        .orderBy(desc(salesReturns.id))
+        .limit(1);
+
+      if (!salesReturnRow) {
+        throw new HttpError(500, 'FAILED_TO_CREATE_REFUND');
+      }
+
+      if (normalizedLines.length > 0) {
+        await tx.insert(salesReturnItems).values(
+          normalizedLines.map((line) => ({
+            salesReturnId: Number(salesReturnRow.id),
+            orderItemId: line.orderItemId,
+            productCodeVersionId: line.productCodeVersionId,
+            qty: line.qty,
+            unitPriceCents: line.unitPriceCents,
+            taxCents: line.taxCents,
+            restock: line.restock,
+          })),
+        );
+      }
+
+      const restockLines = normalizedLines.filter((line) => line.restock);
+
+      if (restockLines.length > 0) {
+        for (const line of restockLines) {
+          await tx
+            .update(productCodeVersions)
+            .set({ qtyOnHand: sql`${productCodeVersions.qtyOnHand} + ${line.qty}` })
+            .where(eq(productCodeVersions.id, line.productCodeVersionId));
+        }
+
+        await tx.insert(stockLedger).values(
+          restockLines.map((line) => ({
+            productCodeVersionId: line.productCodeVersionId,
+            reason: 'return',
+            qtyChange: line.qty,
+            referenceType: 'sales_return',
+            referenceId: Number(salesReturnRow.id),
+            notes:
+              normalizedReason ??
+              (detail.invoice.invoiceNo
+                ? `Refund ${detail.invoice.invoiceNo}`
+                : `Refund invoice ${detail.invoice.id}`),
+          })),
+        );
+      }
+
+      let creditNoteRow = null;
+
+      if (normalizedMethod === 'cash') {
+        if (shiftIdValue != null) {
+          await tx.insert(cashMovements).values({
+            shiftId: shiftIdValue,
+            kind: 'refund',
+            amountCents: totalRefundCents,
+            reason:
+              normalizedReason ??
+              (detail.invoice.invoiceNo
+                ? `Refund ${detail.invoice.invoiceNo}`
+                : `Refund invoice ${detail.invoice.id}`),
+          });
+        }
+      } else if (normalizedMethod === 'store_credit') {
+        if (detail.invoice.customerId == null) {
+          throw new HttpError(400, 'Customer is required for store credit refunds');
+        }
+
+        await tx.insert(creditNotes).values({
+          customerId: detail.invoice.customerId,
+          balanceCents: totalRefundCents,
+          reason:
+            normalizedReason ??
+            (detail.invoice.invoiceNo
+              ? `Refund ${detail.invoice.invoiceNo}`
+              : `Refund invoice ${detail.invoice.id}`),
+        });
+
+        const [row] = await tx
+          .select({
+            id: creditNotes.id,
+            customerId: creditNotes.customerId,
+            balanceCents: creditNotes.balanceCents,
+            createdAt: creditNotes.createdAt,
+          })
+          .from(creditNotes)
+          .where(eq(creditNotes.customerId, detail.invoice.customerId))
+          .orderBy(desc(creditNotes.id))
+          .limit(1);
+
+        if (row) {
+          creditNoteRow = row;
+
+          await tx.insert(creditNoteLedger).values({
+            creditNoteId: Number(row.id),
+            deltaCents: totalRefundCents,
+            refTable: 'sales_return',
+            refId: Number(salesReturnRow.id),
+          });
+        }
+      }
+
+      return { salesReturnRow, creditNoteRow };
+    });
+
+    res.status(201).json({
+      salesReturn: {
+        id: Number(result.salesReturnRow.id),
+        invoiceId: Number(result.salesReturnRow.invoiceId),
+        orderId: Number(result.salesReturnRow.orderId),
+        refundMethod: result.salesReturnRow.refundMethod,
+        totalRefundCents: Number(result.salesReturnRow.totalRefundCents ?? totalRefundCents),
+        restockValueCents: Number(result.salesReturnRow.restockValueCents ?? restockValueCents),
+        createdAt:
+          result.salesReturnRow.createdAt instanceof Date
+            ? result.salesReturnRow.createdAt.toISOString()
+            : toIsoString(result.salesReturnRow.createdAt),
+        reason: normalizedReason,
+        notes: normalizedNotes,
+      },
+      totals: {
+        subtotalCents: subtotalRefundCents,
+        taxCents: taxRefundCents,
+        totalCents: totalRefundCents,
+        restockValueCents,
+      },
+      lines: normalizedLines.map((line) => ({
+        orderItemId: line.orderItemId,
+        productCodeVersionId: line.productCodeVersionId,
+        qty: line.qty,
+        unitPriceCents: line.unitPriceCents,
+        subtotalCents: line.subtotalCents,
+        taxCents: line.taxCents,
+        totalCents: line.totalCents,
+        restock: line.restock,
+      })),
+      creditNote: result.creditNoteRow
+        ? {
+            id: Number(result.creditNoteRow.id),
+            customerId: Number(result.creditNoteRow.customerId),
+            balanceCents: Number(result.creditNoteRow.balanceCents ?? totalRefundCents),
+            createdAt:
+              result.creditNoteRow.createdAt instanceof Date
+                ? result.creditNoteRow.createdAt.toISOString()
+                : toIsoString(result.creditNoteRow.createdAt),
+          }
+        : null,
+      invoice: detail.invoice,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
     }
 
     next(error);
@@ -10392,6 +11913,15 @@ app.post('/api/repairs/:id/notify', async (req, res, next) => {
       return res.status(error.status).json({ error: error.message });
     }
 
+    next(error);
+  }
+});
+
+app.get('/api/layaways/dashboard', async (req, res, next) => {
+  try {
+    const snapshot = await buildLayawayDashboardSnapshot();
+    res.json(snapshot);
+  } catch (error) {
     next(error);
   }
 });
