@@ -7805,8 +7805,11 @@ app.get('/api/dashboard/summary', async (req, res, next) => {
           ),
         ),
       db
-        .select({ total: sql`COALESCE(SUM(${orders.totalCents}), 0)` })
-        .from(orders)
+        .select({
+          total: sql`COALESCE(SUM(ROUND(order_items.qty * order_items.price_cents) - COALESCE(order_items.discount_cents, 0)), 0)`,
+        })
+        .from(orderItems)
+        .innerJoin(orders, eq(orderItems.orderId, orders.id))
         .where(
           and(
             eq(orders.status, 'completed'),
@@ -7815,8 +7818,11 @@ app.get('/api/dashboard/summary', async (req, res, next) => {
           ),
         ),
       db
-        .select({ total: sql`COALESCE(SUM(${orders.totalCents}), 0)` })
-        .from(orders)
+        .select({
+          total: sql`COALESCE(SUM(ROUND(order_items.qty * order_items.price_cents) - COALESCE(order_items.discount_cents, 0)), 0)`,
+        })
+        .from(orderItems)
+        .innerJoin(orders, eq(orderItems.orderId, orders.id))
         .where(
           and(
             eq(orders.status, 'completed'),
