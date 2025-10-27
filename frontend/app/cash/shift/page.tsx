@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
@@ -16,10 +16,14 @@ import {
 import { formatCurrency } from "@/components/cash/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+const rawDefaultBranchId = Number(process.env.NEXT_PUBLIC_DEFAULT_BRANCH_ID ?? 1);
+const DEFAULT_BRANCH_ID = Number.isInteger(rawDefaultBranchId) && rawDefaultBranchId > 0 ? rawDefaultBranchId : null;
 
 const numberFormatter = new Intl.NumberFormat("es-DO");
 const dateTimeFormatter = new Intl.DateTimeFormat("es-DO", { dateStyle: "medium", timeStyle: "short" });
 const OVER_SHORT_THRESHOLD_CENTS = 5_000; // RD$50 variance threshold
+
+type ApiError = Error & { status?: number };
 
 type Shift = {
   id: number;
@@ -47,22 +51,64 @@ type ShiftSnapshot = {
   computedAt: string;
   shift: {
     id: number;
-    branchId: number;
-    openedBy: number;
-    closedBy: number;
-    openedAt: string;
-    closedAt: string;
+    branchId: number | null;
+    openedBy: number | null;
+    closedBy: number | null;
+    openedAt: string | null;
+    closedAt: string | null;
   };
   openingCashCents: number;
-  closingCashCents: number;
+  closingCashCents: number | null;
   expectedCashCents: number;
-  overShortCents: number;
+  overShortCents: number | null;
   cashPaymentsCents: number;
   paymentsByMethod: Record<string, { totalCents: number; count: number }>;
   cashMovements: {
     totalsByKind: Record<string, { totalCents: number; count: number }>;
     netMovementCents: number;
   };
+};
+
+type ShiftMovementsResponse = {
+  shift: Shift;
+  movements: CashMovement[];
+  summary: {
+    totalsByKind: Record<string, { totalCents: number; count: number }>;
+    netMovementCents: number;
+  };
+};
+
+type ShiftEndReportResponse = {
+  generatedAt: string;
+  shift: {
+    id: number;
+    branchId: number | null;
+    openedBy: number | null;
+    closedBy: number | null;
+    openedAt: string | null;
+    closedAt: string | null;
+  };
+  totals: {
+    openingCashCents?: number | null;
+    closingCashCents?: number | null;
+    expectedCashCents?: number | null;
+    overShortCents?: number | null;
+    cashPaymentsCents?: number | null;
+    netMovementCents?: number | null;
+  };
+  payments?: {
+    summary?: {
+      methods?: Record<string, { totalCents: number; count: number }>;
+    };
+  };
+  cashMovements?: {
+    summary?: {
+      totalsByKind?: Record<string, { totalCents: number; count: number }>;
+      netMovementCents?: number | null;
+    };
+  };
+  recentShifts?: Array<{ id: number | null }>;
+  resolvedShiftId: number;
 };
 
 type StatusMessage = { tone: "success" | "error"; message: string } | null;
@@ -89,6 +135,19 @@ const initialDenominationState = DENOMINATIONS.reduce<Record<string, string>>((a
   return acc;
 }, {});
 
+async function getJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`);
+  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
+
+  if (!response.ok) {
+    const error = new Error(data?.error ?? "Request failed") as ApiError;
+    error.status = response.status;
+    throw error;
+  }
+
+  return data;
+}
+
 async function postJson<T>(path: string, payload: Record<string, unknown>): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
@@ -99,7 +158,9 @@ async function postJson<T>(path: string, payload: Record<string, unknown>): Prom
   const data = (await response.json().catch(() => ({}))) as T & { error?: string };
 
   if (!response.ok) {
-    throw new Error(data?.error ?? "Request failed");
+    const error = new Error(data?.error ?? "Request failed") as ApiError;
+    error.status = response.status;
+    throw error;
   }
 
   return data;
@@ -137,8 +198,13 @@ export default function CashShiftPage() {
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [reports, setReports] = useState<ShiftSnapshot[]>([]);
   const [denominations, setDenominations] = useState(initialDenominationState);
-  const [isLoading, setIsLoading] = useState({ open: false, close: false, movement: false });
-  const [openForm, setOpenForm] = useState({ branchId: "", openedBy: "", pin: "", openingCash: "" });
+  const [isLoading, setIsLoading] = useState({ open: false, close: false, movement: false, load: false });
+  const [openForm, setOpenForm] = useState({
+    branchId: DEFAULT_BRANCH_ID ? String(DEFAULT_BRANCH_ID) : "",
+    openedBy: "",
+    pin: "",
+    openingCash: "",
+  });
   const [closeForm, setCloseForm] = useState({ closedBy: "", pin: "", closingCash: "" });
   const [movementForm, setMovementForm] = useState({
     performedBy: "",
@@ -163,6 +229,133 @@ export default function CashShiftPage() {
 
   const expectedCash = activeShift ? Number(activeShift.expectedCashCents ?? 0) / 100 : 0;
   const variance = countedTotal - expectedCash;
+
+  const mapReportToSnapshot = useCallback((report: ShiftEndReportResponse): ShiftSnapshot => {
+    const paymentsByMethod = report.payments?.summary?.methods ?? {};
+    const totalsByKind = report.cashMovements?.summary?.totalsByKind ?? {};
+
+    return {
+      computedAt: report.generatedAt,
+      shift: {
+        id: report.shift.id,
+        branchId: report.shift.branchId ?? null,
+        openedBy: report.shift.openedBy ?? null,
+        closedBy: report.shift.closedBy ?? null,
+        openedAt: report.shift.openedAt ?? null,
+        closedAt: report.shift.closedAt ?? null,
+      },
+      openingCashCents: Number(report.totals?.openingCashCents ?? 0),
+      closingCashCents:
+        report.totals?.closingCashCents == null
+          ? null
+          : Number(report.totals?.closingCashCents ?? 0),
+      expectedCashCents: Number(report.totals?.expectedCashCents ?? 0),
+      overShortCents:
+        report.totals?.overShortCents == null ? null : Number(report.totals?.overShortCents ?? 0),
+      cashPaymentsCents: Number(report.totals?.cashPaymentsCents ?? 0),
+      paymentsByMethod,
+      cashMovements: {
+        totalsByKind,
+        netMovementCents: Number(report.cashMovements?.summary?.netMovementCents ?? 0),
+      },
+    };
+  }, []);
+
+  const loadShiftReportsForBranch = useCallback(
+    async (branchId: number | null, options: { quiet?: boolean } = {}) => {
+      const { quiet = false } = options;
+
+      try {
+        const query = branchId != null ? `?branchId=${branchId}` : "";
+        const primary = await getJson<ShiftEndReportResponse>(`/api/reports/shift-end${query}`);
+
+        const snapshots: ShiftSnapshot[] = [mapReportToSnapshot(primary)];
+
+        const additionalIds = Array.from(
+          new Set(
+            (primary.recentShifts ?? [])
+              .map((item) => (item?.id ? Number(item.id) : null))
+              .filter((id): id is number => Number.isInteger(id) && id > 0 && id !== primary.resolvedShiftId),
+          ),
+        ).slice(0, 4);
+
+        if (additionalIds.length > 0) {
+          const extraReports = await Promise.all(
+            additionalIds.map(async (id) => {
+              try {
+                const detail = await getJson<ShiftEndReportResponse>(`/api/reports/shift-end?shiftId=${id}`);
+                return mapReportToSnapshot(detail);
+              } catch (error) {
+                return null;
+              }
+            }),
+          );
+
+          snapshots.push(...extraReports.filter((item): item is ShiftSnapshot => item != null));
+        }
+
+        setReports(snapshots);
+      } catch (error) {
+        setReports([]);
+        if (!quiet) {
+          const message = error instanceof Error ? error.message : "No se pudieron cargar los reportes.";
+          setStatus({ tone: "error", message });
+        }
+      }
+    },
+    [mapReportToSnapshot],
+  );
+
+  const loadActiveShiftForBranch = useCallback(
+    async (branchId: number, options: { quiet?: boolean } = {}) => {
+      const { quiet = false } = options;
+
+      setIsLoading((state) => ({ ...state, load: true }));
+      if (!quiet) {
+        setStatus(null);
+      }
+
+      try {
+        const data = await getJson<ShiftMovementsResponse>(`/api/shifts/active?branchId=${branchId}`);
+        setActiveShift(data.shift);
+        setMovements(data.movements);
+        await loadShiftReportsForBranch(branchId, { quiet: true });
+
+        if (!quiet) {
+          setStatus({
+            tone: "success",
+            message: `Turno activo #${data.shift.id} cargado para la sucursal ${branchId}.`,
+          });
+        }
+      } catch (error) {
+        if ((error as ApiError)?.status === 404) {
+          setActiveShift(null);
+          setMovements([]);
+          await loadShiftReportsForBranch(branchId, { quiet: true });
+          if (!quiet) {
+            setStatus({ tone: "error", message: "No hay un turno abierto para esta sucursal." });
+          }
+        } else {
+          const message = error instanceof Error ? error.message : "No se pudo cargar el turno.";
+          if (!quiet) {
+            setStatus({ tone: "error", message });
+          }
+        }
+      } finally {
+        setIsLoading((state) => ({ ...state, load: false }));
+      }
+    },
+    [loadShiftReportsForBranch],
+  );
+
+  useEffect(() => {
+    if (DEFAULT_BRANCH_ID) {
+      void loadShiftReportsForBranch(DEFAULT_BRANCH_ID, { quiet: true });
+      void loadActiveShiftForBranch(DEFAULT_BRANCH_ID, { quiet: true });
+    } else {
+      void loadShiftReportsForBranch(null, { quiet: true });
+    }
+  }, [loadActiveShiftForBranch, loadShiftReportsForBranch]);
 
   const handleDenominationChange = (value: number, next: string) => {
     if (/^\d*$/.test(next.trim())) {
@@ -247,6 +440,7 @@ export default function CashShiftPage() {
       const data = await postJson<{ shift: Shift }>("/api/shifts/open", payload);
       setActiveShift(data.shift);
       setMovements([]);
+      await loadShiftReportsForBranch(payload.branchId, { quiet: true });
       setStatus({ tone: "success", message: `Shift #${data.shift.id} opened for branch ${data.shift.branchId}.` });
     } catch (error) {
       setStatus({ tone: "error", message: error instanceof Error ? error.message : "Unable to open shift." });
@@ -258,6 +452,11 @@ export default function CashShiftPage() {
   const handleCloseShift = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeShift || isLoading.close) {
+      return;
+    }
+
+    if (activeShift.closedAt) {
+      setStatus({ tone: "error", message: "Este turno ya se encuentra cerrado." });
       return;
     }
 
@@ -288,6 +487,9 @@ export default function CashShiftPage() {
 
       setActiveShift(data.shift);
       setReports((state) => [data.snapshot, ...state.filter((item) => item.shift.id !== data.snapshot.shift.id)]);
+      const branchIdForReports =
+        data.shift.branchId == null ? null : Number(data.shift.branchId);
+      await loadShiftReportsForBranch(branchIdForReports, { quiet: true });
       setStatus({
         tone: "success",
         message: `Shift #${data.shift.id} closed with variance ${centsToCurrency(data.shift.overShortCents)}.`,
@@ -302,6 +504,11 @@ export default function CashShiftPage() {
   const handleMovementSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeShift || isLoading.movement) {
+      return;
+    }
+
+    if (activeShift.closedAt) {
+      setStatus({ tone: "error", message: "No puedes registrar movimientos en un turno cerrado." });
       return;
     }
 
@@ -348,6 +555,20 @@ export default function CashShiftPage() {
     } finally {
       setIsLoading((state) => ({ ...state, movement: false }));
     }
+  };
+
+  const handleFetchActiveShift = async () => {
+    if (isLoading.load) {
+      return;
+    }
+
+    const branchId = Number(openForm.branchId);
+    if (!Number.isInteger(branchId) || branchId <= 0) {
+      setStatus({ tone: "error", message: "Ingresa una sucursal válida para buscar el turno." });
+      return;
+    }
+
+    await loadActiveShiftForBranch(branchId);
   };
 
   return (
@@ -556,13 +777,23 @@ export default function CashShiftPage() {
               >
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Apertura</h3>
-                  <button
-                    type="button"
-                    onClick={() => setOpenForm({ branchId: "", openedBy: "", pin: "", openingCash: "" })}
-                    className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                  >
-                    Limpiar
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleFetchActiveShift}
+                      disabled={isLoading.load}
+                      className="text-xs font-medium text-slate-500 transition hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-400 dark:hover:text-slate-200"
+                    >
+                      {isLoading.load ? "Buscando..." : "Cargar turno"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOpenForm({ branchId: "", openedBy: "", pin: "", openingCash: "" })}
+                      className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                    >
+                      Limpiar
+                    </button>
+                  </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1">

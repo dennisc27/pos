@@ -56,6 +56,20 @@ type IdImageUpload = {
 
 type ApiError = Error & { status?: number };
 
+type BranchOption = {
+  id: number;
+  name: string;
+  code?: string | null;
+};
+
+type CustomerSummary = {
+  id: number;
+  fullName: string;
+  phone: string | null;
+  email: string | null;
+  branchId: number | null;
+};
+
 const steps = [
   {
     key: "customer",
@@ -101,8 +115,8 @@ function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
+async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, init);
   const data = (await response.json().catch(() => ({}))) as T & { error?: string };
 
   if (!response.ok) {
@@ -179,8 +193,16 @@ export default function LoansNewPage() {
   const [loadingModels, setLoadingModels] = useState(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
-  const [branchId, setBranchId] = useState("1");
-  const [customerId, setCustomerId] = useState("");
+  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(true);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+
+  const [branchId, setBranchId] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerResults, setCustomerResults] = useState<CustomerSummary[]>([]);
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
   const [ticketNumber, setTicketNumber] = useState(() => `PAWN-${Date.now()}`);
   const [comments, setComments] = useState("");
 
@@ -233,6 +255,98 @@ export default function LoansNewPage() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+    setBranchesLoading(true);
+    setBranchesError(null);
+
+    getJson<{ branches: BranchOption[] }>("/api/branches")
+      .then((payload) => {
+        if (!isMounted) return;
+        const options = payload?.branches ?? [];
+        setBranchOptions(options);
+        if (!branchId && options.length > 0) {
+          setBranchId(String(options[0].id));
+        }
+      })
+      .catch((error: ApiError) => {
+        if (!isMounted) return;
+        setBranchesError(error.message ?? "No se pudieron cargar las sucursales");
+      })
+      .finally(() => {
+        if (isMounted) {
+          setBranchesLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [branchId]);
+
+  useEffect(() => {
+    if (customerQuery.trim().length < 2) {
+      setCustomerResults([]);
+      setCustomerSearchError(null);
+      setCustomerSearchLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setCustomerSearchLoading(true);
+    setCustomerSearchError(null);
+
+    const timeout = setTimeout(() => {
+      const params = new URLSearchParams({ q: customerQuery.trim(), limit: "10" });
+      const branchNumeric = Number(branchId);
+      if (Number.isInteger(branchNumeric) && branchNumeric > 0) {
+        params.set("branchId", String(branchNumeric));
+      }
+
+      getJson<{ customers: Array<{ id: number; fullName?: string; firstName?: string; lastName?: string; phone?: string | null; email?: string | null; branchId?: number | null }> }>(
+        `/api/customers?${params.toString()}`,
+        { signal: controller.signal }
+      )
+        .then((payload) => {
+          const customers = (payload?.customers ?? []).map((customer) => {
+            const fullName =
+              customer.fullName ??
+              [customer.firstName, customer.lastName].filter(Boolean).join(" ") ||
+              `Cliente #${customer.id}`;
+
+            return {
+              id: Number(customer.id),
+              fullName,
+              phone: customer.phone ?? null,
+              email: customer.email ?? null,
+              branchId: customer.branchId ?? null,
+            } as CustomerSummary;
+          });
+          setCustomerResults(customers);
+        })
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          if (error instanceof Error) {
+            setCustomerSearchError(error.message);
+          } else {
+            setCustomerSearchError("No se pudieron cargar los clientes");
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setCustomerSearchLoading(false);
+          }
+        });
+    }, 350);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
+  }, [branchId, customerQuery]);
+
+  useEffect(() => {
     const model = interestModels.find((item) => item.id === Number(selectedModelId));
     const principalCents = parseCurrencyToCents(principalAmount);
 
@@ -255,12 +369,10 @@ export default function LoansNewPage() {
     switch (currentStep.key as StepKey) {
       case "customer": {
         const branchNumeric = Number(branchId);
-        const customerNumeric = Number(customerId);
         return (
           Number.isInteger(branchNumeric) &&
           branchNumeric > 0 &&
-          Number.isInteger(customerNumeric) &&
-          customerNumeric > 0 &&
+          selectedCustomer != null &&
           ticketNumber.trim().length > 0
         );
       }
@@ -277,7 +389,7 @@ export default function LoansNewPage() {
       default:
         return false;
     }
-  }, [branchId, customerId, ticketNumber, capturedIdPaths, collateralItems, currentModel, currentStep.key, principalAmount, manualSchedule.length]);
+  }, [branchId, selectedCustomer, ticketNumber, capturedIdPaths, collateralItems, currentModel, currentStep.key, principalAmount, manualSchedule.length]);
 
   const goNext = () => {
     setStepIndex((index) => Math.min(index + 1, steps.length - 1));
@@ -356,6 +468,18 @@ export default function LoansNewPage() {
     setCapturedIdPaths((previous) => previous.filter((path) => path !== upload.assetPath));
   };
 
+  const handleSelectCustomer = (customer: CustomerSummary) => {
+    setSelectedCustomer(customer);
+    setCustomerQuery(customer.fullName);
+    setCustomerResults([]);
+  };
+
+  const clearSelectedCustomer = () => {
+    setSelectedCustomer(null);
+    setCustomerQuery("");
+    setCustomerResults([]);
+  };
+
   const updateCollateralItem = (index: number, patch: Partial<CollateralItem>) => {
     setCollateralItems((previous) => previous.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
   };
@@ -386,6 +510,11 @@ export default function LoansNewPage() {
       return;
     }
 
+    if (!selectedCustomer) {
+      setSubmissionError("Selecciona un cliente antes de enviar.");
+      return;
+    }
+
     setSubmitting(true);
     setSubmissionError(null);
 
@@ -394,7 +523,7 @@ export default function LoansNewPage() {
         loan: { id: number; ticketNumber: string };
       }>("/api/loans", {
         branchId: Number(branchId),
-        customerId: Number(customerId),
+        customerId: selectedCustomer?.id ? Number(selectedCustomer.id) : undefined,
         ticketNumber: ticketNumber.trim(),
         interestModelId: model.id,
         principalCents,
@@ -477,26 +606,96 @@ export default function LoansNewPage() {
       <section className="rounded-xl border border-slate-200 bg-white/80 p-8 shadow-lg dark:border-slate-700 dark:bg-slate-900/70">
         {currentStep.key === "customer" && (
           <form className="grid gap-6 sm:grid-cols-2">
-            <div>
+            <div className="sm:col-span-2 space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Sucursal</label>
-              <input
-                value={branchId}
-                onChange={(event) => setBranchId(event.target.value.replace(/[^0-9]/g, ""))}
-                type="text"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
-                placeholder="ID de sucursal"
-              />
+              {branchesLoading ? (
+                <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                  <Loader2 className="h-4 w-4 animate-spin text-indigo-500" /> Cargando sucursales...
+                </div>
+              ) : branchesError ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{branchesError}</div>
+              ) : (
+                <select
+                  value={branchId}
+                  onChange={(event) => {
+                    setBranchId(event.target.value);
+                    setSelectedCustomer(null);
+                    setCustomerQuery("");
+                    setCustomerResults([]);
+                  }}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
+                >
+                  <option value="">Seleccione una sucursal</option>
+                  {branchOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Cliente</label>
+
+            <div className="sm:col-span-2 space-y-2">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Buscar cliente</label>
               <input
-                value={customerId}
-                onChange={(event) => setCustomerId(event.target.value.replace(/[^0-9]/g, ""))}
-                type="text"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
-                placeholder="ID de cliente"
+                value={customerQuery}
+                onChange={(event) => {
+                  setCustomerQuery(event.target.value);
+                  if (selectedCustomer && event.target.value.trim() !== selectedCustomer.fullName) {
+                    setSelectedCustomer(null);
+                  }
+                }}
+                type="search"
+                placeholder="Nombre, correo o teléfono"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
               />
+              {customerSearchLoading ? (
+                <p className="text-sm text-slate-500">
+                  <Loader2 className="mr-2 inline h-4 w-4 animate-spin text-indigo-500" /> Buscando clientes...
+                </p>
+              ) : customerSearchError ? (
+                <p className="text-sm text-rose-600">{customerSearchError}</p>
+              ) : null}
+              {customerResults.length > 0 && !selectedCustomer ? (
+                <ul className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white text-sm shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                  {customerResults.map((customer) => (
+                    <li key={customer.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCustomer(customer)}
+                        className="flex w-full flex-col items-start gap-1 px-3 py-2 text-left hover:bg-indigo-50 dark:hover:bg-slate-800"
+                      >
+                        <span className="font-medium text-slate-900 dark:text-slate-100">{customer.fullName}</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          {customer.phone ?? customer.email ?? "Sin contacto"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {selectedCustomer ? (
+                <div className="flex flex-col gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold">{selectedCustomer.fullName}</p>
+                      <p className="text-xs opacity-80">
+                        {selectedCustomer.phone ?? selectedCustomer.email ?? "Sin datos de contacto"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearSelectedCustomer}
+                      className="text-xs font-semibold text-indigo-700 underline-offset-2 hover:underline dark:text-indigo-200"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
+
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Ticket</label>
               <div className="mt-1 flex gap-2">
@@ -517,6 +716,7 @@ export default function LoansNewPage() {
                 </button>
               </div>
             </div>
+
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Comentarios internos</label>
               <textarea
@@ -845,7 +1045,11 @@ export default function LoansNewPage() {
                   </div>
                   <div className="flex justify-between">
                     <dt>Cliente</dt>
-                    <dd>{customerId}</dd>
+                    <dd>
+                      {selectedCustomer
+                        ? `${selectedCustomer.fullName} (#${selectedCustomer.id})`
+                        : "N/A"}
+                    </dd>
                   </div>
                   <div className="flex justify-between">
                     <dt>Monto prestado</dt>

@@ -34,6 +34,8 @@ const conditions = [
   { id: "poor", label: "Well worn" }
 ];
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+
 type IntakePhoto = {
   id: string;
   name: string;
@@ -108,6 +110,9 @@ export default function PosBuyPage() {
   const [items, setItems] = useState<IntakeItem[]>(initialItems);
   const [payoutMethod, setPayoutMethod] = useState<"cash" | "transfer">("cash");
   const [isPrinting, setIsPrinting] = useState(false);
+  const [status, setStatus] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [managerNotes, setManagerNotes] = useState("");
 
   useEffect(() => {
     if (!isPrinting) return;
@@ -184,10 +189,60 @@ export default function PosBuyPage() {
     setSeller((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleIntakeSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleIntakeSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    // Future: POST /api/purchases with payload
-    setIsPrinting(true);
+    setStatus(null);
+
+    if (items.length === 0) {
+      setStatus({ tone: "error", message: "Add at least one item to intake." });
+      return;
+    }
+
+    const invalidItem = items.find((item) => !item.description.trim() || item.resaleValue <= 0);
+    if (invalidItem) {
+      setStatus({ tone: "error", message: "Each item needs a description and resale value." });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = {
+        branchId: 1,
+        userId: 1,
+        payoutMethod,
+        seller: seller,
+        items: items.map((item) => ({
+          description: item.description,
+          resaleValue: item.resaleValue,
+          targetMargin: item.targetMargin,
+          accessories: item.accessories,
+          notes: item.notes,
+          serial: item.serial,
+          condition: item.condition,
+          photos: item.photos.map((photo) => photo.preview).filter(Boolean),
+        })),
+        managerNotes,
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/pos/buys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? "Failed to record intake");
+      }
+
+      const data = await response.json();
+      setStatus({ tone: "success", message: `Purchase #${data?.purchase?.id ?? ""} recorded successfully.` });
+      setIsPrinting(true);
+    } catch (error) {
+      setStatus({ tone: "error", message: error instanceof Error ? error.message : "Unable to submit intake." });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -575,6 +630,8 @@ export default function PosBuyPage() {
               <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
                 Manager approval notes
                 <textarea
+                  value={managerNotes}
+                  onChange={(event) => setManagerNotes(event.target.value)}
                   className="mt-1 h-20 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
                   placeholder="Reasoning behind the offer, checklist status, etc."
                 />
@@ -582,11 +639,23 @@ export default function PosBuyPage() {
               <p className="flex items-start gap-2 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3 text-xs leading-5 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
                 <Percent className="mt-0.5 h-4 w-4" /> Offers above RD$50,000 require the floor manager PIN before posting.
               </p>
+              {status && (
+                <p
+                  className={`rounded-xl border px-3 py-2 text-xs ${
+                    status.tone === "success"
+                      ? "border-emerald-300 bg-emerald-50/70 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                      : "border-rose-300 bg-rose-50/70 text-rose-600 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200"
+                  }`}
+                >
+                  {status.message}
+                </p>
+              )}
               <button
                 type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2"
+                disabled={loading}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2"
               >
-                <BadgeDollarSign className="h-4 w-4" /> Submit purchase & print receipt
+                <BadgeDollarSign className="h-4 w-4" /> {loading ? "Posting intake..." : "Submit purchase & print receipt"}
               </button>
             </div>
           </PosCard>

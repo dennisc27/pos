@@ -2319,7 +2319,7 @@ export default function SettingsSystemPage() {
       )}
 
       <section className="grid gap-6 lg:grid-cols-[260px,1fr]">
-        <aside className="space-y-6 rounded-lg border border-border bg-card p-4 shadow-sm">
+        <aside className="space-y-6 overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-sm lg:max-h-[calc(100vh-12rem)]">
           {NAV_SECTIONS.map((section) => (
             <div key={section.heading} className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

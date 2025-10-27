@@ -175,17 +175,17 @@ o Camera view, transaction stamping
 o Block id
 )
 - [x] make sure the settings pages for each settings option is implemented.
-- [ ] connect the dashboard to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the point of sale (new sale, refund, buy, gift cards) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the cash (shift and movements pages) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the loans(new loan, past due, layaway) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the inventory(catalog, ops, split/combine, barcode) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the ecommerce(channels, listings, orders, returns) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the purchasing(overview, receive, returns) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the repairs(intake, board) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the crm(customers, marketing) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the reports(shift-end,loans aging) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] connect the system(all pages) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
-- [ ] check all pages on system and make sure they are correctly connected to the database
-- [ ] add a scrollbar to the ajustes left bar.
+- [x] connect the dashboard to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the point of sale (new sale, refund, buy, gift cards) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the cash (shift and movements pages) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the loans(new loan, past due, layaway) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the inventory(catalog, ops, split/combine, barcode) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the ecommerce(channels, listings, orders, returns) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the purchasing(overview, receive, returns) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the repairs(intake, board) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the crm(customers, marketing) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the reports(shift-end,loans aging) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] connect the system(all pages) to the database. Check the schema.sql file, and the previously created backend api so you don't create double api endpoints.
+- [x] check all pages on system and make sure they are correctly connected to the database
+- [x] add a scrollbar to the ajustes left bar.
 
