@@ -239,6 +239,33 @@ export const payments = mysqlTable('payments', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+export const salesReturns = mysqlTable('sales_returns', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  invoiceId: bigint('invoice_id', { mode: 'number' }).notNull(),
+  orderId: bigint('order_id', { mode: 'number' }).notNull(),
+  branchId: bigint('branch_id', { mode: 'number' }).notNull(),
+  customerId: bigint('customer_id', { mode: 'number' }),
+  createdBy: bigint('created_by', { mode: 'number' }),
+  refundMethod: mysqlEnum('refund_method', ['cash', 'store_credit']).notNull(),
+  totalRefundCents: bigint('total_refund_cents', { mode: 'number' }).notNull(),
+  restockValueCents: bigint('restock_value_cents', { mode: 'number' }).default(0),
+  reason: text('reason'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const salesReturnItems = mysqlTable('sales_return_items', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  salesReturnId: bigint('sales_return_id', { mode: 'number' }).notNull(),
+  orderItemId: bigint('order_item_id', { mode: 'number' }).notNull(),
+  productCodeVersionId: bigint('product_code_version_id', { mode: 'number' }).notNull(),
+  qty: int('qty').notNull(),
+  unitPriceCents: bigint('unit_price_cents', { mode: 'number' }).notNull(),
+  taxCents: bigint('tax_cents', { mode: 'number' }).default(0),
+  restock: boolean('restock').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // ========= CUSTOMERS =========
 export const customers = mysqlTable('customers', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
@@ -282,6 +309,16 @@ export const customerNotes = mysqlTable('customer_notes', {
   customerId: bigint('customer_id', { mode: 'number' }).notNull(),
   authorId: bigint('author_id', { mode: 'number' }).notNull(),
   note: text('note').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const reviews = mysqlTable('reviews', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  source: mysqlEnum('source', ['google', 'facebook', 'internal', 'other']).default('other'),
+  author: varchar('author', { length: 160 }),
+  rating: int('rating').notNull(),
+  comment: text('comment'),
+  status: mysqlEnum('status', ['new', 'approved', 'hidden']).default('new'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

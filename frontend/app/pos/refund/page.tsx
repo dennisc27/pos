@@ -20,110 +20,103 @@ import {
 import { PosCard } from "@/components/pos/pos-card";
 import { formatCurrency } from "@/components/pos/utils";
 
-type InvoiceLine = {
-  id: string;
-  sku: string;
-  description: string;
+type ApiInvoice = {
+  id: number;
+  invoiceNo: string | null;
+  createdAt: string | null;
+  customerName: string;
+  userId: number;
+};
+
+type ApiInvoiceLine = {
+  orderItemId: number;
+  productCodeVersionId: number;
+  sku: string | null;
+  description: string | null;
   qty: number;
-  unitPrice: number;
-  taxRate: number;
-  condition: "new" | "used" | "damaged";
+  unitPriceCents: number;
+  taxCents: number;
+  subtotalCents: number;
+  totalCents: number;
   restockable: boolean;
 };
 
-type InvoicePayment = {
-  method: "cash" | "card" | "transfer" | "store_credit";
-  reference?: string;
-  amount: number;
+type ApiInvoicePayment = {
+  id: number;
+  method: "cash" | "card" | "transfer" | "gift_card" | "credit_note" | "store_credit";
+  amountCents: number;
+  reference: string | null;
+  createdAt: string | null;
 };
 
-type Invoice = {
-  id: string;
-  number: string;
-  customer: string;
-  createdAt: string;
-  clerk: string;
-  lines: InvoiceLine[];
-  payments: InvoicePayment[];
+type InvoiceDetail = {
+  invoice: ApiInvoice;
+  lines: ApiInvoiceLine[];
+  payments: ApiInvoicePayment[];
   policyFlags: string[];
 };
 
-const invoices: Invoice[] = [
-  {
-    id: "inv-10245",
-    number: "INV-10245",
-    customer: "Carlos Rodriguez",
-    createdAt: "2024-06-18 14:22",
-    clerk: "Maria P.",
-    policyFlags: ["Within 15 day window", "ITBIS included"],
-    lines: [
-      {
-        id: "line-1",
-        sku: "MB-2100",
-        description: "Red Note Laser · 128GB",
-        qty: 1,
-        unitPrice: 18500,
-        taxRate: 0.18,
-        condition: "used",
-        restockable: true
-      },
-      {
-        id: "line-2",
-        sku: "HD-3019",
-        description: "Retro Wave Headphones",
-        qty: 1,
-        unitPrice: 9200,
-        taxRate: 0.18,
-        condition: "new",
-        restockable: true
-      },
-      {
-        id: "line-3",
-        sku: "WT-4413",
-        description: "Times Track Silver",
-        qty: 1,
-        unitPrice: 14500,
-        taxRate: 0.18,
-        condition: "damaged",
-        restockable: false
-      }
-    ],
-    payments: [
-      { method: "card", amount: 32000, reference: "AUTH-783202" },
-      { method: "cash", amount: 10200 }
-    ]
-  }
-];
-
-type LineSelection = {
+type RefundLineSelection = {
   selected: boolean;
   restock: boolean;
 };
 
-const DEFAULT_LOOKUP = invoices[0];
+type RefundTotals = {
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  restockValueCents: number;
+};
+
+type RefundResponse = {
+  salesReturn: {
+    id: number;
+    refundMethod: "cash" | "store_credit";
+    totalRefundCents: number;
+    restockValueCents: number;
+    createdAt: string | null;
+  };
+  totals: RefundTotals;
+  creditNote: { id: number; balanceCents: number; createdAt: string | null } | null;
+};
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
 export default function PosRefundPage() {
-  const [search, setSearch] = useState(DEFAULT_LOOKUP.number);
-  const [activeInvoice, setActiveInvoice] = useState<Invoice | null>(DEFAULT_LOOKUP);
-  const [lineSelections, setLineSelections] = useState<Record<string, LineSelection>>({});
+  const [search, setSearch] = useState("");
+  const [activeInvoice, setActiveInvoice] = useState<InvoiceDetail | null>(null);
+  const [lineSelections, setLineSelections] = useState<Record<string, RefundLineSelection>>({});
   const [refundMethod, setRefundMethod] = useState<"cash" | "store_credit">("cash");
   const [isPrinting, setIsPrinting] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [reasonCode, setReasonCode] = useState("Wrong color / mismatch");
+  const [noteInput, setNoteInput] = useState("");
+  const [submitState, setSubmitState] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [submitMessage, setSubmitMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeInvoice) {
       setLineSelections({});
       return;
     }
-    setLineSelections(() => {
-      return activeInvoice.lines.reduce<Record<string, LineSelection>>((acc, line) => {
-        acc[line.id] = {
-          selected: line.condition !== "damaged",
-          restock: line.restockable
+
+    setLineSelections(
+      activeInvoice.lines.reduce<Record<string, RefundLineSelection>>((acc, line) => {
+        const key = String(line.orderItemId);
+        acc[key] = {
+          selected: line.restockable,
+          restock: line.restockable,
         };
         return acc;
-      }, {});
-    });
-  }, [activeInvoice?.id]);
+      }, {}),
+    );
+  }, [activeInvoice?.invoice.id]);
+
+  useEffect(() => {
+    setSubmitState("idle");
+    setSubmitMessage(null);
+  }, [refundMethod, activeInvoice?.invoice.id]);
 
   useEffect(() => {
     if (!isPrinting) return;
@@ -137,50 +130,87 @@ export default function PosRefundPage() {
   const totals = useMemo(() => {
     if (!activeInvoice) {
       return {
-        subtotal: 0,
-        tax: 0,
-        refundTotal: 0,
+        subtotalCents: 0,
+        taxCents: 0,
+        totalCents: 0,
         restockCount: 0,
-        restockValue: 0
+        restockValueCents: 0,
       };
     }
+
     return activeInvoice.lines.reduce(
       (acc, line) => {
-        const selection = lineSelections[line.id];
-        if (!selection?.selected) return acc;
-        const lineSubtotal = line.unitPrice * line.qty;
-        const lineTax = lineSubtotal * line.taxRate;
-        acc.subtotal += lineSubtotal;
-        acc.tax += lineTax;
-        acc.refundTotal += lineSubtotal + lineTax;
+        const selection = lineSelections[String(line.orderItemId)];
+        if (!selection?.selected) {
+          return acc;
+        }
+
+        acc.subtotalCents += line.subtotalCents;
+        acc.taxCents += line.taxCents;
+        acc.totalCents += line.totalCents;
+
         if (selection.restock && line.restockable) {
           acc.restockCount += 1;
-          acc.restockValue += lineSubtotal;
+          acc.restockValueCents += line.subtotalCents;
         }
+
         return acc;
       },
-      { subtotal: 0, tax: 0, refundTotal: 0, restockCount: 0, restockValue: 0 }
+      { subtotalCents: 0, taxCents: 0, totalCents: 0, restockCount: 0, restockValueCents: 0 },
     );
   }, [activeInvoice, lineSelections]);
 
-  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+  const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const result = invoices.find((invoice) => invoice.number === search.trim().toUpperCase());
-    setActiveInvoice(result ?? null);
+
+    const trimmed = search.trim();
+    if (!trimmed) {
+      setLookupError("Enter an invoice number to search");
+      setActiveInvoice(null);
+      setLineSelections({});
+      return;
+    }
+
+    setIsLoading(true);
+    setLookupError(null);
+    setSubmitState("idle");
+    setSubmitMessage(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/invoices/${encodeURIComponent(trimmed)}`);
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? `Unable to find invoice ${trimmed}`);
+      }
+
+      const data = (await response.json()) as InvoiceDetail;
+      setActiveInvoice(data);
+      setSearch(data.invoice.invoiceNo ?? trimmed.toUpperCase());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to look up invoice";
+      setLookupError(message);
+      setActiveInvoice(null);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const toggleSelection = (line: InvoiceLine, field: keyof LineSelection) => {
+  const toggleSelection = (line: ApiInvoiceLine, field: keyof RefundLineSelection) => {
     setLineSelections((prev) => {
-      const current = prev[line.id] ?? { selected: false, restock: false };
+      const key = String(line.orderItemId);
+      const current = prev[key] ?? { selected: false, restock: false };
+
       if (field === "restock" && !line.restockable) {
         return prev;
       }
+
       return {
         ...prev,
-        [line.id]: {
+        [key]: {
           ...current,
-          [field]: field === "restock" ? !current.restock : !current.selected
-        }
+          [field]: field === "restock" ? !current.restock : !current.selected,
+        },
       };
     });
   };
@@ -188,6 +218,68 @@ export default function PosRefundPage() {
   const selectedCount = useMemo(() => {
     return Object.values(lineSelections).filter((value) => value.selected).length;
   }, [lineSelections]);
+
+  const handlePostRefund = async () => {
+    if (!activeInvoice) {
+      setSubmitState("error");
+      setSubmitMessage("Look up an invoice before posting a refund.");
+      return;
+    }
+
+    const selectedLines = activeInvoice.lines.filter((line) => lineSelections[String(line.orderItemId)]?.selected);
+
+    if (selectedLines.length === 0) {
+      setSubmitState("error");
+      setSubmitMessage("Select at least one line item to refund.");
+      return;
+    }
+
+    setSubmitState("submitting");
+    setSubmitMessage("Posting refund...");
+
+    try {
+      const payload = {
+        invoiceNo: activeInvoice.invoice.invoiceNo,
+        method: refundMethod,
+        lines: selectedLines.map((line) => ({
+          orderItemId: line.orderItemId,
+          qty: line.qty,
+          restock: Boolean(lineSelections[String(line.orderItemId)]?.restock && line.restockable),
+        })),
+        reason: reasonCode,
+        notes: noteInput.trim() || null,
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/refunds`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? "Failed to post refund");
+      }
+
+      const data = (await response.json()) as RefundResponse;
+
+      const amountFormatted = formatCurrency(data.totals.totalCents / 100);
+      if (refundMethod === "store_credit" && data.creditNote) {
+        setSubmitMessage(
+          `Store credit refund posted. Credit note #${data.creditNote.id} balance: ${formatCurrency(
+            data.creditNote.balanceCents / 100,
+          )}.`,
+        );
+      } else {
+        setSubmitMessage(`Cash refund posted for ${amountFormatted}.`);
+      }
+
+      setSubmitState("success");
+    } catch (error) {
+      setSubmitState("error");
+      setSubmitMessage(error instanceof Error ? error.message : "Unable to post refund");
+    }
+  };
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
@@ -211,7 +303,8 @@ export default function PosRefundPage() {
               <button
                 type="button"
                 onClick={() => setIsPrinting(true)}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                disabled={!activeInvoice}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
               >
                 <Receipt className="h-3.5 w-3.5" /> Print duplicate
               </button>
@@ -235,50 +328,78 @@ export default function PosRefundPage() {
                   <Package className="h-3 w-3" /> Return window: 30 days
                 </span>
               </div>
-              {activeInvoice ? (
+              {isLoading ? (
+                <p className="rounded-xl border border-slate-200 bg-slate-50/80 p-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300">
+                  Looking up invoice...
+                </p>
+              ) : activeInvoice ? (
                 <div className="grid gap-3 rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:from-slate-900/70 dark:to-slate-950/80 dark:text-slate-300">
                   <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>Invoice #{activeInvoice.number}</span>
-                    <span>{activeInvoice.createdAt}</span>
+                    <span>Invoice #{activeInvoice.invoice.invoiceNo ?? "(unassigned)"}</span>
+                    <span>
+                      {activeInvoice.invoice.createdAt
+                        ? new Date(activeInvoice.invoice.createdAt).toLocaleString()
+                        : "Unknown date"}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-semibold text-slate-900 dark:text-slate-100">{activeInvoice.customer}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">Handled by {activeInvoice.clerk}</p>
+                      <p className="font-semibold text-slate-900 dark:text-slate-100">{activeInvoice.invoice.customerName}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Handled by user #{activeInvoice.invoice.userId}</p>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/80">
                       {selectedCount} line{selectedCount === 1 ? "" : "s"} selected
                     </div>
                   </div>
-                  <div className="space-y-2 text-xs text-slate-500">
-                    {activeInvoice.policyFlags.map((flag) => (
-                      <div key={flag} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900/60">
-                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" /> {flag}
-                      </div>
-                    ))}
-                  </div>
+                  {activeInvoice.policyFlags.length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                      {activeInvoice.policyFlags.map((flag) => (
+                        <div key={flag} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900/60">
+                          <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" /> {flag}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="space-y-2 pt-2 text-xs text-slate-500">
                     <p className="font-semibold text-slate-600 dark:text-slate-300">Payments collected</p>
-                    {activeInvoice.payments.map((payment) => (
-                      <div key={`${payment.method}-${payment.reference ?? payment.amount}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900/60">
-                        <span className="inline-flex items-center gap-2">
-                          {payment.method === "cash" ? (
-                            <DollarSign className="h-3.5 w-3.5" />
-                          ) : payment.method === "card" ? (
-                            <CreditCard className="h-3.5 w-3.5" />
-                          ) : (
-                            <Store className="h-3.5 w-3.5" />
-                          )}
-                          {payment.method.replace("_", " ").toUpperCase()}
-                        </span>
-                        <span className="font-medium text-slate-900 dark:text-slate-100">{formatCurrency(payment.amount)}</span>
-                      </div>
-                    ))}
+                    {activeInvoice.payments.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-slate-500 dark:border-slate-700 dark:bg-slate-900/60">
+                        No payments recorded for this invoice.
+                      </p>
+                    ) : (
+                      activeInvoice.payments.map((payment) => {
+                        const methodLabel = payment.method.replace(/_/g, " ").toUpperCase();
+                        return (
+                          <div
+                            key={`${payment.id}-${payment.method}-${payment.reference ?? ""}`}
+                            className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900/60"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              {payment.method === "cash" ? (
+                                <DollarSign className="h-3.5 w-3.5" />
+                              ) : payment.method === "card" ? (
+                                <CreditCard className="h-3.5 w-3.5" />
+                              ) : (
+                                <Store className="h-3.5 w-3.5" />
+                              )}
+                              {methodLabel}
+                            </span>
+                            <span className="font-medium text-slate-900 dark:text-slate-100">
+                              {formatCurrency((payment.amountCents ?? 0) / 100)}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
+              ) : lookupError ? (
+                <p className="rounded-xl border border-rose-200 bg-rose-50/70 p-6 text-sm text-rose-600 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+                  {lookupError}
+                </p>
               ) : (
                 <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400">
-                  No invoice found. Verify the receipt number or switch to manual refund mode.
+                  No invoice loaded. Enter a receipt number and search to begin.
                 </p>
               )}
             </div>
@@ -298,8 +419,8 @@ export default function PosRefundPage() {
                 <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
                     <tr>
-                      <th className="px-4 py-3 text-left">Line</th>
-                      <th className="px-4 py-3 text-left">Condition</th>
+                      <th className="px-4 py-3 text-left">Product</th>
+                      <th className="px-4 py-3 text-right">Qty</th>
                       <th className="px-4 py-3 text-right">Unit price</th>
                       <th className="px-4 py-3 text-right">ITBIS</th>
                       <th className="px-4 py-3 text-center">Restock</th>
@@ -307,12 +428,13 @@ export default function PosRefundPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {activeInvoice.lines.map((line) => {
-                      const selection = lineSelections[line.id] ?? { selected: false, restock: false };
-                      const lineSubtotal = line.unitPrice * line.qty;
-                      const lineTax = lineSubtotal * line.taxRate;
+                      const key = String(line.orderItemId);
+                      const selection = lineSelections[key] ?? { selected: false, restock: false };
+                      const lineSubtotal = line.subtotalCents / 100;
+                      const lineTax = line.taxCents / 100;
                       return (
                         <tr
-                          key={line.id}
+                          key={line.orderItemId}
                           className={`bg-white transition dark:bg-slate-950/40 ${selection.selected ? "bg-sky-50/70 dark:bg-sky-500/10" : ""}`}
                         >
                           <td className="px-4 py-3">
@@ -324,22 +446,14 @@ export default function PosRefundPage() {
                                 className="mt-1 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                               />
                               <div>
-                                <p className="font-medium text-slate-900 dark:text-slate-100">{line.description}</p>
-                                <p className="text-xs text-slate-500 dark:text-slate-400">SKU {line.sku}</p>
+                                <p className="font-medium text-slate-900 dark:text-slate-100">{line.description ?? "Product"}</p>
+                                {line.sku && (
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">SKU {line.sku}</p>
+                                )}
                               </div>
                             </label>
                           </td>
-                          <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                            {line.condition === "damaged" ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-rose-500 dark:bg-rose-500/10 dark:text-rose-200">
-                                <AlertTriangle className="h-3 w-3" /> Damaged
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300">
-                                <ShieldCheck className="h-3 w-3" /> {line.condition === "new" ? "New" : "Used"}
-                              </span>
-                            )}
-                          </td>
+                          <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{line.qty}</td>
                           <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{formatCurrency(lineSubtotal)}</td>
                           <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{formatCurrency(lineTax)}</td>
                           <td className="px-4 py-3 text-center text-xs">
@@ -395,7 +509,8 @@ export default function PosRefundPage() {
               <button
                 type="button"
                 onClick={() => setIsPrinting(true)}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                disabled={!activeInvoice}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
               >
                 <Printer className="h-3.5 w-3.5" /> Preview credit note
               </button>
@@ -412,23 +527,23 @@ export default function PosRefundPage() {
                 <span className="inline-flex items-center gap-2 text-slate-500">
                   <Store className="h-4 w-4" /> Restocking
                 </span>
-                <span className="text-xs text-slate-500">{totals.restockCount} lines · {formatCurrency(totals.restockValue)}</span>
+                <span className="text-xs text-slate-500">{totals.restockCount} lines · {formatCurrency(totals.restockValueCents / 100)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center gap-2 text-slate-500">
                   <DollarSign className="h-4 w-4" /> Subtotal
                 </span>
-                <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(totals.subtotal)}</span>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(totals.subtotalCents / 100)}</span>
               </div>
               <div className="flex items-center justify-between text-sky-600 dark:text-sky-300">
                 <span className="inline-flex items-center gap-2">
                   <Info className="h-4 w-4" /> ITBIS included
                 </span>
-                <span>{formatCurrency(totals.tax)}</span>
+                <span>{formatCurrency(totals.taxCents / 100)}</span>
               </div>
               <div className="flex items-center justify-between text-lg font-semibold text-emerald-600 dark:text-emerald-400">
                 <span>Total refund</span>
-                <span>{formatCurrency(totals.refundTotal)}</span>
+                <span>{formatCurrency(totals.totalCents / 100)}</span>
               </div>
               {refundMethod === "store_credit" ? (
                 <p className="rounded-xl border border-emerald-300 bg-emerald-50/60 p-3 text-xs leading-5 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200">
@@ -483,15 +598,22 @@ export default function PosRefundPage() {
             <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300">
               <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
                 Reason code
-                <select className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60">
+                <select
+                  value={reasonCode}
+                  onChange={(event) => setReasonCode(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                >
                   <option>Wrong color / mismatch</option>
                   <option>Defective on arrival</option>
                   <option>Customer remorse</option>
+                  <option>Accessory missing</option>
                 </select>
               </label>
               <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
                 Notes for audit log
                 <textarea
+                  value={noteInput}
+                  onChange={(event) => setNoteInput(event.target.value)}
                   className="mt-1 h-24 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
                   placeholder="Add context for the manager approval and inspection results"
                 />
@@ -500,11 +622,27 @@ export default function PosRefundPage() {
                 <AlertTriangle className="mt-0.5 h-4 w-4" /> Refunds above RD$25,000 require manager PIN entry and capture of the
                 customer's signature.
               </p>
+              {submitMessage && (
+                <p
+                  className={`rounded-xl border px-3 py-2 text-xs ${
+                    submitState === "success"
+                      ? "border-emerald-300 bg-emerald-50/70 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                      : submitState === "error"
+                      ? "border-rose-300 bg-rose-50/70 text-rose-600 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200"
+                      : "border-slate-200 bg-slate-50/70 text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
+                  }`}
+                >
+                  {submitMessage}
+                </p>
+              )}
               <button
                 type="button"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2"
+                onClick={handlePostRefund}
+                disabled={submitState === "submitting" || !activeInvoice}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2"
               >
-                <CreditCard className="h-4 w-4" /> Post refund
+                <CreditCard className="h-4 w-4" />
+                {submitState === "submitting" ? "Posting refund..." : "Post refund"}
               </button>
             </div>
           </PosCard>
