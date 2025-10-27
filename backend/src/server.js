@@ -278,6 +278,8 @@ const manualMovementKinds = new Set([
 const defaultInventoryPageSize = 50;
 const maxInventoryPageSize = 200;
 
+let inventoryCategoriesAvailable = null;
+
 const inventorySortColumnMap = {
   name: productCodes.name,
   code: productCodes.code,
@@ -9303,7 +9305,28 @@ app.post('/api/inventory/combine', async (req, res, next) => {
   }
 });
 
-async function runInventoryQuery(rawFilters = {}) {
+function isMissingProductCategoriesTableError(error) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const cause = error.cause && typeof error.cause === 'object' ? error.cause : null;
+  const candidateMessages = [
+    typeof error.message === 'string' ? error.message : '',
+    cause && typeof cause.message === 'string' ? cause.message : '',
+    cause && typeof cause.sqlMessage === 'string' ? cause.sqlMessage : '',
+  ];
+
+  if (cause && (cause.code === 'ER_NO_SUCH_TABLE' || cause.errno === 1146)) {
+    if (candidateMessages.some((msg) => msg && msg.includes('product_categories'))) {
+      return true;
+    }
+  }
+
+  return candidateMessages.some((msg) => msg && msg.includes('product_categories'));
+}
+
+async function runInventoryQuery(rawFilters = {}, attemptOptions = {}) {
   const search = typeof rawFilters.search === 'string' ? rawFilters.search.trim() : '';
   const branchIds = coerceIdArray(rawFilters.branchIds ?? rawFilters.branchId ?? []);
   const categoryIds = coerceIdArray(rawFilters.categoryIds ?? rawFilters.categoryId ?? []);
@@ -9395,6 +9418,11 @@ async function runInventoryQuery(rawFilters = {}) {
     conditions.push(lte(productCodeVersions.qtyOnHand, lowStockThreshold));
   }
 
+  const includeCategories =
+    Object.prototype.hasOwnProperty.call(attemptOptions, 'forceCategoryJoin')
+      ? Boolean(attemptOptions.forceCategoryJoin)
+      : inventoryCategoriesAvailable !== false;
+
   let query = db
     .select({
       productCodeId: productCodes.id,
@@ -9404,7 +9432,7 @@ async function runInventoryQuery(rawFilters = {}) {
       sku: productCodes.sku,
       description: productCodes.description,
       categoryId: productCodes.categoryId,
-      categoryName: productCategories.name,
+      categoryName: includeCategories ? productCategories.name : sql`NULL`,
       branchId: productCodeVersions.branchId,
       branchName: branches.name,
       priceCents: productCodeVersions.priceCents,
@@ -9416,8 +9444,11 @@ async function runInventoryQuery(rawFilters = {}) {
     })
     .from(productCodeVersions)
     .innerJoin(productCodes, eq(productCodeVersions.productCodeId, productCodes.id))
-    .leftJoin(productCategories, eq(productCodes.categoryId, productCategories.id))
     .leftJoin(branches, eq(productCodeVersions.branchId, branches.id));
+
+  if (includeCategories) {
+    query = query.leftJoin(productCategories, eq(productCodes.categoryId, productCategories.id));
+  }
 
   if (conditions.length > 0) {
     query = query.where(and(...conditions));
@@ -9430,7 +9461,21 @@ async function runInventoryQuery(rawFilters = {}) {
     asc(productCodeVersions.branchId),
   ];
 
-  const rows = await query.orderBy(...orderClauses).limit(limitPlusOne).offset(offset);
+  let rows;
+
+  try {
+    rows = await query.orderBy(...orderClauses).limit(limitPlusOne).offset(offset);
+    if (includeCategories) {
+      inventoryCategoriesAvailable = true;
+    }
+  } catch (error) {
+    if (includeCategories && isMissingProductCategoriesTableError(error)) {
+      inventoryCategoriesAvailable = false;
+      return runInventoryQuery(rawFilters, { forceCategoryJoin: false });
+    }
+
+    throw error;
+  }
 
   const items = rows.slice(0, pageSize).map((row) => {
     const qtyOnHand = Number(row.qtyOnHand ?? 0);
