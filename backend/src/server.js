@@ -8,6 +8,8 @@ import { connectDB, closeConnection, db } from './db/connection.js';
 import {
   branches,
   cashMovements,
+  componentChildCodes,
+  componentParentCodes,
   creditNoteLedger,
   creditNotes,
   giftCardLedger,
@@ -60,11 +62,15 @@ import {
   purchaseLines,
   purchaseReturnLines,
   purchaseReturns,
+  products,
   productCodes,
   productCodeComponents,
   productCodeVersions,
   salesReturnItems,
   salesReturns,
+  settings,
+  shiftClosedByUsers,
+  shiftOpenedByUsers,
   supplierCreditLedger,
   supplierCredits,
   shiftReports,
@@ -2716,7 +2722,8 @@ function serializeInstapawnIntake(row) {
     convertedAt: row.convertedAt?.toISOString?.() ?? row.convertedAt,
     createdAt: row.createdAt?.toISOString?.() ?? row.createdAt,
     updatedAt: row.updatedAt?.toISOString?.() ?? row.updatedAt,
-  barcodeUrl: `${frontendBaseUrl}/loans/instapawn?token=${row.barcodeToken}`,
+    barcodeUrl: `${frontendBaseUrl}/loans/instapawn?token=${row.barcodeToken}`,
+  };
 };
 
 const repairSelection = {
@@ -2766,7 +2773,6 @@ const repairPhotoSelection = {
   storagePath: repairPhotos.storagePath,
   createdAt: repairPhotos.createdAt,
 };
-}
 
 async function queueNotificationMessage(
   executor,
@@ -3953,28 +3959,31 @@ async function buildShiftEndReport(shiftId) {
     throw new HttpError(400, 'shiftId must be a positive integer');
   }
 
-  const [shiftRow] = await db
-    .select({
-      id: shifts.id,
-      branchId: shifts.branchId,
-      branchName: branches.name,
-      openedBy: shifts.openedBy,
-      openedByName: shiftOpenedByUsers.fullName,
-      closedBy: shifts.closedBy,
-      closedByName: shiftClosedByUsers.fullName,
-      openingCashCents: shifts.openingCashCents,
-      closingCashCents: shifts.closingCashCents,
-      expectedCashCents: shifts.expectedCashCents,
-      overShortCents: shifts.overShortCents,
-      openedAt: shifts.openedAt,
-      closedAt: shifts.closedAt,
-    })
-    .from(shifts)
-    .leftJoin(branches, eq(branches.id, shifts.branchId))
-    .leftJoin(shiftOpenedByUsers, eq(shiftOpenedByUsers.id, shifts.openedBy))
-    .leftJoin(shiftClosedByUsers, eq(shiftClosedByUsers.id, shifts.closedBy))
-    .where(eq(shifts.id, numericShiftId))
-    .limit(1);
+  // Use raw SQL to avoid alias conflict when joining users table twice
+  const result = await db.execute(sql`
+    SELECT 
+      s.id,
+      s.branch_id as branchId,
+      b.name as branchName,
+      s.opened_by as openedBy,
+      opened_user.full_name as openedByName,
+      s.closed_by as closedBy,
+      closed_user.full_name as closedByName,
+      s.opening_cash_cents as openingCashCents,
+      s.closing_cash_cents as closingCashCents,
+      s.expected_cash_cents as expectedCashCents,
+      s.over_short_cents as overShortCents,
+      s.opened_at as openedAt,
+      s.closed_at as closedAt
+    FROM shifts s
+    LEFT JOIN branches b ON s.branch_id = b.id
+    LEFT JOIN users opened_user ON s.opened_by = opened_user.id
+    LEFT JOIN users closed_user ON s.closed_by = closed_user.id
+    WHERE s.id = ${numericShiftId}
+    LIMIT 1
+  `);
+
+  const shiftRow = result[0]?.[0];
 
   if (!shiftRow) {
     return null;
@@ -7607,21 +7616,24 @@ function normalizeComponentLines(rawComponents) {
 }
 
 async function getInventoryComponentSnapshot() {
+  // Use raw SQL for the component query to avoid alias conflicts with self-join
+  const componentRowsResult = await db.execute(sql`
+    SELECT 
+      pc.parent_code_id as parentCodeId,
+      pc.child_code_id as childCodeId,
+      pc.qty_ratio as qtyRatio,
+      parent.code as parentCode,
+      parent.name as parentName,
+      child.code as childCode,
+      child.name as childName
+    FROM product_code_components pc
+    INNER JOIN product_codes parent ON pc.parent_code_id = parent.id
+    INNER JOIN product_codes child ON pc.child_code_id = child.id
+    ORDER BY parent.code, child.code
+  `);
+
   const [componentRows, versionRows] = await Promise.all([
-    db
-      .select({
-        parentCodeId: productCodeComponents.parentCodeId,
-        childCodeId: productCodeComponents.childCodeId,
-        qtyRatio: productCodeComponents.qtyRatio,
-        parentCode: componentParentCodes.code,
-        parentName: componentParentCodes.name,
-        childCode: componentChildCodes.code,
-        childName: componentChildCodes.name,
-      })
-      .from(productCodeComponents)
-      .innerJoin(componentParentCodes, eq(productCodeComponents.parentCodeId, componentParentCodes.id))
-      .innerJoin(componentChildCodes, eq(productCodeComponents.childCodeId, componentChildCodes.id))
-      .orderBy(asc(componentParentCodes.code), asc(componentChildCodes.code)),
+    Promise.resolve(componentRowsResult[0] || []),
     db
       .select({
         productCodeVersionId: productCodeVersions.id,
@@ -10615,6 +10627,7 @@ app.post('/api/orders', async (req, res, next) => {
         subtotalCents,
         taxCents,
         totalCents,
+        createdBy: userId,
       });
 
       const [orderRow] = await tx

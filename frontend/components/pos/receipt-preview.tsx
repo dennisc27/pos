@@ -6,20 +6,28 @@ import { formatCurrency } from "./utils";
 export function ReceiptPreview({
   items,
   summary,
-  tenders
+  tenders,
+  onFinalize,
+  isProcessing = false
 }: {
   items: CartLine[];
   summary: SaleSummary;
   tenders: TenderBreakdown[];
+  onFinalize?: () => void;
+  isProcessing?: boolean;
 }) {
   return (
     <PosCard
       title="Receipt preview"
       subtitle="Confirm the fiscal receipt before printing or sending via WhatsApp"
       action={
-        <button className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
+        <button
+          onClick={onFinalize}
+          disabled={isProcessing}
+          className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white"
+        >
           <Printer className="h-3.5 w-3.5" />
-          Print & kick drawer
+          {isProcessing ? "Processing..." : "Print & kick drawer"}
         </button>
       }
     >

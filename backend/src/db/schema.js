@@ -57,21 +57,33 @@ export const settings = mysqlTable('settings', {
 });
 
 // ========= PRODUCTS & INVENTORY =========
-export const productCategories = mysqlTable('product_categories', {
+export const productCategories = mysqlTable('categories', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
-  name: varchar('name', { length: 80 }).notNull(),
+  name: varchar('name', { length: 120 }).notNull(),
   parentId: bigint('parent_id', { mode: 'number' }),
+});
+
+export const products = mysqlTable('products', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  sku: varchar('sku', { length: 64 }),
+  name: varchar('name', { length: 240 }).notNull(),
+  description: text('description'),
+  categoryId: bigint('category_id', { mode: 'number' }),
+  uom: varchar('uom', { length: 16 }).default('ea'),
+  taxable: boolean('taxable').default(true),
+  isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
 
 export const productCodes = mysqlTable('product_codes', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
-  code: varchar('code', { length: 40 }).unique().notNull(),
-  name: varchar('name', { length: 200 }).notNull(),
-  categoryId: bigint('category_id', { mode: 'number' }),
+  productId: bigint('product_id', { mode: 'number' }).notNull(),
+  code: varchar('code', { length: 64 }).unique().notNull(),
+  name: varchar('name', { length: 200 }),
   sku: varchar('sku', { length: 60 }),
   description: text('description'),
+  categoryId: bigint('category_id', { mode: 'number' }),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
@@ -205,6 +217,7 @@ export const orders = mysqlTable('orders', {
   subtotalCents: bigint('subtotal_cents', { mode: 'number' }).notNull(),
   taxCents: bigint('tax_cents', { mode: 'number' }).default(0),
   totalCents: bigint('total_cents', { mode: 'number' }).notNull(),
+  createdBy: bigint('created_by', { mode: 'number' }).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
@@ -817,7 +830,8 @@ export const auditLogs = mysqlTable('audit_logs', {
 });
 
 // ========= TABLE ALIASES FOR SELF-JOINS =========
-// Using table references (Drizzle handles aliasing internally)
+// Note: These are just references. For actual self-joins in queries,
+// use separate queries or raw SQL to avoid alias conflicts.
 export const fromBranchAlias = branches;
 export const toBranchAlias = branches;
 export const componentParentCodes = productCodes;

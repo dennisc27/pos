@@ -144,6 +144,8 @@ export default function PosPage() {
   const [cashTenderInput, setCashTenderInput] = useState("");
   const [finalizeState, setFinalizeState] = useState<"idle" | "processing" | "success" | "error">("idle");
   const [finalizeMessage, setFinalizeMessage] = useState<string | null>(null);
+  const [isSuccessDialogOpen, setSuccessDialogOpen] = useState(false);
+  const [successInvoiceId, setSuccessInvoiceId] = useState<string | null>(null);
 
   const resolveProductVersionId = useCallback((productId: string) => {
     const numeric = Number(productId);
@@ -270,6 +272,16 @@ export default function PosPage() {
     },
     [createLineFromProduct]
   );
+
+  const clearCart = useCallback(() => {
+    setCartLines([]);
+    setTenderBreakdown([]);
+    setCustomerName("Walk-in customer");
+    setValidationState("idle");
+    setValidationMessage(null);
+    setFinalizeState("idle");
+    setFinalizeMessage(null);
+  }, []);
 
   const filteredProducts = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -627,8 +639,8 @@ export default function PosPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          branchId: 1,
-          userId: 1,
+          branchId: 3, // Santo Domingo branch
+          userId: 7,   // Cajera Principal
           items: cartLines.map((line) => ({
             productCodeVersionId: resolveProductVersionId(line.id),
             qty: line.qty,
@@ -722,14 +734,23 @@ export default function PosPage() {
 
       const printPayload = await printResponse.json();
 
+      // Close payment dialog and show success
+      setPaymentDialogOpen(false);
       setFinalizeState("success");
       setFinalizeMessage(printPayload.message ?? "Drawer opened and receipt queued.");
+      setSuccessInvoiceId(invoice.number ?? null);
+      setSuccessDialogOpen(true);
     } catch (error) {
       console.error("Finalize sale failed", error);
       setFinalizeState("error");
       setFinalizeMessage("Unable to finalize sale. Review server logs and try again.");
     }
   }, [cartLines, resolveProductVersionId, saleSummary.cashDue, tenderBreakdown]);
+
+  const handleCloseSuccessDialog = useCallback(() => {
+    setSuccessDialogOpen(false);
+    clearCart();
+  }, [clearCart]);
 
   const closeCustomerDialog = useCallback(() => {
     setCustomerDialogMode(null);
@@ -1054,7 +1075,13 @@ export default function PosPage() {
               </button>
             </div>
             <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
-              <ReceiptPreview items={cartLines} summary={saleSummary} tenders={tenderBreakdown} />
+              <ReceiptPreview
+                items={cartLines}
+                summary={saleSummary}
+                tenders={tenderBreakdown}
+                onFinalize={handleFinalizeSale}
+                isProcessing={finalizeState === "processing"}
+              />
               <div className="space-y-4 rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/60 dark:text-slate-200">
                 <div className="flex items-center justify-between">
                   <span>Total due</span>
@@ -1111,6 +1138,53 @@ export default function PosPage() {
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+      {isSuccessDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={handleCloseSuccessDialog}
+        >
+          <div
+            className="w-full max-w-md space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-emerald-600 dark:text-emerald-300">Sale Completed</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {finalizeMessage ?? "Receipt printed and drawer opened."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseSuccessDialog}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close success dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {successInvoiceId ? (
+              <div className="rounded-xl border border-slate-200/80 bg-gradient-to-b from-slate-50 to-white p-4 text-sm text-slate-700 dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/60 dark:text-slate-200">
+                <div className="flex items-center justify-between">
+                  <span>Invoice Number</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">{successInvoiceId}</span>
+                </div>
+              </div>
+            ) : null}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCloseSuccessDialog}
+                className="rounded-lg border border-emerald-600/70 bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-600 hover:text-emerald-600 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200 dark:hover:border-emerald-400/80 dark:hover:text-emerald-100"
+              >
+                Start New Sale
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </>

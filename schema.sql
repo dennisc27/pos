@@ -141,11 +141,18 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 -- price/cost version per sellable code
+-- Note: The following columns (name, sku, description, category_id, updated_at) were added
+-- to denormalize product data in product_codes for improved query performance in the inventory API
 CREATE TABLE IF NOT EXISTS product_codes (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   product_id BIGINT NOT NULL,
   code VARCHAR(64) UNIQUE NOT NULL,
+  name VARCHAR(200),
+  sku VARCHAR(60),
+  description TEXT,
+  category_id BIGINT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (product_id) REFERENCES products(id)
 );
 
@@ -360,14 +367,22 @@ CREATE TABLE IF NOT EXISTS quarantine (
 );
 
 -- ========= POS / SALES =========
+-- Note: The following columns were added to align with Drizzle schema:
+-- user_id, order_number, subtotal_cents, tax_cents, total_cents, updated_at
 CREATE TABLE IF NOT EXISTS orders (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
+  user_id BIGINT NULL,
   customer_id BIGINT NULL,
+  order_number VARCHAR(40),
   status ENUM('pending','completed','cancelled') DEFAULT 'pending',
   payment_status ENUM('unpaid','partial','paid') DEFAULT 'unpaid',
+  subtotal_cents BIGINT DEFAULT 0,
+  tax_cents BIGINT DEFAULT 0,
+  total_cents BIGINT DEFAULT 0,
   created_by BIGINT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
   FOREIGN KEY (customer_id) REFERENCES customers(id)
 );

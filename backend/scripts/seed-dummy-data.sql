@@ -81,10 +81,13 @@ VALUES
 INSERT INTO categories (parent_id, name)
 VALUES
   (NULL, 'Electrónica'),
-  (NULL, 'Joyas'),
-  ((SELECT id FROM categories WHERE name = 'Electrónica' LIMIT 1), 'Celulares');
+  (NULL, 'Joyas');
 
 SET @cat_electronics := (SELECT id FROM categories WHERE name = 'Electrónica' LIMIT 1);
+
+INSERT INTO categories (parent_id, name)
+VALUES
+  (@cat_electronics, 'Celulares');
 SET @cat_jewelry := (SELECT id FROM categories WHERE name = 'Joyas' LIMIT 1);
 SET @cat_cellphones := (SELECT id FROM categories WHERE name = 'Celulares' LIMIT 1);
 
@@ -265,7 +268,7 @@ VALUES
 
 INSERT INTO instapawn_intakes (branch_id, customer_first_name, customer_last_name, customer_phone, customer_email, government_id, item_category, item_description, collateral, requested_principal_cents, auto_appraised_value_cents, interest_model_id, notes, status, barcode_token, barcode_expires_at, notified_at)
 VALUES
-  (@branch_sdq, 'Julia', 'Santos', '+1-809-555-2001', 'julia.santos@example.com', '001-1234567-8', 'Electrónica', 'Laptop Dell XPS 13', JSON_OBJECT('condition', 'Muy buen estado'), 2500000, 3000000, @interest_model, 'Cliente nueva via web', 'pending', 'BARCODE1234567890ABCDEF1234567890', NOW() + INTERVAL 2 DAY, NOW());
+  (@branch_sdq, 'Julia', 'Santos', '+1-809-555-2001', 'julia.santos@example.com', '001-1234567-8', 'Electrónica', 'Laptop Dell XPS 13', JSON_OBJECT('condition', 'Muy buen estado'), 2500000, 3000000, @interest_model, 'Cliente nueva via web', 'pending', 'BARCODE1234567890ABCDEF123456', NOW() + INTERVAL 2 DAY, NOW());
 
 INSERT INTO notification_messages (intake_id, loan_id, customer_id, channel, recipient, message, status, sent_at)
 VALUES

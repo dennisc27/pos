@@ -310,8 +310,8 @@ export default function LoansNewPage() {
           const customers = (payload?.customers ?? []).map((customer) => {
             const fullName =
               customer.fullName ??
-              [customer.firstName, customer.lastName].filter(Boolean).join(" ") ||
-              `Cliente #${customer.id}`;
+              ([customer.firstName, customer.lastName].filter(Boolean).join(" ") ||
+                `Cliente #${customer.id}`);
 
             return {
               id: Number(customer.id),

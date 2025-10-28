@@ -207,8 +207,8 @@ export default function PosBuyPage() {
     setLoading(true);
     try {
       const payload = {
-        branchId: 1,
-        userId: 1,
+        branchId: 3, // Santo Domingo branch
+        userId: 7,   // Cajera Principal
         payoutMethod,
         seller: seller,
         items: items.map((item) => ({
