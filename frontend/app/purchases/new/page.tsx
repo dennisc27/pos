@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
 
 import { ClipboardList, PackagePlus, Printer, Search, Trash2 } from "lucide-react";
 
@@ -167,8 +167,7 @@ export default function PurchaseReceivePage() {
     return { totalQuantity, totalCostCents };
   }, [lines]);
 
-  const handleSearch = async (event: FormEvent) => {
-    event.preventDefault();
+  const runSearch = async () => {
     setStatus(null);
     setPreview(null);
 
@@ -179,6 +178,7 @@ export default function PurchaseReceivePage() {
     }
 
     setSearching(true);
+    setSearchResults([]);
     try {
       const params = new URLSearchParams();
       params.set("q", query);
@@ -202,6 +202,13 @@ export default function PurchaseReceivePage() {
       setSearchResults([]);
     } finally {
       setSearching(false);
+    }
+  };
+
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void runSearch();
     }
   };
 
@@ -523,7 +530,7 @@ export default function PurchaseReceivePage() {
         </section>
 
         <section className="space-y-3">
-          <form onSubmit={handleSearch} className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
+          <div className="flex flex-col gap-2 rounded-md border border-slate-200 p-4">
             <div className="flex items-center gap-3">
               <Search className="h-5 w-5 text-slate-500" />
               <input
@@ -531,14 +538,16 @@ export default function PurchaseReceivePage() {
                 className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
+                onKeyDown={handleSearchKeyDown}
                 placeholder="Buscar por código, nombre o SKU"
               />
               <button
-                type="submit"
+                type="button"
+                onClick={() => void runSearch()}
                 className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
                 disabled={searching}
               >
-                <ClipboardList className="h-4 w-4" /> Buscar
+                <ClipboardList className="h-4 w-4" /> {searching ? "Buscando" : "Buscar"}
               </button>
             </div>
             {searchResults.length > 0 && (
@@ -559,7 +568,7 @@ export default function PurchaseReceivePage() {
                 ))}
               </div>
             )}
-          </form>
+          </div>
 
           <div className="overflow-hidden rounded-md border border-slate-200">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
