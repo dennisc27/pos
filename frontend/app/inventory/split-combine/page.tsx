@@ -52,9 +52,62 @@ type ComponentSnapshot = {
 
 type ComponentInputLine = {
   id: number;
-  childVersionId: number | null;
+  versionId: number | null;
+  description: string;
   qtyPerParent: number;
+  unitCost: string;
 };
+
+function formatCostInputValue(costCents: number | null | undefined): string {
+  if (costCents == null) {
+    return "";
+  }
+
+  return (Number(costCents) / 100).toFixed(2);
+}
+
+function parseCurrencyInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed
+    .replace(/\s+/g, "")
+    .replace(/[^0-9,.-]/g, "")
+    .replace(/,(?=.*[,\.])/g, "");
+
+  const candidate = normalized.includes(",") && !normalized.includes(".")
+    ? normalized.replace(/,/g, ".")
+    : normalized;
+
+  const amount = Number(candidate);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return null;
+  }
+
+  return Math.round(amount * 100);
+}
+
+function buildVersionLabel(version: VersionNode): string {
+  const code = version.code ?? `ID ${version.productCodeVersionId}`;
+  const name = version.name ?? "Sin descripción";
+  return `${code} · ${name}`;
+}
+
+function resolveVersionByLabel(value: string, options: VersionNode[]): VersionNode | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  return options.find((option) => {
+    const label = buildVersionLabel(option).toLowerCase();
+    const code = option.code?.toLowerCase();
+    const name = option.name?.toLowerCase();
+    return label === normalized || code === normalized || name === normalized;
+  });
+}
 
 async function fetchComponentSnapshot(): Promise<ComponentSnapshot> {
   const response = await fetch(`${API_BASE_URL}/api/inventory/component-tree`, {
@@ -104,23 +157,6 @@ function formatBranchName(version: VersionNode | undefined): string {
   return "Sucursal no asignada";
 }
 
-function formatCost(costCents: number | null): string {
-  if (costCents == null) {
-    return "—";
-  }
-
-  return formatCurrencyFromCents(costCents);
-}
-
-function normalizeLines(lines: ComponentInputLine[]) {
-  return lines
-    .filter((line) => line.childVersionId != null && line.qtyPerParent > 0)
-    .map((line) => ({
-      childVersionId: line.childVersionId as number,
-      quantity: Math.round(line.qtyPerParent),
-    }));
-}
-
 export default function InventorySplitCombinePage() {
   const [snapshot, setSnapshot] = useState<ComponentSnapshot>({ components: [], versions: [] });
   const [loading, setLoading] = useState(true);
@@ -129,13 +165,19 @@ export default function InventorySplitCombinePage() {
 
   const [splitParentId, setSplitParentId] = useState<number | "">("");
   const [splitQuantity, setSplitQuantity] = useState<number>(1);
-  const [splitLines, setSplitLines] = useState<ComponentInputLine[]>([{ id: 0, childVersionId: null, qtyPerParent: 1 }]);
+  const [splitLines, setSplitLines] = useState<ComponentInputLine[]>([
+    { id: 0, versionId: null, description: "", qtyPerParent: 1, unitCost: "" },
+  ]);
   const [splitSubmitting, setSplitSubmitting] = useState(false);
   const [splitLineCounter, setSplitLineCounter] = useState(1);
 
   const [combineParentId, setCombineParentId] = useState<number | "">("");
+  const [combineParentSearch, setCombineParentSearch] = useState("");
+  const [combineParentCostInput, setCombineParentCostInput] = useState("");
   const [combineQuantity, setCombineQuantity] = useState<number>(1);
-  const [combineLines, setCombineLines] = useState<ComponentInputLine[]>([{ id: 0, childVersionId: null, qtyPerParent: 1 }]);
+  const [combineLines, setCombineLines] = useState<ComponentInputLine[]>([
+    { id: 0, versionId: null, description: "", qtyPerParent: 1, unitCost: "" },
+  ]);
   const [combineSubmitting, setCombineSubmitting] = useState(false);
   const [combineLineCounter, setCombineLineCounter] = useState(1);
 
@@ -179,38 +221,56 @@ export default function InventorySplitCombinePage() {
   }, [snapshot.versions]);
 
   const splitParent = typeof splitParentId === "number" ? versionsById.get(splitParentId) : undefined;
-  const splitChildCost = useMemo(() => {
-    return splitLines.reduce((sum, line) => {
-      if (line.childVersionId == null) {
-        return sum;
-      }
-      const child = versionsById.get(line.childVersionId);
-      if (!child?.costCents) {
-        return sum;
-      }
-      return sum + child.costCents * line.qtyPerParent;
-    }, 0);
-  }, [splitLines, versionsById]);
+  const splitParentCostPerUnit = splitParent?.costCents != null ? Number(splitParent.costCents) : null;
 
-  const splitCostDelta = splitParent?.costCents != null ? Math.abs(splitParent.costCents - splitChildCost) : null;
-  const splitCostBalanced = splitCostDelta == null || splitCostDelta <= Math.max(1, splitLines.length);
+  const splitChildCostPerUnit = useMemo(() => {
+    let total = 0;
+    for (const line of splitLines) {
+      const unitCostCents = parseCurrencyInput(line.unitCost);
+      if (unitCostCents == null) {
+        return null;
+      }
+      total += unitCostCents * line.qtyPerParent;
+    }
+    return total;
+  }, [splitLines]);
+
+  const splitParentTotalCost =
+    splitParentCostPerUnit != null ? splitParentCostPerUnit * Math.max(1, splitQuantity) : null;
+  const splitChildTotalCost =
+    splitChildCostPerUnit != null ? splitChildCostPerUnit * Math.max(1, splitQuantity) : null;
+
+  const splitCostDelta =
+    splitParentTotalCost != null && splitChildTotalCost != null
+      ? Math.abs(splitParentTotalCost - splitChildTotalCost)
+      : null;
+  const splitCostBalanced = splitCostDelta == null ? null : splitCostDelta <= Math.max(1, splitLines.length);
 
   const combineParent = typeof combineParentId === "number" ? versionsById.get(combineParentId) : undefined;
-  const combineChildCost = useMemo(() => {
-    return combineLines.reduce((sum, line) => {
-      if (line.childVersionId == null) {
-        return sum;
-      }
-      const child = versionsById.get(line.childVersionId);
-      if (!child?.costCents) {
-        return sum;
-      }
-      return sum + child.costCents * line.qtyPerParent;
-    }, 0);
-  }, [combineLines, versionsById]);
+  const combineParentCostPerUnit = parseCurrencyInput(combineParentCostInput);
 
-  const combineCostDelta = combineParent?.costCents != null ? Math.abs(combineParent.costCents - combineChildCost) : null;
-  const combineCostBalanced = combineCostDelta == null || combineCostDelta <= Math.max(1, combineLines.length);
+  const combineChildCostPerUnit = useMemo(() => {
+    let total = 0;
+    for (const line of combineLines) {
+      const unitCostCents = parseCurrencyInput(line.unitCost);
+      if (unitCostCents == null) {
+        return null;
+      }
+      total += unitCostCents * line.qtyPerParent;
+    }
+    return total;
+  }, [combineLines]);
+
+  const combineParentTotalCost =
+    combineParentCostPerUnit != null ? combineParentCostPerUnit * Math.max(1, combineQuantity) : null;
+  const combineChildTotalCost =
+    combineChildCostPerUnit != null ? combineChildCostPerUnit * Math.max(1, combineQuantity) : null;
+
+  const combineCostDelta =
+    combineParentTotalCost != null && combineChildTotalCost != null
+      ? Math.abs(combineParentTotalCost - combineChildTotalCost)
+      : null;
+  const combineCostBalanced = combineCostDelta == null ? null : combineCostDelta <= Math.max(1, combineLines.length);
 
   const splitChildOptions = useMemo(() => {
     if (!splitParent) {
@@ -226,8 +286,24 @@ export default function InventorySplitCombinePage() {
     return snapshot.versions.filter((version) => version.branchId === combineParent.branchId);
   }, [snapshot.versions, combineParent]);
 
+  useEffect(() => {
+    if (typeof combineParentId === "number") {
+      const parentVersion = versionsById.get(combineParentId);
+      if (parentVersion) {
+        setCombineParentSearch(buildVersionLabel(parentVersion));
+        setCombineParentCostInput(formatCostInputValue(parentVersion.costCents));
+      }
+    } else {
+      setCombineParentSearch("");
+      setCombineParentCostInput("");
+    }
+  }, [combineParentId, versionsById]);
+
   const handleAddSplitLine = () => {
-    setSplitLines((lines) => [...lines, { id: splitLineCounter, childVersionId: null, qtyPerParent: 1 }]);
+    setSplitLines((lines) => [
+      ...lines,
+      { id: splitLineCounter, versionId: null, description: "", qtyPerParent: 1, unitCost: "" },
+    ]);
     setSplitLineCounter((value) => value + 1);
   };
 
@@ -236,7 +312,10 @@ export default function InventorySplitCombinePage() {
   };
 
   const handleAddCombineLine = () => {
-    setCombineLines((lines) => [...lines, { id: combineLineCounter, childVersionId: null, qtyPerParent: 1 }]);
+    setCombineLines((lines) => [
+      ...lines,
+      { id: combineLineCounter, versionId: null, description: "", qtyPerParent: 1, unitCost: "" },
+    ]);
     setCombineLineCounter((value) => value + 1);
   };
 
@@ -252,21 +331,79 @@ export default function InventorySplitCombinePage() {
       return;
     }
 
-    const lines = normalizeLines(splitLines);
-    if (lines.length === 0) {
-      setFlash({ tone: "error", message: "Agrega al menos un componente" });
+    const parentCostCents = splitParentCostPerUnit;
+    if (parentCostCents == null) {
+      setFlash({ tone: "error", message: "El costo del código padre no está definido" });
       return;
     }
+
+    const preparedLines = splitLines.map((line) => {
+      const versionId = line.versionId;
+      if (versionId == null) {
+        return null;
+      }
+
+      const unitCostCents = parseCurrencyInput(line.unitCost);
+      if (unitCostCents == null) {
+        return null;
+      }
+
+      const qtyPerParent = Math.max(1, Math.round(line.qtyPerParent));
+      return { versionId, qtyPerParent, unitCostCents };
+    });
+
+    if (preparedLines.some((entry) => entry == null)) {
+      setFlash({ tone: "error", message: "Completa descripción y costo por componente" });
+      return;
+    }
+
+    const castedLines = preparedLines as {
+      versionId: number;
+      qtyPerParent: number;
+      unitCostCents: number;
+    }[];
+
+    const uniqueVersions = new Set<number>();
+    for (const line of castedLines) {
+      if (uniqueVersions.has(line.versionId)) {
+        setFlash({ tone: "error", message: "No repitas el mismo componente" });
+        return;
+      }
+      uniqueVersions.add(line.versionId);
+    }
+
+    const childCostPerUnit = castedLines.reduce(
+      (sum, line) => sum + line.unitCostCents * line.qtyPerParent,
+      0,
+    );
+
+    const totalParentCost = parentCostCents * splitQuantity;
+    const totalChildCost = childCostPerUnit * splitQuantity;
+    const allowedDelta = Math.max(1, castedLines.length);
+    if (Math.abs(totalParentCost - totalChildCost) > allowedDelta) {
+      setFlash({
+        tone: "error",
+        message: "Revisa los costos: no coinciden con el total del padre",
+      });
+      return;
+    }
+
+    const componentsPayload = castedLines.map((line) => ({
+      childVersionId: line.versionId,
+      qtyPerParent: line.qtyPerParent,
+    }));
 
     try {
       setSplitSubmitting(true);
       const result = await postJson<ComponentSnapshot & { message?: string }>("/api/inventory/split", {
         parentVersionId: splitParentId,
         quantity: splitQuantity,
-        components: lines,
+        components: componentsPayload,
       });
       setSnapshot({ components: result.components, versions: result.versions });
       setFlash({ tone: "success", message: result.message ?? "Split registrado" });
+      setSplitLines([{ id: 0, versionId: null, description: "", qtyPerParent: 1, unitCost: "" }]);
+      setSplitLineCounter(1);
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo registrar el split";
       setFlash({ tone: "error", message });
@@ -283,21 +420,79 @@ export default function InventorySplitCombinePage() {
       return;
     }
 
-    const lines = normalizeLines(combineLines);
-    if (lines.length === 0) {
-      setFlash({ tone: "error", message: "Agrega al menos un componente" });
+    const parentCostCents = combineParentCostPerUnit;
+    if (parentCostCents == null) {
+      setFlash({ tone: "error", message: "Ingresa el costo unitario del resultado" });
       return;
     }
+
+    const preparedLines = combineLines.map((line) => {
+      const versionId = line.versionId;
+      if (versionId == null) {
+        return null;
+      }
+
+      const unitCostCents = parseCurrencyInput(line.unitCost);
+      if (unitCostCents == null) {
+        return null;
+      }
+
+      const qtyPerParent = Math.max(1, Math.round(line.qtyPerParent));
+      return { versionId, qtyPerParent, unitCostCents };
+    });
+
+    if (preparedLines.some((entry) => entry == null)) {
+      setFlash({ tone: "error", message: "Completa descripción y costo por componente" });
+      return;
+    }
+
+    const castedLines = preparedLines as {
+      versionId: number;
+      qtyPerParent: number;
+      unitCostCents: number;
+    }[];
+
+    const uniqueVersions = new Set<number>();
+    for (const line of castedLines) {
+      if (uniqueVersions.has(line.versionId)) {
+        setFlash({ tone: "error", message: "No repitas el mismo componente" });
+        return;
+      }
+      uniqueVersions.add(line.versionId);
+    }
+
+    const childCostPerUnit = castedLines.reduce(
+      (sum, line) => sum + line.unitCostCents * line.qtyPerParent,
+      0,
+    );
+
+    const totalParentCost = parentCostCents * combineQuantity;
+    const totalChildCost = childCostPerUnit * combineQuantity;
+    const allowedDelta = Math.max(1, castedLines.length);
+    if (Math.abs(totalParentCost - totalChildCost) > allowedDelta) {
+      setFlash({
+        tone: "error",
+        message: "Revisa los costos: no coinciden con el kit resultante",
+      });
+      return;
+    }
+
+    const componentsPayload = castedLines.map((line) => ({
+      childVersionId: line.versionId,
+      qtyPerParent: line.qtyPerParent,
+    }));
 
     try {
       setCombineSubmitting(true);
       const result = await postJson<ComponentSnapshot & { message?: string }>("/api/inventory/combine", {
         parentVersionId: combineParentId,
         quantity: combineQuantity,
-        components: lines,
+        components: componentsPayload,
       });
       setSnapshot({ components: result.components, versions: result.versions });
       setFlash({ tone: "success", message: result.message ?? "Combinación registrada" });
+      setCombineLines([{ id: 0, versionId: null, description: "", qtyPerParent: 1, unitCost: "" }]);
+      setCombineLineCounter(1);
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo registrar la combinación";
       setFlash({ tone: "error", message });
@@ -405,26 +600,75 @@ export default function InventorySplitCombinePage() {
               </div>
               <div className="mt-2 space-y-3">
                 {splitLines.map((line) => (
-                  <div key={line.id} className="grid grid-cols-7 gap-3">
-                    <select
-                      value={line.childVersionId ?? ""}
-                      onChange={(event) => {
-                        const value = event.target.value ? Number(event.target.value) : null;
-                        setSplitLines((lines) =>
-                          lines.map((current) =>
-                            current.id === line.id ? { ...current, childVersionId: value } : current,
-                          ),
-                        );
-                      }}
-                      className="col-span-5 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                    >
-                      <option value="">Selecciona variante</option>
-                      {splitChildOptions.map((option) => (
-                        <option key={option.productCodeVersionId} value={option.productCodeVersionId}>
-                          {option.code} · {option.name} · Stock: {option.qtyOnHand}
-                        </option>
-                      ))}
-                    </select>
+                  <div
+                    key={line.id}
+                    className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                  >
+                    <div>
+                      <input
+                        value={line.description}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setSplitLines((lines) =>
+                            lines.map((current) => {
+                              if (current.id !== line.id) {
+                                return current;
+                              }
+                              const match = resolveVersionByLabel(value, splitChildOptions);
+                              if (match) {
+                                return {
+                                  ...current,
+                                  description: buildVersionLabel(match),
+                                  versionId: match.productCodeVersionId,
+                                  unitCost:
+                                    match.costCents != null
+                                      ? formatCostInputValue(match.costCents)
+                                      : current.unitCost,
+                                };
+                              }
+                              return {
+                                ...current,
+                                description: value,
+                                versionId: null,
+                              };
+                            }),
+                          );
+                        }}
+                        onBlur={(event) => {
+                          const value = event.target.value;
+                          setSplitLines((lines) =>
+                            lines.map((current) => {
+                              if (current.id !== line.id) {
+                                return current;
+                              }
+                              const match = resolveVersionByLabel(value, splitChildOptions);
+                              if (match) {
+                                return {
+                                  ...current,
+                                  description: buildVersionLabel(match),
+                                  versionId: match.productCodeVersionId,
+                                  unitCost:
+                                    match.costCents != null
+                                      ? formatCostInputValue(match.costCents)
+                                      : current.unitCost,
+                                };
+                              }
+                              return current;
+                            }),
+                          );
+                        }}
+                        list={`split-component-options-${line.id}`}
+                        placeholder="Código o descripción"
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      />
+                      <datalist id={`split-component-options-${line.id}`}>
+                        {splitChildOptions.map((option) => (
+                          <option key={option.productCodeVersionId} value={buildVersionLabel(option)}>
+                            {option.code} · Stock: {option.qtyOnHand}
+                          </option>
+                        ))}
+                      </datalist>
+                    </div>
                     <input
                       type="number"
                       min={1}
@@ -437,12 +681,28 @@ export default function InventorySplitCombinePage() {
                           ),
                         );
                       }}
-                      className="col-span-1 rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={line.unitCost}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setSplitLines((lines) =>
+                          lines.map((current) =>
+                            current.id === line.id ? { ...current, unitCost: value } : current,
+                          ),
+                        );
+                      }}
+                      placeholder="Costo"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     />
                     <button
                       type="button"
                       onClick={() => handleRemoveSplitLine(line.id)}
-                      className="col-span-1 inline-flex items-center justify-center rounded-md border border-slate-300 p-2 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      className="inline-flex items-center justify-center rounded-md border border-slate-300 p-2 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -456,7 +716,12 @@ export default function InventorySplitCombinePage() {
                 <GitBranch className="h-3.5 w-3.5" /> Balance de costo
               </p>
               <p className="mt-1">
-                Padre: <strong>{formatCost(splitParent?.costCents ?? null)}</strong> · Componentes: <strong>{formatCost(splitChildCost)}</strong>
+                Padre (unidad): <strong>{splitParentCostPerUnit != null ? formatCurrencyFromCents(splitParentCostPerUnit) : "—"}</strong> · Componentes (unidad): <strong>{splitChildCostPerUnit != null ? formatCurrencyFromCents(splitChildCostPerUnit) : "—"}</strong>
+              </p>
+              <p className="mt-1">
+                Total operación ({splitQuantity} uds): <strong>
+                  {splitChildTotalCost != null ? formatCurrencyFromCents(splitChildTotalCost) : "—"}
+                </strong>
               </p>
               {splitCostDelta != null && (
                 <p className={splitCostBalanced ? "mt-1 text-emerald-600 dark:text-emerald-300" : "mt-1 text-rose-600 dark:text-rose-300"}>
@@ -486,38 +751,65 @@ export default function InventorySplitCombinePage() {
 
           <div className="mt-4 space-y-4 text-sm">
             <label className="block">
-              <span className="font-medium text-slate-700 dark:text-slate-200">Código destino</span>
-              <select
-                value={combineParentId}
-                onChange={(event) => {
-                  const value = event.target.value ? Number(event.target.value) : "";
-                  setCombineParentId(Number.isFinite(value as number) ? value : "");
-                }}
-                className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              >
-                <option value="">Selecciona el código resultante</option>
-                {branchGroups.map((group) => (
-                  <optgroup key={group.label} label={group.label}>
-                    {group.versions.map((version) => (
-                      <option key={version.productCodeVersionId} value={version.productCodeVersionId}>
-                        {version.code} · {version.name} · Stock: {version.qtyOnHand}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="font-medium text-slate-700 dark:text-slate-200">Cantidad a producir</span>
+              <span className="font-medium text-slate-700 dark:text-slate-200">Artículo destino</span>
               <input
-                type="number"
-                min={1}
-                value={combineQuantity}
-                onChange={(event) => setCombineQuantity(Math.max(1, Number(event.target.value) || 1))}
+                value={combineParentSearch}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setCombineParentSearch(value);
+                  const match = resolveVersionByLabel(value, snapshot.versions);
+                  if (match) {
+                    setCombineParentId(match.productCodeVersionId);
+                    setCombineParentCostInput(formatCostInputValue(match.costCents));
+                  } else {
+                    setCombineParentId("");
+                  }
+                }}
+                onBlur={(event) => {
+                  const value = event.target.value;
+                  const match = resolveVersionByLabel(value, snapshot.versions);
+                  if (match) {
+                    setCombineParentId(match.productCodeVersionId);
+                    setCombineParentSearch(buildVersionLabel(match));
+                    setCombineParentCostInput(formatCostInputValue(match.costCents));
+                  }
+                }}
+                list="combine-parent-options"
+                placeholder="Código o descripción"
                 className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               />
+              <datalist id="combine-parent-options">
+                {snapshot.versions.map((version) => (
+                  <option key={version.productCodeVersionId} value={buildVersionLabel(version)}>
+                    {version.code} · Stock: {version.qtyOnHand}
+                  </option>
+                ))}
+              </datalist>
             </label>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="font-medium text-slate-700 dark:text-slate-200">Cantidad a producir</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={combineQuantity}
+                  onChange={(event) => setCombineQuantity(Math.max(1, Number(event.target.value) || 1))}
+                  className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </label>
+              <label className="block">
+                <span className="font-medium text-slate-700 dark:text-slate-200">Costo unitario (RD$)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={combineParentCostInput}
+                  onChange={(event) => setCombineParentCostInput(event.target.value)}
+                  className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </label>
+            </div>
 
             <div>
               <div className="flex items-center justify-between">
@@ -532,26 +824,75 @@ export default function InventorySplitCombinePage() {
               </div>
               <div className="mt-2 space-y-3">
                 {combineLines.map((line) => (
-                  <div key={line.id} className="grid grid-cols-7 gap-3">
-                    <select
-                      value={line.childVersionId ?? ""}
-                      onChange={(event) => {
-                        const value = event.target.value ? Number(event.target.value) : null;
-                        setCombineLines((lines) =>
-                          lines.map((current) =>
-                            current.id === line.id ? { ...current, childVersionId: value } : current,
-                          ),
-                        );
-                      }}
-                      className="col-span-5 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                    >
-                      <option value="">Selecciona variante</option>
-                      {combineChildOptions.map((option) => (
-                        <option key={option.productCodeVersionId} value={option.productCodeVersionId}>
-                          {option.code} · {option.name} · Stock: {option.qtyOnHand}
-                        </option>
-                      ))}
-                    </select>
+                  <div
+                    key={line.id}
+                    className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                  >
+                    <div>
+                      <input
+                        value={line.description}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setCombineLines((lines) =>
+                            lines.map((current) => {
+                              if (current.id !== line.id) {
+                                return current;
+                              }
+                              const match = resolveVersionByLabel(value, combineChildOptions);
+                              if (match) {
+                                return {
+                                  ...current,
+                                  description: buildVersionLabel(match),
+                                  versionId: match.productCodeVersionId,
+                                  unitCost:
+                                    match.costCents != null
+                                      ? formatCostInputValue(match.costCents)
+                                      : current.unitCost,
+                                };
+                              }
+                              return {
+                                ...current,
+                                description: value,
+                                versionId: null,
+                              };
+                            }),
+                          );
+                        }}
+                        onBlur={(event) => {
+                          const value = event.target.value;
+                          setCombineLines((lines) =>
+                            lines.map((current) => {
+                              if (current.id !== line.id) {
+                                return current;
+                              }
+                              const match = resolveVersionByLabel(value, combineChildOptions);
+                              if (match) {
+                                return {
+                                  ...current,
+                                  description: buildVersionLabel(match),
+                                  versionId: match.productCodeVersionId,
+                                  unitCost:
+                                    match.costCents != null
+                                      ? formatCostInputValue(match.costCents)
+                                      : current.unitCost,
+                                };
+                              }
+                              return current;
+                            }),
+                          );
+                        }}
+                        list={`combine-component-options-${line.id}`}
+                        placeholder="Código o descripción"
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      />
+                      <datalist id={`combine-component-options-${line.id}`}>
+                        {combineChildOptions.map((option) => (
+                          <option key={option.productCodeVersionId} value={buildVersionLabel(option)}>
+                            {option.code} · Stock: {option.qtyOnHand}
+                          </option>
+                        ))}
+                      </datalist>
+                    </div>
                     <input
                       type="number"
                       min={1}
@@ -564,12 +905,28 @@ export default function InventorySplitCombinePage() {
                           ),
                         );
                       }}
-                      className="col-span-1 rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={line.unitCost}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setCombineLines((lines) =>
+                          lines.map((current) =>
+                            current.id === line.id ? { ...current, unitCost: value } : current,
+                          ),
+                        );
+                      }}
+                      placeholder="Costo"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     />
                     <button
                       type="button"
                       onClick={() => handleRemoveCombineLine(line.id)}
-                      className="col-span-1 inline-flex items-center justify-center rounded-md border border-slate-300 p-2 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      className="inline-flex items-center justify-center rounded-md border border-slate-300 p-2 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -583,14 +940,15 @@ export default function InventorySplitCombinePage() {
                 <ArrowRightLeft className="h-3.5 w-3.5" /> Balance de costo
               </p>
               <p className="mt-1">
-                Resultado: <strong>{formatCost(combineParent?.costCents ?? null)}</strong> · Componentes: <strong>{formatCost(combineChildCost)}</strong>
+                Resultado (unidad): <strong>{combineParentCostPerUnit != null ? formatCurrencyFromCents(combineParentCostPerUnit) : "—"}</strong> · Componentes (unidad): <strong>{combineChildCostPerUnit != null ? formatCurrencyFromCents(combineChildCostPerUnit) : "—"}</strong>
+              </p>
+              <p className="mt-1">
+                Total operación ({combineQuantity} uds): <strong>
+                  {combineChildTotalCost != null ? formatCurrencyFromCents(combineChildTotalCost) : "—"}
+                </strong>
               </p>
               {combineCostDelta != null && (
-                <p
-                  className={
-                    combineCostBalanced ? "mt-1 text-emerald-600 dark:text-emerald-300" : "mt-1 text-rose-600 dark:text-rose-300"
-                  }
-                >
+                <p className={combineCostBalanced ? "mt-1 text-emerald-600 dark:text-emerald-300" : "mt-1 text-rose-600 dark:text-rose-300"}>
                   Diferencia: {formatCurrencyFromCents(combineCostDelta)} {combineCostBalanced ? "(dentro del margen de redondeo)" : "→ revisa los costos"}
                 </p>
               )}

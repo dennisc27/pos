@@ -190,25 +190,25 @@ o Block id
 - [x] add a scrollbar to the ajustes left bar.
 
 
-- [ ] On dashboard: the metrics that are amounts (layaway payments today, sales total today, purchases today) are too big and it only has two numbers of the 6 or more digit number in the container box. Fix this by removing the DOP for a $, making the font smaller for this number and making the container wider.
-- [ ] on dashboard: remove text "No change vs yesterday" inside the renewal today box and new activity vs yesterday inside the purchases today box.
-- [ ] on point of sale: invoice lookup: when searching a inv it says "Internal Server Error"
-- [ ] on point of sale-new sale: Implement the see all inventory
-- [ ] on point of sale-new sale: Implement the change customer on new order,
-- [ ] on point of sale-new sale: remove the section Finalize sale. and remove the scan or type code as is duplicated.
-- [ ] on point of sale-new sale: when the button pay RD$##.## is pressed, open the same dialog as when payment is pressed.
-- [ ] on point of sale-new sale: keep the receipt preview but remove the total due section, remove the cash receive section with the change due field. And finally, keep the cancel button but change the apply tender for print and kick drawer.
-- [ ] on point of sale-new sale: when the price is changed to a higher price subtotal, grand total and cash drawer don't change, also remove the implementation of discount and just let the user modify the price without the need of the supervisor pin.
-- [ ] on customers: Failed to load customer (500) when trying to view a customer
-- [ ] on past-due: error Loan id must be a positive integer
-- [ ] on inventory-catalog: en la tabla quita sucursal y cambialo por descripcion para poner la descripcion del producto. En producto solo deja el codigo del producto. en Acciones quita la letra solo deja el icono de editar.
-- [ ] modify the buy page to look for the client when the document id is introduced, all the other information for that client should load.
-- [ ] buy: on offer panel have an input at the top for the offer that the user will introduce, bellow the offer keep the target margin as a slider with 40% as default, and then on offer to seller: change it for the expected resale price.
-- [ ] modifica la pagina de layway para que sea igual que la de point of sale - new sale, lo unico que debe tener fecha limite, deposito inicial, que sea sin cuotas, que no tenga metodo de deposito sino un payment method como en pos-new sale. 
-- [ ] split and combine:    Que en dividir codigo, el componente resultante en vez de tener un dropdown sea un textfield donde se ponga la descripcion, la cantidad y costo del articulo resultante, y que al hacer click en registrar split se confirme el balance de cantidad*costo del padre = a la cantidades*costos de sus componentes.
-- [ ] split and combine:    Que en combinar en kit, el componente destino en vez de tener un dropdown sea un textfield donde se ponga la descripcion, la cantidad y costo del articulo resultante, y que al hacer click en registrar combinacion se confirme el balance de cantidad*costo del resultado = a la cantidades*costos de sus componentes.
-- [ ] purchasing - receive: el buscar no esta funcionando.
-- [ ] reports: include these reports below 
+- [x] On dashboard: the metrics that are amounts (layaway payments today, sales total today, purchases today) are too big and it only has two numbers of the 6 or more digit number in the container box. Fix this by removing the DOP for a $, making the font smaller for this number and making the container wider.
+- [x] on dashboard: remove text "No change vs yesterday" inside the renewal today box and new activity vs yesterday inside the purchases today box.
+- [x] on point of sale: invoice lookup: when searching a inv it says "Internal Server Error"
+- [x] on point of sale-new sale: Implement the see all inventory
+- [x] on point of sale-new sale: Implement the change customer on new order,
+- [x] on point of sale-new sale: remove the section Finalize sale. and remove the scan or type code as is duplicated.
+- [x] on point of sale-new sale: when the button pay RD$##.## is pressed, open the same dialog as when payment is pressed.
+- [x] on point of sale-new sale: keep the receipt preview but remove the total due section, remove the cash receive section with the change due field. And finally, keep the cancel button but change the apply tender for print and kick drawer.
+- [x] on point of sale-new sale: when the price is changed to a higher price subtotal, grand total and cash drawer don't change, also remove the implementation of discount and just let the user modify the price without the need of the supervisor pin.
+- [x] on customers: Failed to load customer (500) when trying to view a customer
+- [x] on past-due: error Loan id must be a positive integer
+- [x] on inventory-catalog: en la tabla quita sucursal y cambialo por descripcion para poner la descripcion del producto. En producto solo deja el codigo del producto. en Acciones quita la letra solo deja el icono de editar.
+- [x] modify the buy page to look for the client when the document id is introduced, all the other information for that client should load.
+- [x] buy: on offer panel have an input at the top for the offer that the user will introduce, bellow the offer keep the target margin as a slider with 40% as default, and then on offer to seller: change it for the expected resale price.
+- [x] modifica la pagina de layway para que sea igual que la de point of sale - new sale, lo unico que debe tener fecha limite, deposito inicial, que sea sin cuotas, que no tenga metodo de deposito sino un payment method como en pos-new sale.
+- [x] split and combine:    Que en dividir codigo, el componente resultante en vez de tener un dropdown sea un textfield donde se ponga la descripcion, la cantidad y costo del articulo resultante, y que al hacer click en registrar split se confirme el balance de cantidad*costo del padre = a la cantidades*costos de sus componentes.
+- [x] split and combine:    Que en combinar en kit, el componente destino en vez de tener un dropdown sea un textfield donde se ponga la descripcion, la cantidad y costo del articulo resultante, y que al hacer click en registrar combinacion se confirme el balance de cantidad*costo del resultado = a la cantidades*costos de sus componentes.
+- [x] purchasing - receive: el buscar no esta funcionando.
+- [x] reports: include these reports below
 (   
 * Sales
 * Purchase
