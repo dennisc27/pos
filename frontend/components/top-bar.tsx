@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bell, Calculator, MoonStar, Search, Store, SunMedium, X } from "lucide-react";
+import { Bell, Calculator, Loader2, MoonStar, Search, Store, SunMedium, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 type Theme = "light" | "dark";
 
@@ -36,6 +37,7 @@ function applyTheme(theme: Theme) {
 }
 
 export function TopBar() {
+  const { branch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [theme, setTheme] = useState<Theme>("light");
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   const [displayValue, setDisplayValue] = useState("0");
@@ -287,14 +289,24 @@ export function TopBar() {
   );
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-slate-200/70 bg-white/80 px-6 backdrop-blur dark:border-slate-800/80 dark:bg-slate-950/60">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200/70 bg-white px-3 py-1.5 text-sm text-slate-600 dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-200">
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/70 bg-white/80 px-4 py-3 backdrop-blur dark:border-slate-800/80 dark:bg-slate-950/60 sm:h-16 sm:flex-nowrap sm:gap-4 sm:px-6">
+      <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200/70 bg-white px-3 py-1.5 text-sm text-slate-600 dark:border-slate-800/80 dark:bg-slate-900 dark:text-slate-200">
           <Store className="h-4 w-4 text-sky-500 dark:text-sky-400" />
-          <span>Santo Domingo - Main</span>
+          {branchLoading ? (
+            <span className="inline-flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando sucursal…
+            </span>
+          ) : branch ? (
+            <span className="truncate">{branch.name}</span>
+          ) : branchError ? (
+            <span className="truncate text-rose-500">{branchError}</span>
+          ) : (
+            <span className="truncate">Sucursal no configurada</span>
+          )}
         </div>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
         <div className="hidden items-center gap-2 rounded-lg border border-slate-200/70 bg-white px-3 py-1.5 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 lg:flex">
           <Search className="h-4 w-4" />
           <input

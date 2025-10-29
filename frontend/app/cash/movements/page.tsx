@@ -8,15 +8,15 @@ import {
   ArrowUpFromLine,
   Building2,
   History,
+  Loader2,
   PiggyBank,
   ShieldCheck,
 } from "lucide-react";
 
 import { formatCurrency } from "@/components/cash/utils";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
-const rawDefaultBranchId = Number(process.env.NEXT_PUBLIC_DEFAULT_BRANCH_ID ?? 1);
-const DEFAULT_BRANCH_ID = Number.isInteger(rawDefaultBranchId) && rawDefaultBranchId > 0 ? rawDefaultBranchId : null;
 
 const dateTimeFormatter = new Intl.DateTimeFormat("es-DO", {
   dateStyle: "medium",
@@ -175,10 +175,11 @@ const formatDate = (value: string | null | undefined) => {
 };
 
 export default function CashMovementsPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
+
   const [status, setStatus] = useState<StatusMessage>(null);
   const [isLoading, setIsLoading] = useState({ load: false, submit: false });
   const [shiftLookup, setShiftLookup] = useState({
-    branchId: DEFAULT_BRANCH_ID ? String(DEFAULT_BRANCH_ID) : "",
     shiftId: "",
   });
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
@@ -215,7 +216,7 @@ export default function CashMovementsPage() {
   const resetState = useCallback(() => {
     setActiveShift(null);
     setMovements([]);
-    setShiftLookup((state) => ({ ...state, shiftId: "" }));
+    setShiftLookup({ shiftId: "" });
   }, []);
 
   const loadShiftById = async (shiftId: number, successMessage?: string) => {
@@ -224,12 +225,17 @@ export default function CashMovementsPage() {
 
     try {
       const data = await getJson<ShiftMovementsResponse>(`/api/cash-movements?shiftId=${shiftId}`);
+      if (activeBranch && data.shift.branchId !== activeBranch.id) {
+        setStatus({
+          tone: "error",
+          message: "El turno pertenece a otra sucursal. Ajusta la sucursal activa para revisar este turno.",
+        });
+        resetState();
+        return;
+      }
       setActiveShift(data.shift);
       setMovements(data.movements);
-      setShiftLookup((state) => ({
-        branchId: data.shift.branchId ? String(data.shift.branchId) : state.branchId,
-        shiftId: String(data.shift.id),
-      }));
+      setShiftLookup({ shiftId: String(data.shift.id) });
       if (successMessage) {
         setStatus({ tone: "success", message: successMessage });
       }
@@ -255,9 +261,14 @@ export default function CashMovementsPage() {
 
       try {
         const data = await getJson<ShiftMovementsResponse>(`/api/shifts/active?branchId=${branchId}`);
+        if (activeBranch && data.shift.branchId !== activeBranch.id) {
+          throw new Error(
+            "El turno activo pertenece a otra sucursal. Actualiza la sucursal activa en ajustes para continuar."
+          );
+        }
         setActiveShift(data.shift);
         setMovements(data.movements);
-        setShiftLookup({ branchId: String(branchId), shiftId: String(data.shift.id) });
+        setShiftLookup({ shiftId: String(data.shift.id) });
         if (!quiet) {
           setStatus({
             tone: "success",
@@ -274,7 +285,7 @@ export default function CashMovementsPage() {
         setIsLoading((state) => ({ ...state, load: false }));
       }
     },
-    [resetState],
+    [activeBranch, resetState],
   );
 
   const handleLoadActiveShift = async (event: FormEvent<HTMLFormElement>) => {
@@ -283,13 +294,15 @@ export default function CashMovementsPage() {
       return;
     }
 
-    const branchId = Number(shiftLookup.branchId);
-    if (!Number.isInteger(branchId) || branchId <= 0) {
-      setStatus({ tone: "error", message: "Ingresa un ID de sucursal válido." });
+    if (!activeBranch) {
+      setStatus({
+        tone: "error",
+        message: branchError ?? "Configura una sucursal activa en ajustes para cargar el turno.",
+      });
       return;
     }
 
-    await loadActiveShiftForBranch(branchId);
+    await loadActiveShiftForBranch(activeBranch.id);
   };
 
   const handleLoadShiftById = async (event: FormEvent<HTMLFormElement>) => {
@@ -308,10 +321,17 @@ export default function CashMovementsPage() {
   };
 
   useEffect(() => {
-    if (DEFAULT_BRANCH_ID) {
-      void loadActiveShiftForBranch(DEFAULT_BRANCH_ID, { quiet: true });
+    if (branchLoading) {
+      return;
     }
-  }, [loadActiveShiftForBranch]);
+
+    if (!activeBranch) {
+      resetState();
+      return;
+    }
+
+    void loadActiveShiftForBranch(activeBranch.id, { quiet: true });
+  }, [activeBranch, branchLoading, loadActiveShiftForBranch, resetState]);
 
   const handleMovementSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -590,29 +610,38 @@ export default function CashMovementsPage() {
             <div className="space-y-6 px-6 py-5 text-sm">
               <form onSubmit={handleLoadActiveShift} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <label className="flex-1 space-y-1">
+                  <div className="flex-1 space-y-1">
                     <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      ID de sucursal
+                      Sucursal activa
                     </span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={shiftLookup.branchId}
-                      onChange={(event) => setShiftLookup((state) => ({ ...state, branchId: event.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                      placeholder="Ej. 1"
-                    />
-                  </label>
+                    {branchLoading ? (
+                      <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Sincronizando configuración…
+                      </span>
+                    ) : branchError ? (
+                      <span className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+                        {branchError}
+                      </span>
+                    ) : activeBranch ? (
+                      <span className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/50 dark:bg-indigo-500/10 dark:text-indigo-200">
+                        {activeBranch.name}
+                      </span>
+                    ) : (
+                      <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-600">
+                        Configura una sucursal activa en ajustes para operar caja.
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="submit"
-                    disabled={isLoading.load}
+                    disabled={isLoading.load || branchLoading || !activeBranch}
                     className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
                   >
                     {isLoading.load ? "Buscando..." : "Cargar turno activo"}
                   </button>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Busca automáticamente el turno abierto para la sucursal seleccionada y trae su historial.
+                  Busca automáticamente el turno abierto de la sucursal configurada en ajustes y sincroniza sus movimientos.
                 </p>
               </form>
 

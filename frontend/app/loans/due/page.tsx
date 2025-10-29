@@ -387,7 +387,7 @@ export default function LoansDuePage() {
     void fetchPastDue();
   }, [fetchPastDue]);
 
-  const loans = data?.loans ?? [];
+  const loans = useMemo(() => data?.loans ?? [], [data]);
 
   useEffect(() => {
     setSelectedIds((prev) => prev.filter((id) => loans.some((loan) => loan.id === id)));

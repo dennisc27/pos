@@ -120,6 +120,9 @@ export async function fetchSalesAndPurchases() {
     } else {
       label = "No change vs yesterday";
     }
+  } else if (todayTotal === 0) {
+    direction = "down";
+    label = "No sales yet today";
   } else {
     const percentChange = (difference / yesterdayTotal) * 100;
     if (percentChange > 0) {
