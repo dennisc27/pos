@@ -13930,9 +13930,60 @@ function sanitizeSettingValue(key, value) {
       return sanitizeDrawerConfig(value);
     case 'pos.receipt':
       return sanitizeReceiptConfig(value);
+    case 'system.activeBranchId':
+      return parsePositiveInteger(value, 'system.activeBranchId');
     default:
       return value;
   }
+}
+
+async function loadActiveBranch(executor = db) {
+  const [entry] = await loadSettingsEntries(
+    { scope: 'global', branchId: null, userId: null },
+    ['system.activeBranchId'],
+    executor
+  );
+
+  let desiredBranchId = null;
+
+  if (entry?.value != null) {
+    try {
+      desiredBranchId = parsePositiveInteger(entry.value, 'system.activeBranchId');
+    } catch (error) {
+      desiredBranchId = null;
+    }
+  }
+
+  const baseQuery = executor
+    .select({
+      id: branches.id,
+      code: branches.code,
+      name: branches.name,
+    })
+    .from(branches);
+
+  let branchRow = null;
+
+  if (desiredBranchId != null) {
+    const [match] = await baseQuery.where(eq(branches.id, desiredBranchId)).limit(1);
+    if (match) {
+      branchRow = match;
+    }
+  }
+
+  if (!branchRow) {
+    const [fallback] = await baseQuery.orderBy(asc(branches.name)).limit(1);
+    if (!fallback) {
+      throw new HttpError(404, 'No branches configured');
+    }
+    branchRow = fallback;
+  }
+
+  return {
+    id: Number(branchRow.id),
+    code: branchRow.code,
+    name: branchRow.name,
+  };
 }
 
 function maskSettingEntry(row) {
@@ -14537,6 +14588,19 @@ app.get('/api/settings', async (req, res, next) => {
       entries,
       fallback,
     });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/settings/active-branch', async (req, res, next) => {
+  try {
+    const branch = await loadActiveBranch();
+    res.json({ branch });
   } catch (error) {
     if (error instanceof HttpError) {
       return res.status(error.status).json({ error: error.message });

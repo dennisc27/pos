@@ -23,6 +23,7 @@ import { OrderPanel } from "@/components/pos/order-panel";
 import { ReceiptPreview } from "@/components/pos/receipt-preview";
 import { formatCurrency } from "@/components/pos/utils";
 import type { CartLine, SaleSummary, TenderBreakdown, Product, ProductCategory } from "@/components/pos/types";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 const TENDER_METHODS = ["cash", "card", "transfer", "store_credit", "gift"] as const;
 type TenderMethod = (typeof TENDER_METHODS)[number];
@@ -172,6 +173,7 @@ function parseAmount(input: string): number | null {
 }
 
 export default function PosPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [categories, setCategories] = useState<ProductCategory[]>([DEFAULT_CATEGORY]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
@@ -562,6 +564,14 @@ export default function PosPage() {
       return;
     }
 
+    if (!activeBranch) {
+      setFinalizeState("error");
+      setFinalizeMessage(
+        branchError ?? "Configura una sucursal activa en ajustes para poder registrar ventas."
+      );
+      return;
+    }
+
     try {
       setFinalizeState("processing");
       setFinalizeMessage("Creating order...");
@@ -572,7 +582,7 @@ export default function PosPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          branchId: 3, // Santo Domingo branch
+          branchId: activeBranch.id,
           userId: 7,   // Cajera Principal
           customerId: selectedCustomerId,
           items: cartLines.map((line) => ({
@@ -679,7 +689,15 @@ export default function PosPage() {
       setFinalizeState("error");
       setFinalizeMessage("Unable to finalize sale. Review server logs and try again.");
     }
-  }, [cartLines, resolveProductVersionId, saleSummary.cashDue, selectedCustomerId, tenderBreakdown]);
+  }, [
+    activeBranch,
+    branchError,
+    cartLines,
+    resolveProductVersionId,
+    saleSummary.cashDue,
+    selectedCustomerId,
+    tenderBreakdown,
+  ]);
 
   const handleCloseSuccessDialog = useCallback(() => {
     setSuccessDialogOpen(false);
@@ -887,6 +905,19 @@ export default function PosPage() {
   return (
     <>
       <div className="flex flex-col gap-6 pb-24">
+        {branchLoading ? (
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+            Sincronizando configuración de sucursal...
+          </div>
+        ) : !activeBranch ? (
+          <div className="rounded-xl border border-amber-400/60 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+            Configura una sucursal predeterminada en Ajustes → Sistema para habilitar la venta.
+          </div>
+        ) : branchError ? (
+          <div className="rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-200">
+            {branchError}
+          </div>
+        ) : null}
         <div className="grid gap-6 xl:grid-cols-[1.75fr_1fr]">
           <div className="space-y-6">
             {productError ? (
@@ -932,7 +963,7 @@ export default function PosPage() {
             <button
               type="button"
               onClick={handleOpenPaymentDialog}
-              disabled={cartLines.length === 0}
+              disabled={cartLines.length === 0 || branchLoading || !activeBranch}
               className="flex w-full items-center justify-center gap-2 rounded-3xl border border-sky-500/70 bg-sky-500/15 px-5 py-3 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
             >
               <CreditCard className="h-4 w-4" />

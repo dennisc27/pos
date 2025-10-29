@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -93,6 +95,7 @@ const paymentMethods = [
 ];
 
 export default function LayawayNewPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [lineDraft, setLineDraft] = useState({
     productCodeVersionId: "",
@@ -111,6 +114,16 @@ export default function LayawayNewPage() {
   const [status, setStatus] = useState<StatusMessage>(null);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<LayawayDetail | null>(null);
+
+  useEffect(() => {
+    setFormDraft((draft) => {
+      const nextBranchId = activeBranch ? String(activeBranch.id) : "";
+      if (draft.branchId === nextBranchId) {
+        return draft;
+      }
+      return { ...draft, branchId: nextBranchId, customerId: "" };
+    });
+  }, [activeBranch]);
 
   const totals = useMemo(() => {
     const subtotalCents = cartItems.reduce((sum, item) => sum + item.qty * item.unitPriceCents, 0);
@@ -370,16 +383,26 @@ export default function LayawayNewPage() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Sucursal (ID)
-                <input
-                  required
-                  value={formDraft.branchId}
-                  onChange={(event) => setFormDraft((draft) => ({ ...draft, branchId: event.target.value }))}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  placeholder="1"
-                />
-              </label>
+              <div className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <span>Sucursal</span>
+                {branchLoading ? (
+                  <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…
+                  </span>
+                ) : branchError ? (
+                  <span className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-600">
+                    {branchError}
+                  </span>
+                ) : activeBranch ? (
+                  <span className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                    {activeBranch.name}
+                  </span>
+                ) : (
+                  <span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+                    Configura una sucursal activa en ajustes
+                  </span>
+                )}
+              </div>
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Operador (ID)
                 <input

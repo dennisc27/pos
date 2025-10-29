@@ -2,7 +2,8 @@
 
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
 
-import { ClipboardList, PackagePlus, Printer, Search, Trash2 } from "lucide-react";
+import { ClipboardList, Loader2, PackagePlus, Printer, Search, Trash2 } from "lucide-react";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 import { formatCurrency } from "@/components/pos/utils";
 
@@ -33,11 +34,6 @@ function makeLineKey() {
 
   return `line-${Math.random().toString(36).slice(2, 10)}`;
 }
-
-type BranchOption = {
-  id: number;
-  name: string;
-};
 
 type LayoutOption = {
   id: string;
@@ -100,7 +96,7 @@ type PurchaseResponse = {
 };
 
 export default function PurchaseReceivePage() {
-  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [availableLayouts, setAvailableLayouts] = useState<LayoutOption[]>([]);
   const [branchId, setBranchId] = useState<string>("");
   const [supplierName, setSupplierName] = useState("");
@@ -122,16 +118,19 @@ export default function PurchaseReceivePage() {
   const [preview, setPreview] = useState<PurchaseResponse | null>(null);
 
   useEffect(() => {
+    setBranchId((prev) => {
+      const next = activeBranch ? String(activeBranch.id) : "";
+      return prev === next ? prev : next;
+    });
+  }, [activeBranch]);
+
+  useEffect(() => {
     async function loadMetadata() {
       try {
         const response = await fetch(`${API_BASE_URL}/api/codes?page=1&pageSize=1`);
         const body = (await response.json().catch(() => ({}))) as {
-          metadata?: { branches?: BranchOption[]; layouts?: LayoutOption[] };
+          metadata?: { layouts?: LayoutOption[] };
         };
-
-        if (Array.isArray(body.metadata?.branches)) {
-          setBranches(body.metadata!.branches!);
-        }
 
         if (Array.isArray(body.metadata?.layouts) && body.metadata!.layouts!.length > 0) {
           setAvailableLayouts(body.metadata!.layouts!);
@@ -216,9 +215,11 @@ export default function PurchaseReceivePage() {
     setStatus(null);
     setPreview(null);
 
-    if (!branchId) {
+    const resolvedBranchId = activeBranch ? activeBranch.id : branchId ? Number(branchId) : null;
+
+    if (resolvedBranchId == null) {
       setBranchId(String(code.branchId));
-    } else if (Number(branchId) !== Number(code.branchId)) {
+    } else if (Number(resolvedBranchId) !== Number(code.branchId)) {
       setStatus({
         tone: "error",
         message: "Todas las líneas deben pertenecer a la misma sucursal.",
@@ -283,8 +284,11 @@ export default function PurchaseReceivePage() {
     setStatus(null);
     setPreview(null);
 
-    if (!branchId) {
-      setStatus({ tone: "error", message: "Selecciona la sucursal que recibe la mercancía." });
+    if (!activeBranch) {
+      setStatus({
+        tone: "error",
+        message: branchError ?? "Configura una sucursal activa en ajustes antes de recibir compras.",
+      });
       return;
     }
 
@@ -351,7 +355,7 @@ export default function PurchaseReceivePage() {
     }
 
     const payload = {
-      branchId: Number(branchId),
+      branchId: activeBranch.id,
       supplierName: supplierName.trim() || null,
       supplierInvoice: supplierInvoice.trim() || null,
       reference: referenceNo.trim() || null,
@@ -405,6 +409,20 @@ export default function PurchaseReceivePage() {
         </p>
       </header>
 
+      {branchLoading ? (
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          Sincronizando configuración de sucursal…
+        </div>
+      ) : !activeBranch ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-200">
+          Configura una sucursal predeterminada en Ajustes → Sistema para recibir mercancía.
+        </div>
+      ) : branchError ? (
+        <div className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
+          {branchError}
+        </div>
+      ) : null}
+
       {status && (
         <div
           className={`rounded-md border px-4 py-3 text-sm ${
@@ -419,21 +437,26 @@ export default function PurchaseReceivePage() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <section className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Sucursal
-            <select
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
-              value={branchId}
-              onChange={(event) => setBranchId(event.target.value)}
-            >
-              <option value="">Selecciona sucursal</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-col gap-1 text-sm text-slate-700">
+            <span>Sucursal</span>
+            {branchLoading ? (
+              <span className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Sincronizando…
+              </span>
+            ) : branchError ? (
+              <span className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+                {branchError}
+              </span>
+            ) : activeBranch ? (
+              <span className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                {activeBranch.name}
+              </span>
+            ) : (
+              <span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                Configura una sucursal activa en ajustes
+              </span>
+            )}
+          </div>
 
           <label className="flex flex-col gap-1 text-sm text-slate-700">
             Fecha de recepción
@@ -653,7 +676,7 @@ export default function PurchaseReceivePage() {
           <button
             type="submit"
             className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
-            disabled={submitting}
+            disabled={submitting || branchLoading || !activeBranch}
           >
             <PackagePlus className="h-4 w-4" /> Registrar compra
           </button>

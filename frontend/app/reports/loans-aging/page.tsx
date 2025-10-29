@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { ArrowLeft, AlertTriangle, Check, Download, Loader2, MessageCircle, RefreshCw, Send } from "lucide-react";
 
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 import { formatCurrencyFromCents } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -108,13 +109,13 @@ const DEFAULT_BUCKET_LABELS: Record<string, string> = {
 };
 
 export default function ReportsLoansAgingPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [report, setReport] = useState<LoansAgingResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [branchIdFilter, setBranchIdFilter] = useState<string>("");
   const [bucketFilter, setBucketFilter] = useState<string>("all");
   const [minDaysFilter, setMinDaysFilter] = useState<string>("");
   const [maxDaysFilter, setMaxDaysFilter] = useState<string>("");
@@ -123,7 +124,15 @@ export default function ReportsLoansAgingPage() {
   const [channel, setChannel] = useState<"sms" | "whatsapp">("whatsapp");
   const [message, setMessage] = useState<string>("Hola {{customerName}}, tu préstamo {{ticketNumber}} tiene saldo pendiente de {{totalDue}}. Acércate a la sucursal para evitar cargos adicionales.");
 
-  const bucketOrder = report?.bucketOrder ?? ["current", "1-7", "8-14", "15-29", "30-59", "60+"];
+  const bucketOrder = useMemo(
+    () => (report?.bucketOrder && report.bucketOrder.length > 0
+      ? report.bucketOrder
+      : ["current", "1-7", "8-14", "15-29", "30-59", "60+"]
+    ),
+    [report?.bucketOrder],
+  );
+
+  const branchUnavailable = branchLoading || !activeBranch || Boolean(branchError);
 
   const loadReport = useCallback(async () => {
     setLoading(true);
@@ -132,9 +141,12 @@ export default function ReportsLoansAgingPage() {
 
     try {
       const params = new URLSearchParams();
-      if (branchIdFilter.trim()) {
-        params.set("branchId", branchIdFilter.trim());
+      if (!activeBranch) {
+        throw new Error(
+          branchError ?? "Configura una sucursal activa en ajustes antes de consultar aging."
+        );
       }
+      params.set("branchId", String(activeBranch.id));
       if (bucketFilter !== "all") {
         params.set("bucket", bucketFilter);
       }
@@ -155,20 +167,21 @@ export default function ReportsLoansAgingPage() {
       const payload: LoansAgingResponse = await response.json();
       setReport(payload);
       setSelectedLoanIds(new Set());
-      if (payload.filters.branchId != null && !branchIdFilter) {
-        setBranchIdFilter(String(payload.filters.branchId));
-      }
     } catch (err) {
       setReport(null);
       setError(err instanceof Error ? err.message : "No se pudo cargar el reporte");
     } finally {
       setLoading(false);
     }
-  }, [branchIdFilter, bucketFilter, maxDaysFilter, minDaysFilter]);
+  }, [activeBranch, branchError, bucketFilter, maxDaysFilter, minDaysFilter]);
 
   useEffect(() => {
+    if (branchUnavailable) {
+      return;
+    }
+
     loadReport();
-  }, [loadReport]);
+  }, [branchUnavailable, loadReport]);
 
   const toggleLoanSelection = useCallback(
     (loanId: number) => {
@@ -199,6 +212,11 @@ export default function ReportsLoansAgingPage() {
   }, [report]);
 
   const handleSendOutreach = useCallback(async () => {
+    if (branchUnavailable) {
+      setError(branchError ?? "Configura una sucursal activa antes de enviar mensajes.");
+      return;
+    }
+
     if (selectedLoanIds.size === 0) {
       setError("Selecciona al menos un préstamo para enviar un mensaje");
       return;
@@ -238,7 +256,7 @@ export default function ReportsLoansAgingPage() {
     } finally {
       setSending(false);
     }
-  }, [channel, message, selectedLoanIds]);
+  }, [branchError, branchUnavailable, channel, message, selectedLoanIds]);
 
   const handleExportCsv = useCallback(() => {
     if (!report) {
@@ -334,18 +352,36 @@ export default function ReportsLoansAgingPage() {
       </header>
 
       <section className="rounded-xl border border-slate-200 bg-white/80 p-6 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/60">
-        <form className="grid gap-4 md:grid-cols-[repeat(4,minmax(0,1fr))_auto] md:items-end" onSubmit={(event) => { event.preventDefault(); loadReport(); }}>
+        <form
+          className="grid gap-4 md:grid-cols-[repeat(4,minmax(0,1fr))_auto] md:items-end"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (branchUnavailable) {
+              setError(branchError ?? "Configura una sucursal activa en ajustes para consultar aging.");
+              return;
+            }
+            loadReport();
+          }}
+        >
           <div className="space-y-2">
-            <label htmlFor="branch" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Sucursal
-            </label>
-            <input
-              id="branch"
-              value={branchIdFilter}
-              onChange={(event) => setBranchIdFilter(event.target.value)}
-              placeholder="Todas"
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
-            />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Sucursal activa</span>
+            {branchLoading ? (
+              <span className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                <Loader2 className="h-4 w-4 animate-spin" /> Sincronizando…
+              </span>
+            ) : branchError ? (
+              <span className="inline-flex items-center gap-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500 dark:bg-rose-500/10 dark:text-rose-200">
+                <AlertTriangle className="h-4 w-4" /> {branchError}
+              </span>
+            ) : activeBranch ? (
+              <span className="inline-flex items-center gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500 dark:bg-indigo-500/10 dark:text-indigo-200">
+                {activeBranch.name}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500 dark:bg-amber-500/10 dark:text-amber-200">
+                Configura una sucursal activa en ajustes.
+              </span>
+            )}
           </div>
           <div className="space-y-2">
             <label htmlFor="bucket" className="text-sm font-medium text-slate-700 dark:text-slate-300">
@@ -392,20 +428,25 @@ export default function ReportsLoansAgingPage() {
           <div className="flex items-end gap-3">
             <button
               type="submit"
-              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              disabled={branchUnavailable}
+              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:bg-indigo-400"
             >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />} Aplicar
             </button>
             <button
               type="button"
               onClick={() => {
-                setBranchIdFilter("");
                 setBucketFilter("all");
                 setMinDaysFilter("");
                 setMaxDaysFilter("");
+                if (branchUnavailable) {
+                  setError(branchError ?? "Configura una sucursal activa en ajustes para consultar aging.");
+                  return;
+                }
                 loadReport();
               }}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+              disabled={branchUnavailable}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
             >
               Limpiar
             </button>
@@ -623,7 +664,7 @@ export default function ReportsLoansAgingPage() {
               <button
                 type="button"
                 onClick={handleSendOutreach}
-                disabled={sending || selectedLoanIds.size === 0}
+                disabled={sending || selectedLoanIds.size === 0 || branchUnavailable}
                 className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />} Enviar mensajes

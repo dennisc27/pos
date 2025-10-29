@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Bell, Copy, Loader2, QrCode, RefreshCw, Send, Users } from "lucide-react";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -163,10 +164,11 @@ function makeCollateralDraft(): CollateralDraft {
 }
 
 export default function LoansInstaPawnPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [interestModels, setInterestModels] = useState<InterestModel[]>([]);
   const [collateralItems, setCollateralItems] = useState<CollateralDraft[]>([makeCollateralDraft()]);
   const [form, setForm] = useState({
-    branchId: "1",
+    branchId: "",
     firstName: "",
     lastName: "",
     phone: "",
@@ -188,6 +190,13 @@ export default function LoansInstaPawnPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
   const [offerTouched, setOfferTouched] = useState(false);
+
+  useEffect(() => {
+    setForm((previous) => ({
+      ...previous,
+      branchId: activeBranch ? String(activeBranch.id) : "",
+    }));
+  }, [activeBranch]);
 
   useEffect(() => {
     const loadModels = async () => {
@@ -283,8 +292,12 @@ export default function LoansInstaPawnPage() {
     setIsSubmitting(true);
 
     try {
+      if (!activeBranch) {
+        throw new Error(branchError ?? "Configura una sucursal activa en ajustes antes de registrar solicitudes.");
+      }
+
       const payload = {
-        branchId: Number(form.branchId) || null,
+        branchId: activeBranch.id,
         customerFirstName: form.firstName.trim(),
         customerLastName: form.lastName.trim() || null,
         customerPhone: form.phone.trim(),
@@ -304,10 +317,6 @@ export default function LoansInstaPawnPage() {
             estimatedValueCents: parseCurrencyToCents(item.estimatedValue),
           })),
       };
-
-      if (!payload.branchId) {
-        throw new Error("Debes indicar la sucursal que gestionará el préstamo.");
-      }
 
       if (!payload.customerFirstName) {
         throw new Error("El nombre del cliente es obligatorio.");
@@ -387,6 +396,19 @@ export default function LoansInstaPawnPage() {
             Actualizar lista
           </button>
         </div>
+        {branchLoading ? (
+          <div className="mt-4 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+            Sincronizando sucursal activa…
+          </div>
+        ) : !activeBranch ? (
+          <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-200">
+            Configura una sucursal predeterminada en Ajustes → Sistema antes de registrar InstaPawn.
+          </div>
+        ) : branchError ? (
+          <div className="mt-4 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
+            {branchError}
+          </div>
+        ) : null}
         {flashMessage ? (
           <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
             {flashMessage}
@@ -408,16 +430,24 @@ export default function LoansInstaPawnPage() {
 
           <form className="mt-6 space-y-6" onSubmit={handleSubmit}>
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-2 text-sm">
+              <div className="flex flex-col gap-2 text-sm">
                 <span className="font-medium text-slate-700 dark:text-slate-300">Sucursal</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={form.branchId}
-                  onChange={(event) => setForm((previous) => ({ ...previous, branchId: event.target.value }))}
-                  className="rounded-md border border-slate-300 px-3 py-2 text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                />
-              </label>
+                {branchLoading ? (
+                  <span className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Sincronizando…
+                  </span>
+                ) : branchError ? (
+                  <span className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{branchError}</span>
+                ) : activeBranch ? (
+                  <span className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                    {activeBranch.name}
+                  </span>
+                ) : (
+                  <span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                    Configura una sucursal activa en ajustes
+                  </span>
+                )}
+              </div>
 
               <label className="flex flex-col gap-2 text-sm">
                 <span className="font-medium text-slate-700 dark:text-slate-300">Modelo de interés</span>
