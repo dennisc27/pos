@@ -223,3 +223,6 @@ o Block id
 * Loan Book
 * Expire loans
 * Voids/Refund with ratio by staff)
+- [ ] On dahboard: remove -100% vs yesterday
+- [ ] Add a all reports entry on the sidebar
+- [ ] Implement the pages on the reports/all

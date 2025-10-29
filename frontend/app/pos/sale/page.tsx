@@ -119,28 +119,42 @@ type CustomerSearchResult = {
 };
 
 function buildSummary(items: CartLine[], tenders: TenderBreakdown[]): SaleSummary {
-  const subtotal = items.reduce(
-    (sum, item) => sum + (item.listPrice ?? item.price) * item.qty,
-    0
-  );
+  // Calculate subtotal as base price (price / (1 + tax_rate)) rounded to 2 decimals per line item
+  // This ensures price changes are reflected in the totals
+  const subtotal = items.reduce((sum, item) => {
+    const rate = item.taxRate ?? DEFAULT_TAX_RATE;
+    const unitPrice = Math.max(item.price, 0);
+    // Calculate base price per unit: price / (1 + tax_rate)
+    const unitBase = unitPrice / (1 + rate);
+    // Round to 2 decimals, then multiply by quantity and add to sum
+    const lineBase = Math.round(unitBase * 100) / 100 * item.qty;
+    return sum + lineBase;
+  }, 0);
+  
+  // Round total subtotal to 2 decimals
+  const roundedSubtotal = Math.round(subtotal * 100) / 100;
+  
+  // Calculate discounts: difference between list price and actual selling price
   const discounts = items.reduce((sum, item) => {
     const listUnit = item.listPrice ?? item.price;
     const unitDiscount = Math.max(0, listUnit - item.price);
     return sum + unitDiscount * item.qty;
   }, 0);
-  const tax = items.reduce((sum, item) => {
-    const lineTotal = Math.max(item.price, 0) * item.qty;
-    const rate = item.taxRate ?? DEFAULT_TAX_RATE;
-    const base = lineTotal / (1 + rate);
-    return sum + (lineTotal - base);
-  }, 0);
-  const total = Math.max(subtotal - discounts, 0);
+  
+  // Calculate total price (includes tax)
+  const totalPrice = items.reduce((sum, item) => sum + Math.max(item.price, 0) * item.qty, 0);
+  
+  // ITBIS = total price - subtotal
+  const tax = Math.round((totalPrice - roundedSubtotal) * 100) / 100;
+  
+  // Total = total price (prices already include tax)
+  const total = totalPrice;
   const nonCashTendered = tenders.reduce((sum, tender) => sum + tender.amount, 0);
   const cappedNonCash = Math.min(nonCashTendered, total);
   const cashDue = Math.max(total - cappedNonCash, 0);
 
   return {
-    subtotal,
+    subtotal: roundedSubtotal,
     discounts,
     tax,
     total,
