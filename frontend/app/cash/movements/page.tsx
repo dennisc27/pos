@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowDownToLine,
+  ArrowLeftRight,
   ArrowUpFromLine,
   Building2,
   History,
@@ -191,6 +192,7 @@ export default function CashMovementsPage() {
     pin: "",
     reason: "",
   });
+  const [movementFilter, setMovementFilter] = useState<"all" | "in" | "out">("all");
 
   const summary = useMemo(() => {
     const totalsByKind = movements.reduce<Record<string, { totalCents: number; count: number }>>((acc, movement) => {
@@ -217,6 +219,7 @@ export default function CashMovementsPage() {
     setActiveShift(null);
     setMovements([]);
     setShiftLookup({ shiftId: "" });
+    setMovementFilter("all");
   }, []);
 
   const loadShiftById = async (shiftId: number, successMessage?: string) => {
@@ -236,6 +239,7 @@ export default function CashMovementsPage() {
       setActiveShift(data.shift);
       setMovements(data.movements);
       setShiftLookup({ shiftId: String(data.shift.id) });
+      setMovementFilter("all");
       if (successMessage) {
         setStatus({ tone: "success", message: successMessage });
       }
@@ -269,6 +273,7 @@ export default function CashMovementsPage() {
         setActiveShift(data.shift);
         setMovements(data.movements);
         setShiftLookup({ shiftId: String(data.shift.id) });
+        setMovementFilter("all");
         if (!quiet) {
           setStatus({
             tone: "success",
@@ -398,6 +403,62 @@ export default function CashMovementsPage() {
     return [...manualKeys, ...remaining];
   }, [summary.totalsByKind]);
 
+  const flowTotals = useMemo(
+    () =>
+      movements.reduce(
+        (acc, movement) => {
+          const direction =
+            MOVEMENT_DIRECTIONS[movement.kind as MovementKind] ?? (movement.kind === "refund" ? -1 : 1);
+          const amount = Math.max(0, Number(movement.amountCents ?? 0));
+
+          if (direction >= 0) {
+            acc.inCents += amount;
+            acc.inCount += 1;
+          } else {
+            acc.outCents += amount;
+            acc.outCount += 1;
+          }
+
+          return acc;
+        },
+        { inCents: 0, inCount: 0, outCents: 0, outCount: 0 },
+      ),
+    [movements],
+  );
+
+  const filteredMovements = useMemo(() => {
+    if (movementFilter === "all") {
+      return movements;
+    }
+
+    return movements.filter((movement) => {
+      const direction =
+        MOVEMENT_DIRECTIONS[movement.kind as MovementKind] ?? (movement.kind === "refund" ? -1 : 1);
+      return movementFilter === "in" ? direction >= 0 : direction < 0;
+    });
+  }, [movementFilter, movements]);
+
+  const filterOptions = useMemo(
+    () => [
+      { value: "all" as const, label: "Todo", count: movements.length },
+      { value: "in" as const, label: "Entradas", count: flowTotals.inCount },
+      { value: "out" as const, label: "Salidas", count: flowTotals.outCount },
+    ],
+    [flowTotals.inCount, flowTotals.outCount, movements.length],
+  );
+
+  const totalFlowCents = flowTotals.inCents + flowTotals.outCents;
+  const inboundShare = totalFlowCents === 0 ? 0 : (flowTotals.inCents / totalFlowCents) * 100;
+  const outboundShare = totalFlowCents === 0 ? 0 : 100 - inboundShare;
+  const netIsPositive = summary.netMovementCents > 0;
+  const netIsNegative = summary.netMovementCents < 0;
+  const netMovementAbsolute = Math.abs(summary.netMovementCents);
+  const netMovementCopy = netIsNegative
+    ? "Salió más efectivo del turno"
+    : netIsPositive
+    ? "Entró más efectivo al turno"
+    : "Balance sin variaciones";
+
   const renderStatusBanner = () => {
     if (!status) {
       return null;
@@ -464,33 +525,82 @@ export default function CashMovementsPage() {
                   </span>
                 </div>
 
-                <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm dark:border-slate-700 dark:bg-slate-900/40 sm:grid-cols-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Efectivo esperado</p>
-                    <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                      {centsToCurrency(activeShift.expectedCashCents)}
-                    </p>
-                  </div>
+                <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm dark:border-slate-700 dark:bg-slate-900/40 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Apertura declarada</p>
-                    <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                    <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">
                       {centsToCurrency(activeShift.openingCashCents)}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Efectivo reportado al inicio del turno.</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Efectivo esperado</p>
+                    <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+                      {centsToCurrency(activeShift.expectedCashCents)}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Incluye ventas, pagos y movimientos manuales.</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Entradas registradas</p>
+                    <p className="text-xl font-semibold text-emerald-600 dark:text-emerald-300">
+                      {centsToCurrency(flowTotals.inCents)}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {flowTotals.inCount} {flowTotals.inCount === 1 ? "movimiento" : "movimientos"} hacia caja.
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Movimientos manuales</p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        summary.netMovementCents === 0
-                          ? "text-slate-700 dark:text-slate-300"
-                          : summary.netMovementCents > 0
-                          ? "text-emerald-600 dark:text-emerald-300"
-                          : "text-rose-600 dark:text-rose-300"
-                      }`}
-                    >
-                      {centsToCurrency(Math.abs(summary.netMovementCents))}
-                      {summary.netMovementCents === 0 ? "" : summary.netMovementCents > 0 ? " ingreso" : " salida"}
+                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Salidas registradas</p>
+                    <p className="text-xl font-semibold text-rose-600 dark:text-rose-300">
+                      {centsToCurrency(flowTotals.outCents)}
                     </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {flowTotals.outCount} {flowTotals.outCount === 1 ? "movimiento" : "movimientos"} hacia fuera.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white/70 p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-950/40">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Impacto neto de movimientos</p>
+                      <p
+                        className={`flex items-center gap-2 text-2xl font-semibold ${
+                          netIsNegative
+                            ? "text-rose-600 dark:text-rose-300"
+                            : netIsPositive
+                            ? "text-emerald-600 dark:text-emerald-300"
+                            : "text-slate-700 dark:text-slate-200"
+                        }`}
+                      >
+                        <ArrowLeftRight className="h-5 w-5" />
+                        {netMovementAbsolute === 0 ? "RD$ 0.00" : centsToCurrency(netMovementAbsolute)}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{netMovementCopy}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                      {movements.length} {movements.length === 1 ? "movimiento manual" : "movimientos manuales"}
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      <span>Entradas {centsToCurrency(flowTotals.inCents)}</span>
+                      <span>Salidas {centsToCurrency(flowTotals.outCents)}</span>
+                    </div>
+                    {totalFlowCents === 0 ? (
+                      <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-800" />
+                    ) : (
+                      <div className="flex h-2 w-full overflow-hidden rounded-full border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-900">
+                        <span
+                          className="h-full bg-emerald-500/80"
+                          style={{ width: `${Math.max(0, Math.min(100, inboundShare))}%` }}
+                        />
+                        <span
+                          className="h-full bg-rose-500/80"
+                          style={{ width: `${Math.max(0, Math.min(100, outboundShare))}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -540,15 +650,44 @@ export default function CashMovementsPage() {
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white/90 shadow-sm ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900/60">
-            <header className="flex items-center gap-3 border-b border-slate-200 px-6 py-4 dark:border-slate-700">
+            <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-6 py-4 dark:border-slate-700">
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
                 <History className="h-5 w-5" />
               </span>
-              <div>
+              <div className="min-w-[200px]">
                 <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Historial del turno</h2>
                 <p className="text-sm text-slate-600 dark:text-slate-400">
                   Visualiza cada movimiento manual registrado con su motivo y hora exacta.
                 </p>
+              </div>
+              <div className="ml-auto flex flex-wrap gap-2">
+                {filterOptions.map((option) => {
+                  const isActive = movementFilter === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setMovementFilter(option.value)}
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        isActive
+                          ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-600"
+                      }`}
+                      aria-pressed={isActive}
+                    >
+                      {option.label}
+                      <span
+                        className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
+                          isActive
+                            ? "bg-white/20"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                        }`}
+                      >
+                        {option.count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </header>
             <div className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -556,33 +695,52 @@ export default function CashMovementsPage() {
                 <p className="px-6 py-8 text-sm text-slate-500 dark:text-slate-400">
                   Selecciona un turno para revisar sus movimientos.
                 </p>
-              ) : movements.length === 0 ? (
+              ) : filteredMovements.length === 0 ? (
                 <p className="px-6 py-8 text-sm text-slate-500 dark:text-slate-400">
-                  Aún no hay movimientos registrados para este turno.
+                  {movementFilter === "all"
+                    ? "Aún no hay movimientos registrados para este turno."
+                    : movementFilter === "in"
+                    ? "No se registraron entradas con el filtro aplicado."
+                    : "No se registraron salidas con el filtro aplicado."}
                 </p>
               ) : (
-                movements.map((movement) => {
+                filteredMovements.map((movement) => {
                   const direction =
                     MOVEMENT_DIRECTIONS[movement.kind as MovementKind] ?? (movement.kind === "refund" ? -1 : 1);
                   const formattedAmount = centsToCurrency(movement.amountCents);
                   return (
-                    <article key={movement.id} className="flex items-center justify-between px-6 py-4 text-sm">
-                      <div>
-                        <p className="font-medium text-slate-800 dark:text-slate-100">
-                          {MOVEMENT_LABELS[movement.kind as MovementKind] ?? movement.kind.replace(/_/g, " ")}
-                        </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          {formatDate(movement.createdAt)}
-                          {movement.reason ? ` · ${movement.reason}` : ""}
-                        </p>
+                    <article
+                      key={movement.id}
+                      className="flex items-start justify-between gap-4 px-6 py-4 text-sm transition hover:bg-slate-50 dark:hover:bg-slate-900"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`mt-1 inline-flex h-8 w-8 items-center justify-center rounded-full ${
+                            direction < 0
+                              ? "bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-200"
+                              : "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-200"
+                          }`}
+                        >
+                          {direction < 0 ? <ArrowUpFromLine className="h-4 w-4" /> : <ArrowDownToLine className="h-4 w-4" />}
+                        </span>
+                        <div>
+                          <p className="font-medium text-slate-800 dark:text-slate-100">
+                            {MOVEMENT_LABELS[movement.kind as MovementKind] ?? movement.kind.replace(/_/g, " ")}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {formatDate(movement.createdAt)}
+                            {movement.reason ? ` · ${movement.reason}` : ""}
+                          </p>
+                        </div>
                       </div>
                       <span
-                        className={`inline-flex items-center gap-1 text-sm font-semibold ${
-                          direction < 0 ? "text-rose-600 dark:text-rose-300" : "text-emerald-600 dark:text-emerald-300"
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-sm font-semibold ${
+                          direction < 0
+                            ? "bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-200"
+                            : "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-200"
                         }`}
                       >
-                        {direction < 0 ? <ArrowUpFromLine className="h-4 w-4" /> : <ArrowDownToLine className="h-4 w-4" />}
-                        {direction < 0 ? "- " : ""}
+                        {direction < 0 ? "-" : "+"}
                         {formattedAmount}
                       </span>
                     </article>
