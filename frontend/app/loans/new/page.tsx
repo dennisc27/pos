@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 import {
   BadgeCheck,
@@ -55,12 +56,6 @@ type IdImageUpload = {
 };
 
 type ApiError = Error & { status?: number };
-
-type BranchOption = {
-  id: number;
-  name: string;
-  code?: string | null;
-};
 
 type CustomerSummary = {
   id: number;
@@ -193,10 +188,7 @@ export default function LoansNewPage() {
   const [loadingModels, setLoadingModels] = useState(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
-  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([]);
-  const [branchesLoading, setBranchesLoading] = useState(true);
-  const [branchesError, setBranchesError] = useState<string | null>(null);
-
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [branchId, setBranchId] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null);
   const [customerQuery, setCustomerQuery] = useState("");
@@ -218,6 +210,18 @@ export default function LoansNewPage() {
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [principalAmount, setPrincipalAmount] = useState("");
   const [termCount, setTermCount] = useState(1);
+
+  useEffect(() => {
+    if (activeBranch) {
+      setBranchId(String(activeBranch.id));
+    }
+  }, [activeBranch]);
+
+  useEffect(() => {
+    setSelectedCustomer(null);
+    setCustomerQuery("");
+    setCustomerResults([]);
+  }, [branchId]);
   const [startDate, setStartDate] = useState(todayIso());
   const [manualSchedule, setManualSchedule] = useState<LoanScheduleRow[]>([]);
 
@@ -253,35 +257,6 @@ export default function LoansNewPage() {
       isMounted = false;
     };
   }, []);
-
-  useEffect(() => {
-    let isMounted = true;
-    setBranchesLoading(true);
-    setBranchesError(null);
-
-    getJson<{ branches: BranchOption[] }>("/api/branches")
-      .then((payload) => {
-        if (!isMounted) return;
-        const options = payload?.branches ?? [];
-        setBranchOptions(options);
-        if (!branchId && options.length > 0) {
-          setBranchId(String(options[0].id));
-        }
-      })
-      .catch((error: ApiError) => {
-        if (!isMounted) return;
-        setBranchesError(error.message ?? "No se pudieron cargar las sucursales");
-      })
-      .finally(() => {
-        if (isMounted) {
-          setBranchesLoading(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [branchId]);
 
   useEffect(() => {
     if (customerQuery.trim().length < 2) {
@@ -608,30 +583,20 @@ export default function LoansNewPage() {
           <form className="grid gap-6 sm:grid-cols-2">
             <div className="sm:col-span-2 space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Sucursal</label>
-              {branchesLoading ? (
+              {branchLoading ? (
                 <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <Loader2 className="h-4 w-4 animate-spin text-indigo-500" /> Cargando sucursales...
+                  <Loader2 className="h-4 w-4 animate-spin text-indigo-500" /> Cargando sucursal…
                 </div>
-              ) : branchesError ? (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{branchesError}</div>
+              ) : branchError ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{branchError}</div>
+              ) : activeBranch ? (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                  {activeBranch.name}
+                </div>
               ) : (
-                <select
-                  value={branchId}
-                  onChange={(event) => {
-                    setBranchId(event.target.value);
-                    setSelectedCustomer(null);
-                    setCustomerQuery("");
-                    setCustomerResults([]);
-                  }}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
-                >
-                  <option value="">Seleccione una sucursal</option>
-                  {branchOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                  Configura una sucursal activa en ajustes antes de registrar préstamos.
+                </div>
               )}
             </div>
 

@@ -6,6 +6,8 @@ import { ArrowLeft, CheckCircle2, Loader2, ShieldAlert, Sparkles, Store } from "
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
+
 const pesoFormatter = new Intl.NumberFormat("es-DO", {
   style: "currency",
   currency: "DOP",
@@ -98,12 +100,12 @@ type LoansForfeitPageProps = {
 
 export default function LoanForfeitPage({ params }: LoansForfeitPageProps) {
   const loanId = params.id;
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [detail, setDetail] = useState<LoanDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedCollateralId, setSelectedCollateralId] = useState<number | null>(null);
-  const [branchId, setBranchId] = useState("");
   const [priceInput, setPriceInput] = useState("");
   const [costInput, setCostInput] = useState("0");
   const [codeInput, setCodeInput] = useState("");
@@ -113,6 +115,15 @@ export default function LoanForfeitPage({ params }: LoansForfeitPageProps) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const branchMismatch = useMemo(() => {
+    if (!detail || !activeBranch) {
+      return false;
+    }
+    return detail.loan.branchId !== activeBranch.id;
+  }, [activeBranch, detail]);
+
+  const branchUnavailable = branchLoading || !activeBranch || branchMismatch || Boolean(branchError);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -120,7 +131,6 @@ export default function LoanForfeitPage({ params }: LoansForfeitPageProps) {
       try {
         const data = await getJson<LoanDetailResponse>(`/api/loans/${loanId}`);
         setDetail(data);
-        setBranchId(String(data.loan.branchId));
       } catch (err) {
         const apiError = err as ApiError;
         setError(apiError.message ?? "No se pudo cargar el préstamo");
@@ -149,7 +159,7 @@ export default function LoanForfeitPage({ params }: LoansForfeitPageProps) {
     if (!priceInput && collateral.estimatedValueCents != null) {
       setPriceInput((collateral.estimatedValueCents / 100).toFixed(2));
     }
-  }, [detail, selectedCollateralId]);
+  }, [detail, priceInput, selectedCollateralId]);
 
   const disableActions = detail?.loan.status === "redeemed" || detail?.loan.status === "forfeited";
 
@@ -184,10 +194,17 @@ export default function LoanForfeitPage({ params }: LoansForfeitPageProps) {
     }
 
     const costCents = parseCurrencyToCents(costInput ?? "0");
-    const finalBranchId = Number(branchId);
+    if (!activeBranch) {
+      setSubmitError(
+        branchError ?? "Configura una sucursal activa en ajustes antes de convertir el colateral."
+      );
+      return;
+    }
 
-    if (!Number.isInteger(finalBranchId) || finalBranchId <= 0) {
-      setSubmitError("Ingresa un ID de sucursal válido");
+    if (branchMismatch) {
+      setSubmitError(
+        "Este préstamo pertenece a otra sucursal. Ajusta la sucursal activa para completar el forfeit."
+      );
       return;
     }
 
@@ -195,7 +212,7 @@ export default function LoanForfeitPage({ params }: LoansForfeitPageProps) {
     try {
       const payload = {
         collateralId: selectedCollateral.id,
-        branchId: finalBranchId,
+        branchId: activeBranch.id,
         priceCents,
         costCents: costCents ?? undefined,
         code: codeInput || undefined,
@@ -313,15 +330,30 @@ export default function LoanForfeitPage({ params }: LoansForfeitPageProps) {
                 <Sparkles className="h-5 w-5 text-slate-500" /> Configura el producto
               </h2>
               <form onSubmit={handleSubmit} className="mt-4 grid gap-4 text-sm">
-                <label className="font-medium text-slate-700">
-                  ID de sucursal destino
-                  <input
-                    value={branchId}
-                    onChange={(event) => setBranchId(event.target.value)}
-                    className="mt-1 w-full rounded border border-slate-300 px-3 py-2"
-                    disabled={disableActions}
-                  />
-                </label>
+                <div className="space-y-1">
+                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Sucursal destino</span>
+                  {branchLoading ? (
+                    <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Sincronizando sucursal…
+                    </span>
+                  ) : branchError ? (
+                    <span className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+                      <ShieldAlert className="h-4 w-4" /> {branchError}
+                    </span>
+                  ) : branchMismatch ? (
+                    <span className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      <ShieldAlert className="h-4 w-4" /> Este préstamo pertenece a otra sucursal.
+                    </span>
+                  ) : activeBranch ? (
+                    <span className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700">
+                      <Store className="h-4 w-4" /> {activeBranch.name}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      <ShieldAlert className="h-4 w-4" /> Configura una sucursal activa en ajustes.
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="font-medium text-slate-700">
                     Precio de venta RD$
@@ -376,7 +408,7 @@ export default function LoanForfeitPage({ params }: LoansForfeitPageProps) {
                 <button
                   type="submit"
                   className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  disabled={disableActions || busy}
+                  disabled={disableActions || busy || branchUnavailable}
                 >
                   {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
                   Generar código y forfeit

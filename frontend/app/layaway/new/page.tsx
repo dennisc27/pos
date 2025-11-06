@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -93,6 +95,7 @@ const paymentMethods = [
 ];
 
 export default function LayawayNewPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [lineDraft, setLineDraft] = useState({
     productCodeVersionId: "",
@@ -106,23 +109,29 @@ export default function LayawayNewPage() {
     customerId: "",
     dueDate: formatInputDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 30)),
     deposit: "0",
-    depositMethod: "cash",
-    depositNote: "",
-    installments: "4",
+    paymentMethod: "cash",
   });
   const [status, setStatus] = useState<StatusMessage>(null);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<LayawayDetail | null>(null);
 
+  useEffect(() => {
+    setFormDraft((draft) => {
+      const nextBranchId = activeBranch ? String(activeBranch.id) : "";
+      if (draft.branchId === nextBranchId) {
+        return draft;
+      }
+      return { ...draft, branchId: nextBranchId, customerId: "" };
+    });
+  }, [activeBranch]);
+
   const totals = useMemo(() => {
     const subtotalCents = cartItems.reduce((sum, item) => sum + item.qty * item.unitPriceCents, 0);
     const depositCents = Math.max(0, Math.round(Number(formDraft.deposit || 0) * 100));
     const balanceCents = Math.max(subtotalCents - depositCents, 0);
-    const installmentCount = Math.max(1, Number(formDraft.installments) || 1);
-    const installmentAmount = Math.ceil(balanceCents / installmentCount);
 
-    return { subtotalCents, depositCents, balanceCents, installmentCount, installmentAmount };
-  }, [cartItems, formDraft.deposit, formDraft.installments]);
+    return { subtotalCents, depositCents, balanceCents };
+  }, [cartItems, formDraft.deposit]);
 
   const handleAddItem = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -220,8 +229,7 @@ export default function LayawayNewPage() {
       if (totals.depositCents > 0) {
         layawayPayload.initialPayment = {
           amountCents: totals.depositCents,
-          method: formDraft.depositMethod,
-          note: formDraft.depositNote?.trim() || undefined,
+          method: formDraft.paymentMethod,
         };
       }
 
@@ -375,16 +383,26 @@ export default function LayawayNewPage() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Sucursal (ID)
-                <input
-                  required
-                  value={formDraft.branchId}
-                  onChange={(event) => setFormDraft((draft) => ({ ...draft, branchId: event.target.value }))}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  placeholder="1"
-                />
-              </label>
+              <div className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <span>Sucursal</span>
+                {branchLoading ? (
+                  <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…
+                  </span>
+                ) : branchError ? (
+                  <span className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-600">
+                    {branchError}
+                  </span>
+                ) : activeBranch ? (
+                  <span className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                    {activeBranch.name}
+                  </span>
+                ) : (
+                  <span className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+                    Configura una sucursal activa en ajustes
+                  </span>
+                )}
+              </div>
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Operador (ID)
                 <input
@@ -406,7 +424,7 @@ export default function LayawayNewPage() {
               </label>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2">
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Fecha límite
                 <input
@@ -428,43 +446,34 @@ export default function LayawayNewPage() {
                   step={0.01}
                 />
               </label>
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Nº cuotas
-                <input
-                  value={formDraft.installments}
-                  onChange={(event) => setFormDraft((draft) => ({ ...draft, installments: event.target.value }))}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  type="number"
-                  min={1}
-                  max={24}
-                />
-              </label>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Método de depósito
-                <select
-                  value={formDraft.depositMethod}
-                  onChange={(event) => setFormDraft((draft) => ({ ...draft, depositMethod: event.target.value }))}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                >
-                  {paymentMethods.map((method) => (
-                    <option key={method.value} value={method.value}>
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Método de pago inicial</span>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {paymentMethods.map((method) => {
+                  const isActive = formDraft.paymentMethod === method.value;
+                  return (
+                    <button
+                      key={method.value}
+                      type="button"
+                      onClick={() =>
+                        setFormDraft((draft) => ({
+                          ...draft,
+                          paymentMethod: method.value,
+                        }))
+                      }
+                      className={`rounded-lg border px-3 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 ${
+                        isActive
+                          ? "border-amber-500 bg-amber-50 text-amber-700"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-amber-400 hover:text-amber-600"
+                      }`}
+                    >
                       {method.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="md:col-span-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Nota en recibo
-                <input
-                  value={formDraft.depositNote}
-                  onChange={(event) => setFormDraft((draft) => ({ ...draft, depositNote: event.target.value }))}
-                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  placeholder="Identificar comprobante, tarjeta, etc."
-                />
-              </label>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -496,22 +505,24 @@ export default function LayawayNewPage() {
 
         <aside className="space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Plan de pagos sugerido</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Pago inicial</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Ajuste el número de cuotas para equilibrar pagos y fecha de vencimiento.
+              Confirme el abono para reservar el inventario y registrar el plan a plazo.
             </p>
             <dl className="mt-4 space-y-2 text-sm text-slate-700">
               <div className="flex justify-between">
-                <dt>Depósito hoy</dt>
+                <dt>Depositado hoy</dt>
                 <dd className="font-medium text-amber-700">{formatCurrency(totals.depositCents)}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt>Método</dt>
+                <dd className="font-medium capitalize text-slate-900">
+                  {paymentMethods.find((method) => method.value === formDraft.paymentMethod)?.label ?? "Seleccionar"}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt>Saldo restante</dt>
                 <dd className="font-medium text-slate-900">{formatCurrency(totals.balanceCents)}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>{totals.installmentCount} cuotas</dt>
-                <dd className="font-medium text-slate-900">{formatCurrency(totals.installmentAmount)}</dd>
               </div>
               <div className="flex justify-between text-xs text-slate-500">
                 <dt>Fecha límite</dt>
@@ -532,7 +543,7 @@ export default function LayawayNewPage() {
               </button>
             </div>
             <p className="mt-4 whitespace-pre-line text-sm text-slate-700">
-              {`El cliente acepta pagar ${formatCurrency(totals.depositCents)} como depósito inicial y completar el saldo de ${formatCurrency(totals.balanceCents)} antes del ${formDraft.dueDate ? dateFormatter.format(new Date(formDraft.dueDate)) : "—"} en ${totals.installmentCount} cuotas consecutivas.`}
+              {`El cliente acepta pagar ${formatCurrency(totals.depositCents)} como depósito inicial y completar el saldo de ${formatCurrency(totals.balanceCents)} antes del ${formDraft.dueDate ? dateFormatter.format(new Date(formDraft.dueDate)) : "—"}.`}
             </p>
             <p className="mt-3 text-xs text-slate-500">
               El inventario queda reservado automáticamente y volverá a piso si el plan se cancela o vence.

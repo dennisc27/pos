@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import Link from "next/link";
+
 import {
   AlertTriangle,
   ArrowDownToLine,
+  ArrowLeft,
   Clock,
   Download,
   FileText,
@@ -12,6 +15,7 @@ import {
   RefreshCw
 } from "lucide-react";
 
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 import { formatCurrencyFromCents } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -154,28 +158,32 @@ type ShiftEndReport = {
 type ApiReportResponse = ShiftEndReport & { resolvedShiftId: number };
 
 export default function ReportsShiftEndPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [report, setReport] = useState<ShiftEndReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shiftIdInput, setShiftIdInput] = useState<string>("");
-  const [branchIdInput, setBranchIdInput] = useState<string>("");
+
+  const branchUnavailable = branchLoading || !activeBranch || Boolean(branchError);
 
   const loadReport = useCallback(
-    async ({ shiftId, branchId }: { shiftId?: number | null; branchId?: number | null } = {}) => {
+    async ({ shiftId }: { shiftId?: number | null } = {}) => {
       setLoading(true);
       setError(null);
 
       try {
+        if (!activeBranch) {
+          throw new Error(
+            branchError ?? "Configura una sucursal activa en ajustes antes de consultar cierres de caja."
+          );
+        }
+
         const params = new URLSearchParams();
         if (shiftId != null) {
           params.set("shiftId", String(shiftId));
         }
-        if (branchId != null) {
-          params.set("branchId", String(branchId));
-        } else if (branchIdInput.trim()) {
-          params.set("branchId", branchIdInput.trim());
-        }
+        params.set("branchId", String(activeBranch.id));
 
         const url = `${API_BASE_URL}/api/reports/shift-end${params.toString() ? `?${params}` : ""}`;
         const response = await fetch(url);
@@ -186,11 +194,14 @@ export default function ReportsShiftEndPage() {
         }
 
         const payload: ApiReportResponse = await response.json();
+        if (payload.shift.branchId != null && payload.shift.branchId !== activeBranch.id) {
+          throw new Error(
+            "El turno pertenece a otra sucursal. Ajusta la sucursal activa para consultar este cierre."
+          );
+        }
+
         setReport(payload);
         setShiftIdInput(String(payload.shift.id));
-        if (payload.shift.branchId) {
-          setBranchIdInput(String(payload.shift.branchId));
-        }
       } catch (err) {
         setReport(null);
         setError(err instanceof Error ? err.message : "Unable to load shift report");
@@ -198,12 +209,16 @@ export default function ReportsShiftEndPage() {
         setLoading(false);
       }
     },
-    [branchIdInput]
+    [activeBranch, branchError]
   );
 
   useEffect(() => {
+    if (branchUnavailable) {
+      return;
+    }
+
     loadReport();
-  }, [loadReport]);
+  }, [branchUnavailable, loadReport]);
 
   const paymentBreakdown = useMemo(() => {
     if (!report) {
@@ -247,29 +262,26 @@ export default function ReportsShiftEndPage() {
         return;
       }
 
-      const numericBranch = branchIdInput.trim() ? Number(branchIdInput.trim()) : null;
-      if (branchIdInput.trim() && (!Number.isInteger(numericBranch!) || numericBranch! <= 0)) {
-        setError("Ingresa un ID de sucursal válido");
+      if (branchUnavailable) {
+        setError(branchError ?? "Configura una sucursal activa en ajustes para consultar cierres.");
         return;
       }
 
       loadReport({
-        shiftId: shiftIdInput.trim() ? numericShift : null,
-        branchId: numericBranch
+        shiftId: shiftIdInput.trim() ? numericShift : null
       });
     },
-    [branchIdInput, loadReport, shiftIdInput]
+    [branchError, branchUnavailable, loadReport, shiftIdInput]
   );
 
   const handleLoadLatest = useCallback(() => {
-    const numericBranch = branchIdInput.trim() ? Number(branchIdInput.trim()) : null;
-    if (branchIdInput.trim() && (!Number.isInteger(numericBranch!) || numericBranch! <= 0)) {
-      setError("Ingresa un ID de sucursal válido");
+    if (branchUnavailable) {
+      setError(branchError ?? "Configura una sucursal activa en ajustes para consultar cierres.");
       return;
     }
 
-    loadReport({ branchId: numericBranch });
-  }, [branchIdInput, loadReport]);
+    loadReport();
+  }, [branchError, branchUnavailable, loadReport]);
 
   const handleExport = useCallback(async () => {
     if (!report) {
@@ -327,6 +339,15 @@ export default function ReportsShiftEndPage() {
 
   return (
     <main className="space-y-8 px-6 py-10 lg:px-10">
+      <div>
+        <Link
+          href="/reports/all"
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white/70 px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300"
+        >
+          <ArrowLeft className="h-4 w-4" /> Volver a todos los reportes
+        </Link>
+      </div>
+
       <header className="space-y-2">
         <p className="text-sm uppercase tracking-wide text-slate-500">Reportes</p>
         <h1 className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
@@ -353,28 +374,38 @@ export default function ReportsShiftEndPage() {
             />
           </div>
           <div className="space-y-2">
-            <label htmlFor="branchId" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Sucursal (opcional)
-            </label>
-            <input
-              id="branchId"
-              value={branchIdInput}
-              onChange={(event) => setBranchIdInput(event.target.value)}
-              placeholder="Ej. 3"
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
-            />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Sucursal activa</span>
+            {branchLoading ? (
+              <span className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                <Loader2 className="h-4 w-4 animate-spin" /> Sincronizando…
+              </span>
+            ) : branchError ? (
+              <span className="inline-flex items-center gap-2 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500 dark:bg-rose-500/10 dark:text-rose-200">
+                <AlertTriangle className="h-4 w-4" /> {branchError}
+              </span>
+            ) : activeBranch ? (
+              <span className="inline-flex items-center gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500 dark:bg-indigo-500/10 dark:text-indigo-200">
+                {activeBranch.name}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500 dark:bg-amber-500/10 dark:text-amber-200">
+                Configura una sucursal activa en ajustes.
+              </span>
+            )}
           </div>
           <div className="flex items-end gap-3">
             <button
               type="submit"
-              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              disabled={branchUnavailable || loading}
+              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:cursor-not-allowed disabled:bg-indigo-400"
             >
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />} Consultar
             </button>
             <button
               type="button"
               onClick={handleLoadLatest}
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+              disabled={branchUnavailable || loading}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
             >
               <RefreshCw className="mr-2 h-4 w-4" /> Último cierre
             </button>
@@ -417,7 +448,7 @@ export default function ReportsShiftEndPage() {
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={() => loadReport({ shiftId: report.shift.id, branchId: report.shift.branchId })}
+                onClick={() => loadReport({ shiftId: report.shift.id })}
                 className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
               >
                 <RefreshCw className="mr-2 h-4 w-4" /> Refrescar
@@ -616,9 +647,6 @@ export default function ReportsShiftEndPage() {
                           disabled={isCurrent}
                           onClick={() => {
                             setShiftIdInput(String(shift.id));
-                            if (shift.branchId != null) {
-                              setBranchIdInput(String(shift.branchId));
-                            }
                             loadReport({ shiftId: shift.id });
                           }}
                           className={`w-full rounded-lg border px-3 py-2 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-300 disabled:cursor-not-allowed ${

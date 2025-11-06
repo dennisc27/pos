@@ -111,12 +111,12 @@ export default function PosRefundPage() {
         return acc;
       }, {}),
     );
-  }, [activeInvoice?.invoice.id]);
+  }, [activeInvoice]);
 
   useEffect(() => {
     setSubmitState("idle");
     setSubmitMessage(null);
-  }, [refundMethod, activeInvoice?.invoice.id]);
+  }, [refundMethod, activeInvoice]);
 
   useEffect(() => {
     if (!isPrinting) return;
@@ -547,7 +547,7 @@ export default function PosRefundPage() {
               </div>
               {refundMethod === "store_credit" ? (
                 <p className="rounded-xl border border-emerald-300 bg-emerald-50/60 p-3 text-xs leading-5 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200">
-                  Store credit will issue a credit note and update the customer's account balance immediately.
+                  Store credit will issue a credit note and update the customer&apos;s account balance immediately.
                 </p>
               ) : (
                 <p className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
@@ -620,7 +620,7 @@ export default function PosRefundPage() {
               </label>
               <p className="flex items-start gap-2 rounded-xl border border-rose-200/70 bg-rose-50/70 p-3 text-xs leading-5 text-rose-600 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
                 <AlertTriangle className="mt-0.5 h-4 w-4" /> Refunds above RD$25,000 require manager PIN entry and capture of the
-                customer's signature.
+                customer&apos;s signature.
               </p>
               {submitMessage && (
                 <p
