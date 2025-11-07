@@ -741,7 +741,7 @@ export default function LoanDetailPage({ params }: LoansIdPageProps) {
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   Genera un nuevo calendario con los periodos deseados. Registra automáticamente el pago de
-                  intereses si se indica un monto en "Pago de renovación".
+                  intereses si se indica un monto en &ldquo;Pago de renovación&rdquo;.
                 </p>
                 <form onSubmit={handleRenewSubmit} className="mt-4 grid gap-3 text-sm">
                   <div className="grid grid-cols-3 gap-3">

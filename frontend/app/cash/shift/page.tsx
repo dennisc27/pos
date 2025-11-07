@@ -9,15 +9,15 @@ import {
   Coins,
   FileText,
   History,
+  Loader2,
   RefreshCcw,
   ShieldCheck,
 } from "lucide-react";
 
 import { formatCurrency } from "@/components/cash/utils";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
-const rawDefaultBranchId = Number(process.env.NEXT_PUBLIC_DEFAULT_BRANCH_ID ?? 1);
-const DEFAULT_BRANCH_ID = Number.isInteger(rawDefaultBranchId) && rawDefaultBranchId > 0 ? rawDefaultBranchId : null;
 
 const numberFormatter = new Intl.NumberFormat("es-DO");
 const dateTimeFormatter = new Intl.DateTimeFormat("es-DO", { dateStyle: "medium", timeStyle: "short" });
@@ -193,18 +193,14 @@ const formatDate = (value: string | null | undefined) => {
 };
 
 export default function CashShiftPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [status, setStatus] = useState<StatusMessage>(null);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [reports, setReports] = useState<ShiftSnapshot[]>([]);
   const [denominations, setDenominations] = useState(initialDenominationState);
   const [isLoading, setIsLoading] = useState({ open: false, close: false, movement: false, load: false });
-  const [openForm, setOpenForm] = useState({
-    branchId: DEFAULT_BRANCH_ID ? String(DEFAULT_BRANCH_ID) : "",
-    openedBy: "",
-    pin: "",
-    openingCash: "",
-  });
+  const [openForm, setOpenForm] = useState({ branchId: "", openedBy: "", pin: "", openingCash: "" });
   const [closeForm, setCloseForm] = useState({ closedBy: "", pin: "", closingCash: "" });
   const [movementForm, setMovementForm] = useState({
     performedBy: "",
@@ -214,6 +210,13 @@ export default function CashShiftPage() {
     type: "drop" as MovementType,
   });
   const denominationRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  useEffect(() => {
+    setOpenForm((state) => ({
+      ...state,
+      branchId: activeBranch ? String(activeBranch.id) : "",
+    }));
+  }, [activeBranch]);
 
   const countedTotal = useMemo(() => {
     return DENOMINATIONS.reduce((sum, denom) => {
@@ -349,13 +352,15 @@ export default function CashShiftPage() {
   );
 
   useEffect(() => {
-    if (DEFAULT_BRANCH_ID) {
-      void loadShiftReportsForBranch(DEFAULT_BRANCH_ID, { quiet: true });
-      void loadActiveShiftForBranch(DEFAULT_BRANCH_ID, { quiet: true });
+    if (activeBranch) {
+      void loadShiftReportsForBranch(activeBranch.id, { quiet: true });
+      void loadActiveShiftForBranch(activeBranch.id, { quiet: true });
     } else {
       void loadShiftReportsForBranch(null, { quiet: true });
+      setActiveShift(null);
+      setMovements([]);
     }
-  }, [loadActiveShiftForBranch, loadShiftReportsForBranch]);
+  }, [activeBranch, loadActiveShiftForBranch, loadShiftReportsForBranch]);
 
   const handleDenominationChange = (value: number, next: string) => {
     if (/^\d*$/.test(next.trim())) {
@@ -416,7 +421,15 @@ export default function CashShiftPage() {
       return;
     }
 
-    if (!openForm.branchId || !openForm.openedBy || !openForm.pin) {
+    if (!activeBranch) {
+      setStatus({
+        tone: "error",
+        message: branchError ?? "Configura una sucursal activa en ajustes antes de abrir turnos.",
+      });
+      return;
+    }
+
+    if (!openForm.openedBy || !openForm.pin) {
       setStatus({ tone: "error", message: "Branch, operator, and PIN are required to open a shift." });
       return;
     }
@@ -432,7 +445,7 @@ export default function CashShiftPage() {
 
     try {
       const payload = {
-        branchId: Number(openForm.branchId),
+        branchId: activeBranch.id,
         openedBy: Number(openForm.openedBy),
         openingCashCents: openingCents,
         pin: openForm.pin,
@@ -562,13 +575,15 @@ export default function CashShiftPage() {
       return;
     }
 
-    const branchId = Number(openForm.branchId);
-    if (!Number.isInteger(branchId) || branchId <= 0) {
-      setStatus({ tone: "error", message: "Ingresa una sucursal válida para buscar el turno." });
+    if (!activeBranch) {
+      setStatus({
+        tone: "error",
+        message: branchError ?? "Configura una sucursal activa en ajustes antes de cargar el turno.",
+      });
       return;
     }
 
-    await loadActiveShiftForBranch(branchId);
+    await loadActiveShiftForBranch(activeBranch.id);
   };
 
   return (
@@ -581,6 +596,20 @@ export default function CashShiftPage() {
           with over/short alerts for audit review.
         </p>
       </header>
+
+      {branchLoading ? (
+        <div className="mb-8 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          Sincronizando sucursal activa…
+        </div>
+      ) : !activeBranch ? (
+        <div className="mb-8 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-200">
+          Configura una sucursal predeterminada en Ajustes → Sistema antes de gestionar turnos.
+        </div>
+      ) : branchError ? (
+        <div className="mb-8 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
+          {branchError}
+        </div>
+      ) : null}
 
       {status ? (
         <div
@@ -796,18 +825,26 @@ export default function CashShiftPage() {
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1">
+                  <div className="space-y-1">
                     <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Sucursal</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={openForm.branchId}
-                      onChange={(event) => setOpenForm((state) => ({ ...state, branchId: event.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                      placeholder="Ej. 1"
-                      required
-                    />
-                  </label>
+                    {branchLoading ? (
+                      <span className="inline-flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Sincronizando…
+                      </span>
+                    ) : branchError ? (
+                      <span className="block rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+                        {branchError}
+                      </span>
+                    ) : activeBranch ? (
+                      <span className="block rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                        {activeBranch.name}
+                      </span>
+                    ) : (
+                      <span className="block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                        Configura una sucursal activa en ajustes
+                      </span>
+                    )}
+                  </div>
                   <label className="space-y-1">
                     <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Cajero</span>
                     <input

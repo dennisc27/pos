@@ -10,6 +10,7 @@ import {
   Laptop,
   Landmark,
   PauseCircle,
+  Search,
   ShieldX,
   Shirt,
   Smartphone,
@@ -22,6 +23,7 @@ import { OrderPanel } from "@/components/pos/order-panel";
 import { ReceiptPreview } from "@/components/pos/receipt-preview";
 import { formatCurrency } from "@/components/pos/utils";
 import type { CartLine, SaleSummary, TenderBreakdown, Product, ProductCategory } from "@/components/pos/types";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 const TENDER_METHODS = ["cash", "card", "transfer", "store_credit", "gift"] as const;
 type TenderMethod = (typeof TENDER_METHODS)[number];
@@ -44,6 +46,8 @@ const TENDER_DEFAULT_STATUS: Record<TenderMethod, TenderBreakdown["status"]> = {
 };
 
 const DEFAULT_TAX_RATE = 0.18;
+const WALK_IN_CUSTOMER = "Walk-in customer";
+const WALK_IN_DESCRIPTOR = "Default walk-in profile";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 const PAYMENT_METHOD_MAP: Record<TenderBreakdown["method"], "cash" | "card" | "transfer" | "gift_card" | "credit_note"> = {
   cash: "cash",
@@ -69,6 +73,50 @@ const DEFAULT_CATEGORY: ProductCategory = { id: "all", label: "All products", ic
 const initialCartLines: CartLine[] = [];
 
 const initialTenderBreakdown: TenderBreakdown[] = [];
+
+type InventoryResponseItem = {
+  productCodeId: number;
+  productCodeVersionId: number;
+  code: string | null;
+  name: string | null;
+  sku: string | null;
+  description: string | null;
+  categoryId: number | null;
+  priceCents: number | null;
+  availableQty: number | null;
+  qtyOnHand: number | null;
+};
+
+function mapInventoryItems(items: InventoryResponseItem[] | undefined): Product[] {
+  if (!Array.isArray(items) || items.length === 0) {
+    return [];
+  }
+
+  return items.map((item) => {
+    const versionId = item.productCodeVersionId ?? item.productCodeId;
+    const availableQty = Number(item.availableQty ?? item.qtyOnHand ?? 0);
+
+    return {
+      id: String(versionId ?? 0),
+      name: item.name ?? item.code ?? "Unnamed product",
+      sku: item.sku ?? item.code ?? `SKU-${versionId ?? "0"}`,
+      categoryId: item.categoryId != null ? String(item.categoryId) : "uncategorized",
+      price: Math.max(0, Number(item.priceCents ?? 0)) / 100,
+      stock: availableQty,
+      highlight: availableQty <= 1 ? "Low stock" : undefined,
+      previewLabel: (item.code ?? item.name ?? "").slice(0, 2).toUpperCase(),
+      variant: item.description ?? undefined,
+    } satisfies Product;
+  });
+}
+
+type CustomerSearchResult = {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  lastActivityAt: string | null;
+};
 
 function buildSummary(items: CartLine[], tenders: TenderBreakdown[]): SaleSummary {
   const subtotal = items.reduce(
@@ -125,6 +173,7 @@ function parseAmount(input: string): number | null {
 }
 
 export default function PosPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [categories, setCategories] = useState<ProductCategory[]>([DEFAULT_CATEGORY]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
@@ -133,19 +182,25 @@ export default function PosPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [cartLines, setCartLines] = useState<CartLine[]>(initialCartLines);
   const [tenderBreakdown, setTenderBreakdown] = useState<TenderBreakdown[]>(initialTenderBreakdown);
-  const [customerName, setCustomerName] = useState("Walk-in customer");
+  const [customerName, setCustomerName] = useState(WALK_IN_CUSTOMER);
   const [customerDialogMode, setCustomerDialogMode] = useState<"change" | "add" | null>(null);
   const [customerInput, setCustomerInput] = useState("");
-  const [scanInput, setScanInput] = useState("");
-  const [scanStatus, setScanStatus] = useState<string | null>(null);
-  const [validationState, setValidationState] = useState<"idle" | "validating" | "success" | "error">("idle");
-  const [validationMessage, setValidationMessage] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [customerDescriptor, setCustomerDescriptor] = useState(WALK_IN_DESCRIPTOR);
+  const [customerSearchResults, setCustomerSearchResults] = useState<CustomerSearchResult[]>([]);
+  const [isSearchingCustomers, setIsSearchingCustomers] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
   const [isPaymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [cashTenderInput, setCashTenderInput] = useState("");
   const [finalizeState, setFinalizeState] = useState<"idle" | "processing" | "success" | "error">("idle");
   const [finalizeMessage, setFinalizeMessage] = useState<string | null>(null);
   const [isSuccessDialogOpen, setSuccessDialogOpen] = useState(false);
   const [successInvoiceId, setSuccessInvoiceId] = useState<string | null>(null);
+  const [isInventoryModalOpen, setInventoryModalOpen] = useState(false);
+  const [isLoadingFullInventory, setIsLoadingFullInventory] = useState(false);
+  const [fullInventory, setFullInventory] = useState<Product[]>([]);
+  const [fullInventoryError, setFullInventoryError] = useState<string | null>(null);
+  const [inventoryModalSearch, setInventoryModalSearch] = useState("");
+  const [inventoryModalCategory, setInventoryModalCategory] = useState<string>("all");
 
   const resolveProductVersionId = useCallback((productId: string) => {
     const numeric = Number(productId);
@@ -172,18 +227,7 @@ export default function PosPage() {
         }
 
         const payload: {
-          items?: Array<{
-            productCodeId: number;
-            productCodeVersionId: number;
-            code: string | null;
-            name: string | null;
-            sku: string | null;
-            description: string | null;
-            categoryId: number | null;
-            priceCents: number | null;
-            availableQty: number | null;
-            qtyOnHand: number | null;
-          }>;
+          items?: InventoryResponseItem[];
           categoryOptions?: Array<{ id: number | null; name: string | null }>;
         } = await response.json();
 
@@ -191,21 +235,7 @@ export default function PosPage() {
           return;
         }
 
-        const mappedProducts: Product[] = (payload.items ?? []).map((item) => {
-          const versionId = item.productCodeVersionId ?? item.productCodeId;
-          const availableQty = Number(item.availableQty ?? item.qtyOnHand ?? 0);
-          return {
-            id: String(versionId ?? 0),
-            name: item.name ?? item.code ?? "Unnamed product",
-            sku: item.sku ?? item.code ?? `SKU-${versionId ?? "0"}`,
-            categoryId: item.categoryId != null ? String(item.categoryId) : "uncategorized",
-            price: Math.max(0, Number(item.priceCents ?? 0)) / 100,
-            stock: availableQty,
-            highlight: availableQty <= 1 ? "Low stock" : undefined,
-            previewLabel: (item.code ?? item.name ?? "").slice(0, 2).toUpperCase(),
-            variant: item.description ?? undefined,
-          };
-        });
+        const mappedProducts = mapInventoryItems(payload.items);
 
         setProducts(mappedProducts);
 
@@ -245,6 +275,63 @@ export default function PosPage() {
     };
   }, []);
 
+  const loadFullInventory = useCallback(async () => {
+    try {
+      setIsLoadingFullInventory(true);
+      setFullInventoryError(null);
+
+      const params = new URLSearchParams({
+        page: "1",
+        pageSize: "250",
+        status: "active",
+        availability: "all",
+      });
+
+      const response = await fetch(`${API_BASE_URL}/api/inventory?${params.toString()}`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to load full inventory (${response.status})`);
+      }
+
+      const payload: { items?: InventoryResponseItem[] } = await response.json();
+      setFullInventory(mapInventoryItems(payload.items));
+    } catch (error) {
+      console.error("Failed to load full inventory for POS", error);
+      setFullInventoryError("Unable to load full inventory. Try again.");
+    } finally {
+      setIsLoadingFullInventory(false);
+    }
+  }, []);
+
+  const handleOpenInventoryModal = useCallback(() => {
+    setInventoryModalOpen(true);
+    if (fullInventory.length === 0 && !isLoadingFullInventory) {
+      void loadFullInventory();
+    }
+  }, [fullInventory.length, isLoadingFullInventory, loadFullInventory]);
+
+  const handleCloseInventoryModal = useCallback(() => {
+    setInventoryModalOpen(false);
+    setInventoryModalSearch("");
+    setInventoryModalCategory("all");
+  }, []);
+
+  useEffect(() => {
+    if (!isInventoryModalOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleCloseInventoryModal();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleCloseInventoryModal, isInventoryModalOpen]);
+
   const createLineFromProduct = useCallback((product: Product): CartLine => ({
     id: product.id,
     name: product.name,
@@ -276,9 +363,9 @@ export default function PosPage() {
   const clearCart = useCallback(() => {
     setCartLines([]);
     setTenderBreakdown([]);
-    setCustomerName("Walk-in customer");
-    setValidationState("idle");
-    setValidationMessage(null);
+    setCustomerName(WALK_IN_CUSTOMER);
+    setCustomerDescriptor(WALK_IN_DESCRIPTOR);
+    setSelectedCustomerId(null);
     setFinalizeState("idle");
     setFinalizeMessage(null);
   }, []);
@@ -301,14 +388,6 @@ export default function PosPage() {
   }, [activeCategoryId, products, searchTerm]);
 
   const saleSummary = useMemo(() => buildSummary(cartLines, tenderBreakdown), [cartLines, tenderBreakdown]);
-  const nonCashTenderTotal = useMemo(
-    () => tenderBreakdown.filter((item) => item.method !== "cash").reduce((sum, item) => sum + item.amount, 0),
-    [tenderBreakdown]
-  );
-  const cashRequired = useMemo(
-    () => Math.max(saleSummary.total - nonCashTenderTotal, 0),
-    [nonCashTenderTotal, saleSummary.total]
-  );
 
   const handleToggleProduct = useCallback(
     (product: Product) => {
@@ -465,167 +544,31 @@ export default function PosPage() {
     setTenderBreakdown((previous) => previous.filter((item) => item.id !== tenderId));
   }, []);
 
-  const handleScanSubmit = useCallback(() => {
-    const query = scanInput.trim().toLowerCase();
-    if (!query) {
-      setScanStatus(null);
-      return;
-    }
-
-    const exactMatch = products.find(
-      (product) => product.sku.toLowerCase() === query || product.id.toLowerCase() === query
-    );
-
-    const match = exactMatch
-      ? exactMatch
-      : products.find((product) => {
-          const haystack = `${product.sku} ${product.name}`.toLowerCase();
-          return haystack.includes(query);
-        });
-
-    if (match) {
-      addProductToCart(match);
-      setScanStatus(`Added ${match.name}`);
-    } else {
-      setScanStatus("Product not found");
-    }
-
-    setScanInput("");
-  }, [addProductToCart, products, scanInput]);
-
-  const handleScanKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        handleScanSubmit();
-      }
-    },
-    [handleScanSubmit]
-  );
-
-  const handleValidateSale = useCallback(async () => {
-    if (cartLines.length === 0) {
-      setValidationState("error");
-      setValidationMessage("Cart is empty. Scan or add an item first.");
-      return;
-    }
-
-    try {
-      setValidationState("validating");
-      setValidationMessage("Validating totals with server...");
-
-      const response = await fetch(`${API_BASE_URL}/api/orders/validate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          items: cartLines.map((line) => ({
-            sku: line.sku,
-            qty: line.qty,
-            unitPriceCents: Math.round(line.price * 100),
-            taxRate: line.taxRate ?? DEFAULT_TAX_RATE
-          })),
-          taxRate: DEFAULT_TAX_RATE
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-
-      const payload: { subtotalCents: number; taxCents: number; totalCents: number } = await response.json();
-      const serverSubtotal = (payload.subtotalCents ?? 0) / 100;
-      const serverTax = (payload.taxCents ?? 0) / 100;
-      const serverTotal = (payload.totalCents ?? 0) / 100;
-
-      const subtotalMatch = Math.abs(serverSubtotal - saleSummary.subtotal) < 0.01;
-      const taxMatch = Math.abs(serverTax - saleSummary.tax) < 0.01;
-      const totalMatch = Math.abs(serverTotal - saleSummary.total) < 0.01;
-
-      if (subtotalMatch && taxMatch && totalMatch) {
-        setValidationState("success");
-        setValidationMessage("Server totals confirmed. Ready to finalize the sale.");
-      } else {
-        setValidationState("error");
-        setValidationMessage("Totals mismatch. Refresh item prices before collecting payment.");
-      }
-    } catch (error) {
-      console.error("Failed to validate totals", error);
-      setValidationState("error");
-      setValidationMessage("Unable to validate totals with the server. Try again.");
-    }
-  }, [cartLines, saleSummary]);
-
   useEffect(() => {
-    setValidationState("idle");
-    setValidationMessage(null);
     setFinalizeState("idle");
     setFinalizeMessage(null);
   }, [cartLines, tenderBreakdown]);
 
   const handleOpenPaymentDialog = useCallback(() => {
-    setCashTenderInput(cashRequired.toFixed(2));
     setPaymentDialogOpen(true);
-  }, [cashRequired]);
+  }, []);
 
   const handleClosePaymentDialog = useCallback(() => {
     setPaymentDialogOpen(false);
   }, []);
 
-  const handleConfirmPaymentDialog = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const parsed = parseAmount(cashTenderInput);
-      if (parsed === null || parsed < 0) {
-        return;
-      }
-
-      const applied = Math.max(0, Math.min(parsed, cashRequired));
-
-      setTenderBreakdown((previous) => {
-        const withoutCash = previous.filter((item) => item.method !== "cash");
-        if (applied <= 0) {
-          return withoutCash;
-        }
-
-        return [
-          ...withoutCash,
-          {
-            id: "cash-tender",
-            method: "cash" as TenderBreakdown["method"],
-            label: TENDER_LABELS.cash,
-            amount: applied,
-            status: "captured" as TenderBreakdown["status"],
-          },
-        ];
-      });
-
-      setPaymentDialogOpen(false);
-    },
-    [cashRequired, cashTenderInput]
-  );
-
-  const changeDue = useMemo(() => {
-    const parsed = parseAmount(cashTenderInput);
-    if (parsed === null) {
-      return 0;
-    }
-    return Math.max(parsed - cashRequired, 0);
-  }, [cashRequired, cashTenderInput]);
-
-  const cashShortfall = useMemo(() => {
-    const parsed = parseAmount(cashTenderInput);
-    if (parsed === null) {
-      return cashRequired;
-    }
-    return Math.max(cashRequired - parsed, 0);
-  }, [cashRequired, cashTenderInput]);
-
   const handleFinalizeSale = useCallback(async () => {
     if (cartLines.length === 0) {
       setFinalizeState("error");
       setFinalizeMessage("Cart is empty. Scan an item to continue.");
+      return;
+    }
+
+    if (!activeBranch) {
+      setFinalizeState("error");
+      setFinalizeMessage(
+        branchError ?? "Configura una sucursal activa en ajustes para poder registrar ventas."
+      );
       return;
     }
 
@@ -639,8 +582,9 @@ export default function PosPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          branchId: 3, // Santo Domingo branch
+          branchId: activeBranch.id,
           userId: 7,   // Cajera Principal
+          customerId: selectedCustomerId,
           items: cartLines.map((line) => ({
             productCodeVersionId: resolveProductVersionId(line.id),
             qty: line.qty,
@@ -745,7 +689,15 @@ export default function PosPage() {
       setFinalizeState("error");
       setFinalizeMessage("Unable to finalize sale. Review server logs and try again.");
     }
-  }, [cartLines, resolveProductVersionId, saleSummary.cashDue, tenderBreakdown]);
+  }, [
+    activeBranch,
+    branchError,
+    cartLines,
+    resolveProductVersionId,
+    saleSummary.cashDue,
+    selectedCustomerId,
+    tenderBreakdown,
+  ]);
 
   const handleCloseSuccessDialog = useCallback(() => {
     setSuccessDialogOpen(false);
@@ -755,6 +707,9 @@ export default function PosPage() {
   const closeCustomerDialog = useCallback(() => {
     setCustomerDialogMode(null);
     setCustomerInput("");
+    setCustomerSearchResults([]);
+    setCustomerSearchError(null);
+    setIsSearchingCustomers(false);
   }, []);
 
   useEffect(() => {
@@ -775,10 +730,91 @@ export default function PosPage() {
     };
   }, [customerDialogMode, closeCustomerDialog]);
 
+  useEffect(() => {
+    if (!customerDialogMode) {
+      return;
+    }
+
+    const query = customerInput.trim();
+
+    if (query.length < 2) {
+      setCustomerSearchResults([]);
+      setCustomerSearchError(null);
+      setIsSearchingCustomers(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsSearchingCustomers(true);
+    setCustomerSearchError(null);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: query, limit: "10" });
+        const response = await fetch(`${API_BASE_URL}/api/customers?${params.toString()}`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Search failed with status ${response.status}`);
+        }
+
+        const payload: {
+          customers?: Array<{
+            id: number;
+            firstName: string | null;
+            lastName: string | null;
+            email: string | null;
+            phone: string | null;
+            lastActivityAt?: string | null;
+          }>;
+        } = await response.json();
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const results = (payload.customers ?? []).map((customer) => {
+          const first = customer.firstName?.trim() ?? "";
+          const last = customer.lastName?.trim() ?? "";
+          const name = `${first} ${last}`.trim() || "Unnamed customer";
+
+          return {
+            id: Number(customer.id),
+            name,
+            email: customer.email ?? null,
+            phone: customer.phone ?? null,
+            lastActivityAt: customer.lastActivityAt ?? null,
+          } satisfies CustomerSearchResult;
+        });
+
+        setCustomerSearchResults(results);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("Customer search failed", error);
+        setCustomerSearchError("Unable to search customers. Try again.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingCustomers(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [customerDialogMode, customerInput]);
+
   const openCustomerDialog = useCallback(
     (mode: "change" | "add") => {
       setCustomerDialogMode(mode);
       setCustomerInput(mode === "change" ? customerName : "");
+      setCustomerSearchResults([]);
+      setCustomerSearchError(null);
+      setIsSearchingCustomers(false);
     },
     [customerName]
   );
@@ -792,6 +828,8 @@ export default function PosPage() {
       }
 
       setCustomerName(trimmed);
+      setCustomerDescriptor("Manual entry");
+      setSelectedCustomerId(null);
       closeCustomerDialog();
     },
     [closeCustomerDialog, customerInput]
@@ -805,6 +843,29 @@ export default function PosPage() {
     openCustomerDialog("add");
   }, [openCustomerDialog]);
 
+  const handleSelectCustomer = useCallback(
+    (customer: CustomerSearchResult) => {
+      const descriptorParts = [customer.email, customer.phone].filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0
+      );
+
+      setCustomerName(customer.name);
+      setCustomerDescriptor(
+        descriptorParts.length > 0 ? descriptorParts.join(" • ") : "CRM customer"
+      );
+      setSelectedCustomerId(customer.id);
+      closeCustomerDialog();
+    },
+    [closeCustomerDialog]
+  );
+
+  const handleUseWalkInCustomer = useCallback(() => {
+    setSelectedCustomerId(null);
+    setCustomerName(WALK_IN_CUSTOMER);
+    setCustomerDescriptor(WALK_IN_DESCRIPTOR);
+    closeCustomerDialog();
+  }, [closeCustomerDialog]);
+
   const tenderOptions = useMemo(
     () =>
       TENDER_METHODS.filter((method): method is NonCashTenderMethod => method !== "cash").map(
@@ -817,43 +878,48 @@ export default function PosPage() {
   );
 
   const selectedProductIds = useMemo(() => cartLines.map((line) => line.id), [cartLines]);
+  const selectedProductSet = useMemo(() => new Set(selectedProductIds), [selectedProductIds]);
+
+  const filteredInventoryModalProducts = useMemo(() => {
+    const source = fullInventory.length > 0 ? fullInventory : products;
+    const query = inventoryModalSearch.trim().toLowerCase();
+    const categoryFilter = inventoryModalCategory;
+
+    return source.filter((product) => {
+      const matchesCategory = categoryFilter === "all" || product.categoryId === categoryFilter;
+      if (!matchesCategory) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const haystack = `${product.name} ${product.sku} ${product.variant ?? ""}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [fullInventory, inventoryModalCategory, inventoryModalSearch, products]);
 
   const isCustomerDialogOpen = customerDialogMode !== null;
 
   return (
     <>
       <div className="flex flex-col gap-6 pb-24">
+        {branchLoading ? (
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+            Sincronizando configuración de sucursal...
+          </div>
+        ) : !activeBranch ? (
+          <div className="rounded-xl border border-amber-400/60 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+            Configura una sucursal predeterminada en Ajustes → Sistema para habilitar la venta.
+          </div>
+        ) : branchError ? (
+          <div className="rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-200">
+            {branchError}
+          </div>
+        ) : null}
         <div className="grid gap-6 xl:grid-cols-[1.75fr_1fr]">
           <div className="space-y-6">
-            <div className="rounded-3xl border border-slate-200/70 bg-gradient-to-r from-white to-slate-50 p-5 shadow-sm dark:border-slate-800/80 dark:from-slate-950/60 dark:to-slate-950/80">
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Scan or type code
-                </label>
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <div className="flex flex-1 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 shadow-sm focus-within:border-sky-400 dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200">
-                    <Smartphone className="h-4 w-4 text-sky-500 dark:text-sky-300" />
-                    <input
-                      value={scanInput}
-                      onChange={(event) => setScanInput(event.target.value)}
-                      onKeyDown={handleScanKeyDown}
-                      placeholder="Scan barcode or type SKU/name"
-                      className="flex-1 bg-transparent focus:outline-none"
-                    />
-                  </div>
-                  <button
-                    onClick={handleScanSubmit}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
-                    type="button"
-                  >
-                    Scan
-                  </button>
-                </div>
-                {scanStatus ? (
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{scanStatus}</p>
-                ) : null}
-              </div>
-            </div>
             {productError ? (
               <div className="rounded-xl border border-red-500/40 bg-red-50 px-4 py-2 text-xs text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
                 {productError}
@@ -870,6 +936,7 @@ export default function PosPage() {
               onCategorySelect={setActiveCategoryId}
               selectedProductIds={selectedProductIds}
               onToggleProduct={handleToggleProduct}
+              onOpenInventory={handleOpenInventoryModal}
             />
           </div>
           <div className="space-y-6">
@@ -878,9 +945,7 @@ export default function PosPage() {
               summary={saleSummary}
               tenders={tenderBreakdown}
               customerName={customerName}
-              customerDescriptor={
-                customerName === "Walk-in customer" ? "Default walk-in profile" : "CRM customer"
-              }
+              customerDescriptor={customerDescriptor}
               ticketId="R-20451"
               onRemoveItem={handleRemoveLine}
               onQuantityChange={handleQuantityChange}
@@ -893,65 +958,17 @@ export default function PosPage() {
               tenderOptions={tenderOptions}
               defaultTenderAmount={saleSummary.cashDue}
               cashTenderAmount={saleSummary.cashDue}
+              onOpenPaymentDialog={handleOpenPaymentDialog}
             />
-            <div className="rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm dark:border-slate-800/80 dark:bg-slate-950/60">
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Finalize sale</h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    Send the cart to the server so totals are validated before you close the ticket.
-                  </p>
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={handleValidateSale}
-                    disabled={validationState === "validating"}
-                    className="inline-flex items-center justify-center rounded-xl border border-emerald-500/70 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-500 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-emerald-500/50 dark:bg-emerald-500/20 dark:text-emerald-200 dark:hover:border-emerald-400/80 dark:hover:text-emerald-100"
-                  >
-                    {validationState === "validating" ? "Validating..." : "Validate totals with server"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenPaymentDialog}
-                    disabled={cartLines.length === 0}
-                    className="inline-flex items-center justify-center rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
-                  >
-                    Collect payment
-                  </button>
-                </div>
-                {validationMessage ? (
-                  <p
-                    className={
-                      validationState === "success"
-                        ? "text-sm text-emerald-600 dark:text-emerald-300"
-                        : "text-sm text-rose-500 dark:text-rose-300"
-                    }
-                  >
-                    {validationMessage}
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={handleFinalizeSale}
-                  disabled={finalizeState === "processing" || cartLines.length === 0}
-                  className="inline-flex items-center justify-center rounded-xl border border-emerald-600/70 bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-600 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200 dark:hover:border-emerald-400/80 dark:hover:text-emerald-100"
-                >
-                  {finalizeState === "processing" ? "Finalizing..." : "Finalize sale"}
-                </button>
-                {finalizeMessage ? (
-                  <p
-                    className={
-                      finalizeState === "success"
-                        ? "text-sm text-emerald-600 dark:text-emerald-300"
-                        : "text-sm text-rose-500 dark:text-rose-300"
-                    }
-                  >
-                    {finalizeMessage}
-                  </p>
-                ) : null}
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={handleOpenPaymentDialog}
+              disabled={cartLines.length === 0 || branchLoading || !activeBranch}
+              className="flex w-full items-center justify-center gap-2 rounded-3xl border border-sky-500/70 bg-sky-500/15 px-5 py-3 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+            >
+              <CreditCard className="h-4 w-4" />
+              Collect payment
+            </button>
           </div>
         </div>
       </div>
@@ -1028,22 +1045,244 @@ export default function PosPage() {
                 }}
               />
             </div>
-            <div className="flex items-center justify-end gap-3">
+            <div className="space-y-3">
+              {customerInput.trim().length < 2 ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Type at least 2 characters to search existing customers.
+                </p>
+              ) : null}
+              {customerSearchError ? (
+                <div className="rounded-xl border border-rose-400/60 bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  {customerSearchError}
+                </div>
+              ) : null}
+              {isSearchingCustomers ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">Searching customers…</p>
+              ) : null}
+              {customerSearchResults.length > 0 ? (
+                <div className="max-h-52 space-y-2 overflow-y-auto">
+                  {customerSearchResults.map((customer) => {
+                    const descriptorParts = [customer.email, customer.phone].filter(
+                      (value): value is string => typeof value === "string" && value.trim().length > 0
+                    );
+                    const descriptor = descriptorParts.join(" • ");
+                    const activityDate = customer.lastActivityAt
+                      ? new Date(customer.lastActivityAt)
+                      : null;
+                    const activityLabel =
+                      activityDate && !Number.isNaN(activityDate.valueOf())
+                        ? `Last activity ${activityDate.toLocaleDateString()}`
+                        : null;
+                    const isSelected = selectedCustomerId === customer.id;
+
+                    return (
+                      <button
+                        key={customer.id}
+                        type="button"
+                        onClick={() => handleSelectCustomer(customer)}
+                        className={`flex w-full items-start justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
+                          isSelected
+                            ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-200"
+                            : "border-slate-200/70 bg-white hover:border-slate-300 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="space-y-1">
+                          <p className="font-medium text-slate-900 dark:text-white">{customer.name}</p>
+                          {descriptor ? (
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{descriptor}</p>
+                          ) : null}
+                          {activityLabel ? (
+                            <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                              {activityLabel}
+                            </p>
+                          ) : null}
+                        </div>
+                        <span className="text-xs font-semibold text-sky-600 dark:text-sky-300">
+                          {isSelected ? "Selected" : "Select"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : customerInput.trim().length >= 2 && !isSearchingCustomers && !customerSearchError ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  No customers found. You can add them manually using the form below.
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <button
                 type="button"
-                onClick={closeCustomerDialog}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+                onClick={handleUseWalkInCustomer}
+                className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
               >
-                Cancel
+                Use walk-in customer
               </button>
-              <button
-                type="submit"
-                className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
-              >
-                {customerDialogMode === "change" ? "Update" : "Add customer"}
-              </button>
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={closeCustomerDialog}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+                >
+                  {customerDialogMode === "change" ? "Update" : "Add customer"}
+                </button>
+              </div>
             </div>
           </form>
+        </div>
+      ) : null}
+      {isInventoryModalOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={handleCloseInventoryModal}
+        >
+          <div
+            className="w-full max-w-5xl space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Inventory catalog</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Browse the full catalog and add items to the ticket.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseInventoryModal}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close inventory dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <label className="flex flex-1 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition focus-within:border-sky-400 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200">
+                  <Search className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+                  <input
+                    value={inventoryModalSearch}
+                    onChange={(event) => setInventoryModalSearch(event.target.value)}
+                    className="flex-1 bg-transparent focus:outline-none"
+                    placeholder="Search by SKU, name, or description"
+                  />
+                </label>
+                <select
+                  value={inventoryModalCategory}
+                  onChange={(event) => setInventoryModalCategory(event.target.value)}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition hover:border-slate-400 focus:border-sky-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200"
+                >
+                  <option value="all">All categories</option>
+                  {categories
+                    .filter((category) => category.id !== "all")
+                    .map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.label}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => loadFullInventory()}
+                  disabled={isLoadingFullInventory}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:border-slate-700"
+                >
+                  {isLoadingFullInventory ? "Loading..." : "Refresh"}
+                </button>
+              </div>
+              {fullInventoryError ? (
+                <div className="rounded-xl border border-red-500/40 bg-red-50 px-4 py-2 text-xs text-red-600 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                  {fullInventoryError}
+                </div>
+              ) : null}
+              <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-inner dark:border-slate-800/70 dark:bg-slate-950/60">
+                <div className="max-h-[60vh] overflow-y-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
+                    <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
+                      <tr>
+                        <th className="px-4 py-3 text-left">SKU</th>
+                        <th className="px-4 py-3 text-left">Product</th>
+                        <th className="px-4 py-3 text-right">Price</th>
+                        <th className="px-4 py-3 text-right">Stock</th>
+                        <th className="px-4 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {isLoadingFullInventory && fullInventory.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                            Loading inventory...
+                          </td>
+                        </tr>
+                      ) : filteredInventoryModalProducts.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                            No products match your filters.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredInventoryModalProducts.map((product) => {
+                          const isSelected = selectedProductSet.has(product.id);
+                          return (
+                            <tr
+                              key={product.id}
+                              className={isSelected ? "bg-sky-50/70 dark:bg-sky-900/30" : undefined}
+                            >
+                              <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">
+                                {product.sku}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-medium text-slate-900 dark:text-white">{product.name}</span>
+                                  {product.variant ? (
+                                    <span className="text-xs text-slate-500 dark:text-slate-400">{product.variant}</span>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-right font-semibold text-slate-700 dark:text-slate-200">
+                                {formatCurrency(product.price)}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="flex flex-col items-end gap-1 text-xs text-slate-500 dark:text-slate-400">
+                                  <span className="font-medium text-slate-700 dark:text-slate-200">
+                                    {product.stock}
+                                  </span>
+                                  {product.highlight ? (
+                                    <span className="text-emerald-600 dark:text-emerald-300">{product.highlight}</span>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleProduct(product)}
+                                  className={`inline-flex items-center justify-center rounded-xl border px-4 py-2 text-xs font-semibold transition ${
+                                    isSelected
+                                      ? "border-emerald-500/70 bg-emerald-500/15 text-emerald-700 hover:border-emerald-500 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200"
+                                      : "border-sky-500/70 bg-sky-500/15 text-sky-700 hover:border-sky-500 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100"
+                                  }`}
+                                >
+                                  {isSelected ? "Remove" : "Add to cart"}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
       {isPaymentDialogOpen ? (
@@ -1056,7 +1295,7 @@ export default function PosPage() {
           <form
             className="w-full max-w-4xl space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
             onClick={(event) => event.stopPropagation()}
-            onSubmit={handleConfirmPaymentDialog}
+            onSubmit={(event) => event.preventDefault()}
           >
             <div className="flex items-start justify-between">
               <div>
@@ -1082,60 +1321,30 @@ export default function PosPage() {
                 onFinalize={handleFinalizeSale}
                 isProcessing={finalizeState === "processing"}
               />
-              <div className="space-y-4 rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50 p-4 text-sm text-slate-700 shadow-sm dark:border-slate-800/80 dark:from-slate-950/70 dark:to-slate-950/60 dark:text-slate-200">
-                <div className="flex items-center justify-between">
-                  <span>Total due</span>
-                  <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(saleSummary.total)}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                  <span>Non-cash tendered</span>
-                  <span>{formatCurrency(nonCashTenderTotal)}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs text-sky-600 dark:text-sky-300">
-                  <span>Cash required</span>
-                  <span>{formatCurrency(cashRequired)}</span>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Cash received
-                </label>
-                <input
-                  value={cashTenderInput}
-                  onChange={(event) => setCashTenderInput(event.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200"
-                  placeholder={cashRequired.toFixed(2)}
-                />
-              </div>
-              <div className="space-y-2 rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 dark:border-slate-700/80 dark:bg-slate-950/70 dark:text-slate-300">
-                <div className="flex items-center justify-between">
-                  <span>Change due</span>
-                  <span className={changeDue > 0 ? "font-semibold text-emerald-600 dark:text-emerald-300" : "font-semibold"}>
-                    {formatCurrency(changeDue)}
-                  </span>
-                </div>
-                {cashShortfall > 0 ? (
-                  <div className="flex items-center justify-between text-xs text-rose-500 dark:text-rose-300">
-                    <span>Remaining balance</span>
-                    <span>{formatCurrency(cashShortfall)}</span>
-                  </div>
-                ) : null}
-              </div>
             </div>
-            <div className="flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={handleClosePaymentDialog}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
-              >
-                Apply tender
-              </button>
+            <div className="space-y-3">
+              {finalizeState === "error" && finalizeMessage ? (
+                <div className="rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm text-rose-600 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  {finalizeMessage}
+                </div>
+              ) : null}
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={handleClosePaymentDialog}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleFinalizeSale}
+                  disabled={finalizeState === "processing" || cartLines.length === 0}
+                  className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+                >
+                  {finalizeState === "processing" ? "Finalizing..." : "Print & kick drawer"}
+                </button>
+              </div>
             </div>
           </form>
         </div>
