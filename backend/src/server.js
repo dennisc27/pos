@@ -12725,7 +12725,19 @@ function buildCustomerWhereClause({ search, branchId, blacklisted }) {
 
 async function loadCustomerDetail(customerId) {
   const [customerRow] = await db
-    .select(customerSelection)
+    .select({
+      id: customers.id,
+      branchId: customers.branchId,
+      firstName: customers.firstName,
+      lastName: customers.lastName,
+      email: customers.email,
+      phone: customers.phone,
+      address: customers.address,
+      isBlacklisted: customers.isBlacklisted,
+      loyaltyPoints: customers.loyaltyPoints,
+      createdAt: customers.createdAt,
+      updatedAt: customers.updatedAt,
+    })
     .from(customers)
     .where(eq(customers.id, customerId))
     .limit(1);
@@ -12747,13 +12759,27 @@ async function loadCustomerDetail(customerId) {
       .where(eq(idImages.customerId, customerId))
       .orderBy(desc(idImages.createdAt)),
     db
-      .select(customerNoteSelection)
+      .select({
+        id: customerNotes.id,
+        customerId: customerNotes.customerId,
+        authorId: customerNotes.authorId,
+        note: customerNotes.note,
+        createdAt: customerNotes.createdAt,
+      })
       .from(customerNotes)
       .where(eq(customerNotes.customerId, customerId))
       .orderBy(desc(customerNotes.createdAt))
       .limit(50),
     db
-      .select(loyaltyLedgerSelection)
+      .select({
+        id: loyaltyLedger.id,
+        customerId: loyaltyLedger.customerId,
+        pointsDelta: loyaltyLedger.pointsDelta,
+        reason: loyaltyLedger.reason,
+        refTable: loyaltyLedger.refTable,
+        refId: loyaltyLedger.refId,
+        createdAt: loyaltyLedger.createdAt,
+      })
       .from(loyaltyLedger)
       .where(eq(loyaltyLedger.customerId, customerId))
       .orderBy(desc(loyaltyLedger.createdAt))
@@ -12802,7 +12828,7 @@ async function collectCustomerTransactions(customerId) {
         createdAt: orders.createdAt,
         totalCents: orders.totalCents,
         status: orders.status,
-        invoiceNo: orders.invoiceNo,
+        orderNumber: orders.orderNumber,
       })
       .from(orders)
       .where(eq(orders.customerId, customerId))
@@ -12854,7 +12880,7 @@ async function collectCustomerTransactions(customerId) {
       createdAt: row.createdAt?.toISOString?.() ?? row.createdAt,
       amountCents: row.totalCents == null ? null : Number(row.totalCents),
       status: row.status,
-      reference: row.invoiceNo,
+      reference: row.orderNumber,
     });
   }
 
@@ -14938,7 +14964,21 @@ app.get('/api/customers', async (req, res, next) => {
         blacklistedParam === 'true' ? true : blacklistedParam === 'false' ? false : undefined,
     });
 
-    const query = db.select(customerSelection).from(customers);
+    const query = db
+      .select({
+        id: customers.id,
+        branchId: customers.branchId,
+        firstName: customers.firstName,
+        lastName: customers.lastName,
+        email: customers.email,
+        phone: customers.phone,
+        address: customers.address,
+        isBlacklisted: customers.isBlacklisted,
+        loyaltyPoints: customers.loyaltyPoints,
+        createdAt: customers.createdAt,
+        updatedAt: customers.updatedAt,
+      })
+      .from(customers);
 
     if (whereClause) {
       query.where(whereClause);
@@ -15077,7 +15117,19 @@ app.post('/api/customers', async (req, res, next) => {
       });
 
       const [row] = await tx
-        .select(customerSelection)
+        .select({
+          id: customers.id,
+          branchId: customers.branchId,
+          firstName: customers.firstName,
+          lastName: customers.lastName,
+          email: customers.email,
+          phone: customers.phone,
+          address: customers.address,
+          isBlacklisted: customers.isBlacklisted,
+          loyaltyPoints: customers.loyaltyPoints,
+          createdAt: customers.createdAt,
+          updatedAt: customers.updatedAt,
+        })
         .from(customers)
         .orderBy(desc(customers.id))
         .limit(1);
@@ -15222,7 +15274,13 @@ app.post('/api/customers/:id/notes', async (req, res, next) => {
       });
 
       const [row] = await tx
-        .select(customerNoteSelection)
+        .select({
+          id: customerNotes.id,
+          customerId: customerNotes.customerId,
+          authorId: customerNotes.authorId,
+          note: customerNotes.note,
+          createdAt: customerNotes.createdAt,
+        })
         .from(customerNotes)
         .where(eq(customerNotes.customerId, customerId))
         .orderBy(desc(customerNotes.createdAt), desc(customerNotes.id))
