@@ -10141,7 +10141,15 @@ app.get('/api/invoices', async (req, res, next) => {
     let branchIdFilter = null;
 
     if (branchIdRaw !== null && branchIdRaw !== undefined && String(branchIdRaw).trim().length > 0) {
-      branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
+      try {
+        branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
+      } catch (error) {
+        if (error instanceof HttpError) {
+          branchIdFilter = null;
+        } else {
+          throw error;
+        }
+      }
     }
 
     const limitRaw = req.query.limit ?? req.query.pageSize ?? null;
@@ -10409,7 +10417,15 @@ app.get('/api/loans/next-ticket', async (req, res, next) => {
     let branchIdFilter = null;
 
     if (branchIdRaw !== null && branchIdRaw !== undefined && String(branchIdRaw).trim().length > 0) {
-      branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
+      try {
+        branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
+      } catch (error) {
+        if (error instanceof HttpError) {
+          branchIdFilter = null;
+        } else {
+          throw error;
+        }
+      }
     }
 
     const filters = [isNotNull(loans.ticketNumber)];
