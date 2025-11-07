@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -9,12 +9,14 @@ import {
   CreditCard,
   DollarSign,
   Info,
+  Loader2,
   Package,
   Printer,
   Receipt,
   Search,
   ShieldCheck,
-  Store
+  Store,
+  X
 } from "lucide-react";
 
 import { PosCard } from "@/components/pos/pos-card";
@@ -80,7 +82,25 @@ type RefundResponse = {
   creditNote: { id: number; balanceCents: number; createdAt: string | null } | null;
 };
 
+type InvoiceSearchResult = {
+  id: number;
+  invoiceNo: string | null;
+  customerName: string | null;
+  totalCents: number;
+  createdAt: string | null;
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+
+const formatDateInput = (date: Date) => date.toISOString().slice(0, 10);
+
+const defaultHistoryStartDate = () => {
+  const start = new Date();
+  start.setDate(start.getDate() - 30);
+  return formatDateInput(start);
+};
+
+const defaultHistoryEndDate = () => formatDateInput(new Date());
 
 export default function PosRefundPage() {
   const [search, setSearch] = useState("");
@@ -94,6 +114,13 @@ export default function PosRefundPage() {
   const [noteInput, setNoteInput] = useState("");
   const [submitState, setSubmitState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
+  const [isHistoryDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [historyStartDate, setHistoryStartDate] = useState(() => defaultHistoryStartDate());
+  const [historyEndDate, setHistoryEndDate] = useState(() => defaultHistoryEndDate());
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyResults, setHistoryResults] = useState<InvoiceSearchResult[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeInvoice) {
@@ -160,10 +187,9 @@ export default function PosRefundPage() {
     );
   }, [activeInvoice, lineSelections]);
 
-  const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const lookupInvoice = useCallback(async (rawInvoice: string) => {
+    const trimmed = rawInvoice.trim();
 
-    const trimmed = search.trim();
     if (!trimmed) {
       setLookupError("Enter an invoice number to search");
       setActiveInvoice(null);
@@ -178,13 +204,16 @@ export default function PosRefundPage() {
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/invoices/${encodeURIComponent(trimmed)}`);
+      const payload = (await response.json().catch(() => null)) as InvoiceDetail | { error?: string } | null;
 
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error ?? `Unable to find invoice ${trimmed}`);
+        const message = payload && "error" in (payload as { error?: string })
+          ? (payload as { error?: string }).error
+          : null;
+        throw new Error(message ?? `Unable to find invoice ${trimmed}`);
       }
 
-      const data = (await response.json()) as InvoiceDetail;
+      const data = payload as InvoiceDetail;
       setActiveInvoice(data);
       setSearch(data.invoice.invoiceNo ?? trimmed.toUpperCase());
     } catch (error) {
@@ -194,7 +223,71 @@ export default function PosRefundPage() {
     } finally {
       setIsLoading(false);
     }
+  }, []);
+
+  const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await lookupInvoice(search);
   };
+
+  const loadInvoiceHistory = useCallback(async () => {
+    const start = historyStartDate?.trim() ?? "";
+    const end = historyEndDate?.trim() ?? "";
+
+    if (start && end && start > end) {
+      setHistoryError("Start date must be before end date");
+      setHistoryResults([]);
+      return;
+    }
+
+    setHistoryLoading(true);
+    setHistoryError(null);
+
+    try {
+      const params = new URLSearchParams();
+      if (start) params.set("from", start);
+      if (end) params.set("to", end);
+      if (historyQuery.trim()) params.set("q", historyQuery.trim());
+      params.set("limit", "25");
+
+      const response = await fetch(`${API_BASE_URL}/api/invoices?${params.toString()}`);
+      const payload = (await response.json().catch(() => null)) as
+        | { invoices?: InvoiceSearchResult[]; error?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Unable to load invoices");
+      }
+
+      setHistoryResults(payload?.invoices ?? []);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load invoices";
+      setHistoryError(message);
+      setHistoryResults([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyStartDate, historyEndDate, historyQuery]);
+
+  const openHistoryDialog = useCallback(() => {
+    setHistoryError(null);
+    setHistoryDialogOpen(true);
+    void loadInvoiceHistory();
+  }, [loadInvoiceHistory]);
+
+  const closeHistoryDialog = useCallback(() => {
+    setHistoryDialogOpen(false);
+  }, []);
+
+  const handleSelectHistoryInvoice = useCallback(
+    async (entry: InvoiceSearchResult) => {
+      const identifier = entry.invoiceNo ?? String(entry.id);
+      closeHistoryDialog();
+      setSearch(identifier);
+      await lookupInvoice(identifier);
+    },
+    [closeHistoryDialog, lookupInvoice]
+  );
 
   const toggleSelection = (line: ApiInvoiceLine, field: keyof RefundLineSelection) => {
     setLineSelections((prev) => {
@@ -282,7 +375,8 @@ export default function PosRefundPage() {
   };
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <>
+      <main className="mx-auto max-w-6xl px-6 py-10">
       <header className="mb-8 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500">POS · Refunds</p>
         <h1 className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
@@ -311,14 +405,23 @@ export default function PosRefundPage() {
             }
           >
             <div className="grid gap-4">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                  placeholder="INV-00000"
-                />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                    placeholder="INV-00000"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={openHistoryDialog}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800"
+                >
+                  <Search className="h-4 w-4" /> Buscar
+                </button>
               </div>
               <div className="flex flex-wrap items-center gap-3 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 dark:bg-slate-800/80">
@@ -648,6 +751,125 @@ export default function PosRefundPage() {
           </PosCard>
         </div>
       </form>
-    </main>
+      </main>
+      {isHistoryDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={closeHistoryDialog}
+        >
+          <div
+            className="w-full max-w-3xl space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Buscar facturas recientes</h2>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Selecciona un rango de fechas para revisar recibos emitidos recientemente y elige la factura correcta.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeHistoryDialog}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Cerrar historial de facturas"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm text-slate-600 dark:text-slate-300">
+                Desde
+                <input
+                  type="date"
+                  value={historyStartDate}
+                  max={historyEndDate}
+                  onChange={(event) => setHistoryStartDate(event.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm text-slate-600 dark:text-slate-300">
+                Hasta
+                <input
+                  type="date"
+                  value={historyEndDate}
+                  min={historyStartDate}
+                  onChange={(event) => setHistoryEndDate(event.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+              <label className="md:col-span-2 flex flex-col gap-1 text-sm text-slate-600 dark:text-slate-300">
+                Número de factura o cliente (opcional)
+                <input
+                  type="search"
+                  value={historyQuery}
+                  onChange={(event) => setHistoryQuery(event.target.value)}
+                  placeholder="Ej. FAC-0001 o Ana"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-slate-500 dark:text-slate-400">El historial muestra hasta 25 facturas en el rango seleccionado.</p>
+              <button
+                type="button"
+                onClick={loadInvoiceHistory}
+                className="inline-flex items-center gap-2 rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+              >
+                {historyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Buscar facturas
+              </button>
+            </div>
+
+            {historyError ? (
+              <div className="rounded-lg border border-rose-300/70 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                {historyError}
+              </div>
+            ) : null}
+
+            <div className="max-h-80 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-inner dark:border-slate-800 dark:bg-slate-950/40">
+              {historyLoading && historyResults.length === 0 ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-500 dark:text-slate-400">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Cargando facturas...
+                </div>
+              ) : historyResults.length === 0 ? (
+                <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                  No se encontraron facturas en el rango seleccionado.
+                </div>
+              ) : (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {historyResults.map((invoice) => {
+                    const createdAt = invoice.createdAt ? new Date(invoice.createdAt).toLocaleString() : "Fecha desconocida";
+                    return (
+                      <li key={`${invoice.id}-${invoice.invoiceNo ?? "unknown"}`}>
+                        <button
+                          type="button"
+                          onClick={() => void handleSelectHistoryInvoice(invoice)}
+                          className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              {invoice.invoiceNo ?? `Factura #${invoice.id}`}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{invoice.customerName ?? "Sin cliente"}</p>
+                          </div>
+                          <div className="text-right text-xs text-slate-500 dark:text-slate-400">
+                            <p>{createdAt}</p>
+                            <p className="mt-1 font-semibold text-slate-700 dark:text-slate-200">{formatCurrency(invoice.totalCents / 100)}</p>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

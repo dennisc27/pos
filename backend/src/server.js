@@ -601,6 +601,10 @@ function toIsoString(value) {
   return null;
 }
 
+function escapeForLike(value) {
+  return value.replace(/[%_]/g, '\\$&');
+}
+
 function parsePositiveInteger(value, fieldName) {
   const numeric = Number(value);
 
@@ -10128,6 +10132,95 @@ app.post(
   }
 );
 
+app.get('/api/invoices', async (req, res, next) => {
+  try {
+    const from = parseOptionalDate(req.query.from ?? req.query.startDate ?? null, 'from');
+    const to = parseOptionalDate(req.query.to ?? req.query.endDate ?? null, 'to');
+    const queryRaw = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    let branchIdFilter = null;
+
+    if (branchIdRaw !== null && branchIdRaw !== undefined && String(branchIdRaw).trim().length > 0) {
+      branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
+    }
+
+    const limitRaw = req.query.limit ?? req.query.pageSize ?? null;
+    let limit = 25;
+    const parsedLimit = Number(limitRaw);
+    if (Number.isInteger(parsedLimit) && parsedLimit > 0) {
+      limit = Math.min(parsedLimit, 50);
+    }
+
+    const conditions = [isNotNull(invoices.invoiceNo)];
+
+    if (from) {
+      conditions.push(gte(invoices.createdAt, startOfDay(from)));
+    }
+
+    if (to) {
+      conditions.push(lt(invoices.createdAt, startOfTomorrow(to)));
+    }
+
+    if (branchIdFilter) {
+      conditions.push(eq(orders.branchId, branchIdFilter));
+    }
+
+    if (queryRaw) {
+      const safe = escapeForLike(queryRaw);
+      const likePattern = `%${safe}%`;
+      conditions.push(
+        or(
+          like(invoices.invoiceNo, likePattern),
+          like(customers.firstName, likePattern),
+          like(customers.lastName, likePattern)
+        )
+      );
+    }
+
+    let statement = db
+      .select({
+        id: invoices.id,
+        invoiceNo: invoices.invoiceNo,
+        createdAt: invoices.createdAt,
+        totalCents: invoices.totalCents,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+      })
+      .from(invoices)
+      .innerJoin(orders, eq(invoices.orderId, orders.id))
+      .leftJoin(customers, eq(orders.customerId, customers.id));
+
+    if (conditions.length > 0) {
+      statement = statement.where(and(...conditions));
+    }
+
+    const rows = await statement.orderBy(desc(invoices.createdAt), desc(invoices.id)).limit(limit);
+
+    const invoicesList = rows.map((row) => {
+      const customerName = [row.customerFirstName, row.customerLastName]
+        .filter((part) => typeof part === 'string' && part.trim().length > 0)
+        .join(' ')
+        .trim();
+
+      return {
+        id: Number(row.id),
+        invoiceNo: row.invoiceNo ?? null,
+        customerName: customerName || null,
+        totalCents: Number(row.totalCents ?? 0),
+        createdAt: toIsoString(row.createdAt),
+      };
+    });
+
+    res.json({ invoices: invoicesList });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
 app.get('/api/invoices/:invoiceNo', async (req, res, next) => {
   try {
     const invoiceNo = req.params.invoiceNo?.trim();
@@ -10298,6 +10391,61 @@ app.post('/api/gift-cards/redeem', async (req, res, next) => {
     });
 
     res.json(serializeGiftCardRow(updatedCard));
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/loans/next-ticket', async (req, res, next) => {
+  try {
+    const prefix = typeof req.query.prefix === 'string' && req.query.prefix.trim().length > 0
+      ? req.query.prefix.trim()
+      : 'PAWN-';
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    let branchIdFilter = null;
+
+    if (branchIdRaw !== null && branchIdRaw !== undefined && String(branchIdRaw).trim().length > 0) {
+      branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
+    }
+
+    const filters = [isNotNull(loans.ticketNumber)];
+
+    if (branchIdFilter) {
+      filters.push(eq(loans.branchId, branchIdFilter));
+    }
+
+    if (prefix) {
+      filters.push(like(loans.ticketNumber, `${prefix}%`));
+    }
+
+    let query = db
+      .select({ ticketNumber: loans.ticketNumber })
+      .from(loans);
+
+    if (filters.length > 0) {
+      query = query.where(and(...filters));
+    }
+
+    const [latest] = await query.orderBy(desc(loans.createdAt), desc(loans.id)).limit(1);
+
+    let nextNumeric = 1;
+    let padLength = 6;
+
+    if (latest?.ticketNumber) {
+      const match = String(latest.ticketNumber).match(/(\d+)(?!.*\d)/);
+      if (match) {
+        padLength = Math.max(match[1].length, padLength);
+        nextNumeric = Number(match[1]) + 1;
+      }
+    }
+
+    const nextTicket = `${prefix}${String(nextNumeric).padStart(padLength, '0')}`;
+
+    res.json({ ticketNumber: nextTicket });
   } catch (error) {
     if (error instanceof HttpError) {
       return res.status(error.status).json({ error: error.message });

@@ -127,11 +127,15 @@ export async function fetchSalesAndPurchases() {
     const percentChange = (difference / yesterdayTotal) * 100;
     if (percentChange > 0) {
       direction = "up";
+      const rounded = Math.round(percentChange);
+      label = `+${rounded}% vs yesterday`;
     } else if (percentChange < 0) {
       direction = "down";
+      const rounded = Math.round(Math.abs(percentChange));
+      label = `${rounded}% lower than yesterday`;
+    } else {
+      label = "No change vs yesterday";
     }
-    const rounded = Math.round(percentChange);
-    label = `${percentChange > 0 ? "+" : ""}${rounded}% vs yesterday`;
   }
 
   return {
