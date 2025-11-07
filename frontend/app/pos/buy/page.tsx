@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import {
   BadgeDollarSign,
@@ -17,6 +18,7 @@ import {
 
 import { PosCard } from "@/components/pos/pos-card";
 import { formatCurrency } from "@/components/pos/utils";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 const categories = [
   "Mobile phones",
@@ -106,6 +108,7 @@ function readFiles(files: FileList | null) {
 }
 
 export default function PosBuyPage() {
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [seller, setSeller] = useState<SellerProfile>(initialSeller);
   const [items, setItems] = useState<IntakeItem[]>(initialItems);
   const [payoutMethod, setPayoutMethod] = useState<"cash" | "transfer">("cash");
@@ -204,10 +207,18 @@ export default function PosBuyPage() {
       return;
     }
 
+    if (!activeBranch) {
+      setStatus({
+        tone: "error",
+        message: branchError ?? "Configura una sucursal activa en ajustes antes de registrar compras.",
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       const payload = {
-        branchId: 3, // Santo Domingo branch
+        branchId: activeBranch.id,
         userId: 7,   // Cajera Principal
         payoutMethod,
         seller: seller,
@@ -258,6 +269,20 @@ export default function PosBuyPage() {
           drawer log, and print a signed receipt for the seller.
         </p>
       </header>
+
+      {branchLoading ? (
+        <div className="mb-6 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+          Sincronizando sucursal activa…
+        </div>
+      ) : !activeBranch ? (
+        <div className="mb-6 rounded-xl border border-amber-400/60 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-200">
+          Configura una sucursal predeterminada en Ajustes → Sistema para registrar compras.
+        </div>
+      ) : branchError ? (
+        <div className="mb-6 rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-200">
+          {branchError}
+        </div>
+      ) : null}
 
       <form onSubmit={handleIntakeSubmit} className="grid gap-6 lg:grid-cols-[2fr,1fr]">
         <div className="space-y-6">
@@ -442,10 +467,12 @@ export default function PosBuyPage() {
                                 key={photo.id}
                                 className="group relative aspect-[4/3] overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-sm dark:border-slate-800 dark:bg-slate-900"
                               >
-                                <img
+                                <Image
                                   src={photo.preview}
                                   alt={photo.name}
-                                  className="h-full w-full object-cover"
+                                  fill
+                                  sizes="(min-width: 640px) 33vw, 50vw"
+                                  className="object-cover"
                                 />
                                 <button
                                   type="button"
@@ -652,7 +679,7 @@ export default function PosBuyPage() {
               )}
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || branchLoading || !activeBranch}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2"
               >
                 <BadgeDollarSign className="h-4 w-4" /> {loading ? "Posting intake..." : "Submit purchase & print receipt"}

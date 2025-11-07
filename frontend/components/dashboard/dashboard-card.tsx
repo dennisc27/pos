@@ -15,7 +15,7 @@ export function DashboardCard({
   return (
     <section
       className={cn(
-        "flex flex-col gap-4 rounded-2xl border bg-gradient-to-b p-6 transition-colors",
+        "flex flex-col gap-4 rounded-2xl border bg-gradient-to-b p-4 transition-colors sm:p-6",
         "from-white to-slate-100 border-slate-200/70 text-slate-900 shadow-sm",
         "dark:border-slate-800/60 dark:from-slate-900/80 dark:to-slate-950/80 dark:text-slate-100",
         className

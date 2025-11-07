@@ -3,6 +3,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 import { formatCurrency } from "@/components/pos/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -61,7 +62,7 @@ const paymentMethods = [
 ];
 
 export default function RepairsIntakePage() {
-  const [branchId, setBranchId] = useState("");
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [customerId, setCustomerId] = useState("");
   const [jobNumber, setJobNumber] = useState("");
   const [itemDescription, setItemDescription] = useState("");
@@ -78,6 +79,8 @@ export default function RepairsIntakePage() {
   const [status, setStatus] = useState<StatusMessage>(null);
   const [submitting, setSubmitting] = useState(false);
   const [createdRepair, setCreatedRepair] = useState<CreatedRepair | null>(null);
+
+  const branchUnavailable = branchLoading || !activeBranch || Boolean(branchError);
 
   const sanitizedPhotos = useMemo(
     () => photos.map((value) => value.trim()).filter((value) => value.length > 0),
@@ -106,13 +109,15 @@ export default function RepairsIntakePage() {
     setStatus(null);
     setSubmitting(true);
 
-    const numericBranchId = Number.parseInt(branchId, 10);
     const numericCustomerId = Number.parseInt(customerId, 10);
     const estimateCents = parseCurrencyToCents(estimate);
     const depositCents = parseCurrencyToCents(deposit);
 
-    if (!Number.isInteger(numericBranchId) || numericBranchId <= 0) {
-      setStatus({ tone: "error", message: "Branch ID must be a positive number." });
+    if (!activeBranch) {
+      setStatus({
+        tone: "error",
+        message: branchError ?? "Configura una sucursal activa en ajustes antes de registrar reparaciones.",
+      });
       setSubmitting(false);
       return;
     }
@@ -131,7 +136,7 @@ export default function RepairsIntakePage() {
 
     try {
       const payload: Record<string, unknown> = {
-        branchId: numericBranchId,
+        branchId: activeBranch.id,
         customerId: numericCustomerId,
         itemDescription: itemDescription.trim() || null,
         issueDescription: issueDescription.trim() || null,
@@ -202,17 +207,26 @@ export default function RepairsIntakePage() {
       <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <form className="grid grid-cols-1 gap-6" onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
-              <span>Branch ID</span>
-              <input
-                type="number"
-                min={1}
-                required
-                value={branchId}
-                onChange={(event) => setBranchId(event.target.value)}
-                className="rounded border border-slate-300 px-3 py-2 text-base text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-              />
-            </label>
+            <div className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
+              <span>Sucursal</span>
+              {branchLoading ? (
+                <span className="inline-flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  Sincronizando sucursal…
+                </span>
+              ) : branchError ? (
+                <span className="inline-flex items-center gap-2 rounded border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500 dark:bg-rose-500/10 dark:text-rose-200">
+                  {branchError}
+                </span>
+              ) : activeBranch ? (
+                <span className="inline-flex items-center gap-2 rounded border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500 dark:bg-indigo-500/10 dark:text-indigo-200">
+                  {activeBranch.name}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500 dark:bg-amber-500/10 dark:text-amber-200">
+                  Configura una sucursal activa en ajustes.
+                </span>
+              )}
+            </div>
             <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
               <span>Customer ID</span>
               <input
@@ -398,13 +412,15 @@ export default function RepairsIntakePage() {
           <div className="flex items-center justify-between">
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || branchUnavailable}
               className="inline-flex items-center rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
               {submitting ? "Saving..." : "Create repair"}
             </button>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Deposits sync to the repair ledger automatically.
+              {branchUnavailable
+                ? "Configura una sucursal activa en ajustes para habilitar el registro de reparaciones."
+                : "Deposits sync to the repair ledger automatically."}
             </p>
           </div>
         </form>

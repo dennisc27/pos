@@ -23,6 +23,7 @@ import {
   KanbanSquare,
   LayoutDashboard,
   Megaphone,
+  ListTree,
   PackagePlus,
   PackageSearch,
   QrCode,
@@ -118,6 +119,7 @@ const sections: NavSection[] = [
   {
     title: "Reports",
     items: [
+      { name: "All reports", href: "/reports/all", icon: ListTree },
       { name: "Shift-end", href: "/reports/shift-end", icon: FileText },
       { name: "Loans aging", href: "/reports/loans-aging", icon: BarChart3 },
     ],
