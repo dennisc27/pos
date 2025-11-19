@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   BadgeDollarSign,
   Camera,
@@ -9,11 +9,15 @@ import {
   CircleDollarSign,
   FileText,
   ImagePlus,
+  Loader2,
   NotebookPen,
   Percent,
   PlusCircle,
   Printer,
-  Trash2
+  Search,
+  Trash2,
+  UserCircle2,
+  X
 } from "lucide-react";
 
 import { PosCard } from "@/components/pos/pos-card";
@@ -52,8 +56,7 @@ type IntakeItem = {
   serial?: string;
   accessories: string;
   notes: string;
-  resaleValue: number;
-  targetMargin: number;
+  offerAmount: number;
   photos: IntakePhoto[];
 };
 
@@ -64,7 +67,22 @@ type SellerProfile = {
   notes: string;
 };
 
+type SellerSearchResult = {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  lastActivityAt: string | null;
+};
+
 const createId = () => Math.random().toString(36).slice(2, 10);
+
+const WALK_IN_SELLER: SellerProfile = {
+  name: "Walk-in seller",
+  document: "",
+  phone: "",
+  notes: "",
+};
 
 const initialItems: IntakeItem[] = [
   {
@@ -75,8 +93,7 @@ const initialItems: IntakeItem[] = [
     serial: "G0N53Q2M3P",
     accessories: "Box, USB-C cable, MagSafe case",
     notes: "Minor scuff on frame. Battery health 89%.",
-    resaleValue: 43500,
-    targetMargin: 32,
+    offerAmount: 25000,
     photos: []
   }
 ];
@@ -110,12 +127,20 @@ function readFiles(files: FileList | null) {
 export default function PosBuyPage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [seller, setSeller] = useState<SellerProfile>(initialSeller);
+  const [linkedSellerId, setLinkedSellerId] = useState<number | null>(null);
   const [items, setItems] = useState<IntakeItem[]>(initialItems);
   const [payoutMethod, setPayoutMethod] = useState<"cash" | "transfer">("cash");
   const [isPrinting, setIsPrinting] = useState(false);
   const [status, setStatus] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [managerNotes, setManagerNotes] = useState("");
+  const [sellerDialogMode, setSellerDialogMode] = useState<"change" | "add" | null>(null);
+  const [sellerLookup, setSellerLookup] = useState("");
+  const [sellerSearchResults, setSellerSearchResults] = useState<SellerSearchResult[]>([]);
+  const [sellerSearchError, setSellerSearchError] = useState<string | null>(null);
+  const [isSearchingSellers, setIsSearchingSellers] = useState(false);
+  const [sellerForm, setSellerForm] = useState<SellerProfile>(initialSeller);
+  const [sellerFormError, setSellerFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isPrinting) return;
@@ -126,21 +151,119 @@ export default function PosBuyPage() {
     return () => clearTimeout(timeout);
   }, [isPrinting]);
 
+  useEffect(() => {
+    if (!sellerDialogMode) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSellerDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [sellerDialogMode]);
+
+  useEffect(() => {
+    if (!sellerDialogMode) {
+      return;
+    }
+
+    const query = sellerLookup.trim();
+    if (query.length < 2) {
+      setSellerSearchResults([]);
+      setSellerSearchError(null);
+      setIsSearchingSellers(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsSearchingSellers(true);
+    setSellerSearchError(null);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: query, limit: "8" });
+        const response = await fetch(`${API_BASE_URL}/api/customers?${params.toString()}`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Search failed with status ${response.status}`);
+        }
+
+        const payload: {
+          customers?: Array<{
+            id: number;
+            firstName: string | null;
+            lastName: string | null;
+            email: string | null;
+            phone: string | null;
+            lastActivityAt?: string | null;
+          }>;
+        } = await response.json();
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const results: SellerSearchResult[] = (payload.customers ?? []).map((customer) => {
+          const first = customer.firstName?.trim() ?? "";
+          const last = customer.lastName?.trim() ?? "";
+          const name = `${first} ${last}`.trim() || "Unnamed customer";
+
+          return {
+            id: Number(customer.id),
+            name,
+            email: customer.email ?? null,
+            phone: customer.phone ?? null,
+            lastActivityAt: customer.lastActivityAt ?? null,
+          };
+        });
+
+        setSellerSearchResults(results);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("Seller search failed", error);
+        setSellerSearchError("Unable to search CRM sellers.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingSellers(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [sellerDialogMode, sellerLookup]);
+
   const intakeSummary = useMemo(() => {
     const offerTotal = items.reduce((sum, item) => {
-      const offer = Math.max(0, Math.round(item.resaleValue * (1 - item.targetMargin / 100)));
-      return sum + offer;
+      return sum + Math.max(0, Number(item.offerAmount) || 0);
     }, 0);
-    const resaleTotal = items.reduce((sum, item) => sum + Math.max(0, item.resaleValue), 0);
-    const expectedMargin = resaleTotal === 0 ? 0 : 1 - offerTotal / resaleTotal;
 
     return {
-      offerTotal,
-      resaleTotal,
-      expectedMargin,
-      projectedProfit: resaleTotal - offerTotal
+      offerTotal
     };
   }, [items]);
+
+  const sellerDescriptor = useMemo(() => {
+    const parts = [seller.document.trim(), seller.phone.trim()].filter((value) => value.length > 0);
+    if (parts.length > 0) {
+      return parts.join(" • ");
+    }
+    if (linkedSellerId) {
+      return "Linked CRM seller";
+    }
+    return "Manual entry";
+  }, [linkedSellerId, seller.document, seller.phone]);
 
   const updateItem = (id: string, patch: Partial<IntakeItem>) => {
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
@@ -177,8 +300,7 @@ export default function PosBuyPage() {
         serial: "",
         accessories: "",
         notes: "",
-        resaleValue: 0,
-        targetMargin: 35,
+        offerAmount: 0,
         photos: []
       }
     ]);
@@ -192,7 +314,73 @@ export default function PosBuyPage() {
     setSeller((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleIntakeSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const closeSellerDialog = () => {
+    setSellerDialogMode(null);
+    setSellerLookup("");
+    setSellerSearchResults([]);
+    setSellerSearchError(null);
+    setIsSearchingSellers(false);
+    setSellerFormError(null);
+  };
+
+  const openSellerDialog = (mode: "change" | "add") => {
+    setSellerDialogMode(mode);
+    setSellerLookup(mode === "change" ? seller.name : "");
+    setSellerSearchResults([]);
+    setSellerSearchError(null);
+    setIsSearchingSellers(false);
+    setSellerForm(mode === "change" ? seller : WALK_IN_SELLER);
+    setSellerFormError(null);
+  };
+
+  const handleSellerFormChange = (field: keyof SellerProfile, value: string) => {
+    setSellerForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSubmitSellerProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = sellerForm.name.trim();
+    if (!trimmedName) {
+      setSellerFormError("Seller name is required.");
+      return;
+    }
+
+    const nextSeller: SellerProfile = {
+      name: trimmedName,
+      document: sellerForm.document.trim(),
+      phone: sellerForm.phone.trim(),
+      notes: sellerForm.notes.trim(),
+    };
+
+    setSeller(nextSeller);
+    setSellerForm(nextSeller);
+    setLinkedSellerId(null);
+    setSellerFormError(null);
+    closeSellerDialog();
+  };
+
+  const handleSelectSeller = (result: SellerSearchResult) => {
+    const nextSeller: SellerProfile = {
+      name: result.name,
+      document: "",
+      phone: result.phone ?? "",
+      notes: seller.notes,
+    };
+
+    setSeller(nextSeller);
+    setSellerForm(nextSeller);
+    setLinkedSellerId(result.id);
+    closeSellerDialog();
+  };
+
+  const handleUseWalkInSeller = () => {
+    setSeller(WALK_IN_SELLER);
+    setSellerForm(WALK_IN_SELLER);
+    setLinkedSellerId(null);
+    closeSellerDialog();
+  };
+
+  const handleIntakeSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setStatus(null);
 
@@ -201,9 +389,9 @@ export default function PosBuyPage() {
       return;
     }
 
-    const invalidItem = items.find((item) => !item.description.trim() || item.resaleValue <= 0);
+    const invalidItem = items.find((item) => !item.description.trim() || item.offerAmount <= 0);
     if (invalidItem) {
-      setStatus({ tone: "error", message: "Each item needs a description and resale value." });
+      setStatus({ tone: "error", message: "Each item needs a description and payout offer." });
       return;
     }
 
@@ -224,8 +412,7 @@ export default function PosBuyPage() {
         seller: seller,
         items: items.map((item) => ({
           description: item.description,
-          resaleValue: item.resaleValue,
-          targetMargin: item.targetMargin,
+          offerAmount: item.offerAmount,
           accessories: item.accessories,
           notes: item.notes,
           serial: item.serial,
@@ -256,8 +443,11 @@ export default function PosBuyPage() {
     }
   };
 
+  const isSellerDialogOpen = sellerDialogMode !== null;
+
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <>
+      <main className="mx-auto max-w-6xl px-6 py-10">
       <header className="mb-8 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500">POS · Buy from customer</p>
         <h1 className="text-3xl font-semibold text-slate-900 dark:text-slate-100">
@@ -290,47 +480,69 @@ export default function PosBuyPage() {
             title="Seller profile"
             subtitle="Identify the person we are buying from per AML guidelines"
             action={
-              <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-300">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Verified in CRM
-              </div>
+              linkedSellerId ? (
+                <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> CRM linked
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  <FileText className="h-3.5 w-3.5" /> Manual profile
+                </div>
+              )
             }
           >
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                Full name
-                <input
-                  value={seller.name}
-                  onChange={(event) => handleSellerChange("name", event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                  placeholder="María Gómez"
-                  required
-                />
-              </label>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                Document ID
-                <input
-                  value={seller.document}
-                  onChange={(event) => handleSellerChange("document", event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                  placeholder="402-0000000-0"
-                  required
-                />
-              </label>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                Phone number
-                <input
-                  value={seller.phone}
-                  onChange={(event) => handleSellerChange("phone", event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                  placeholder="809-555-0101"
-                />
-              </label>
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 px-4 py-3 text-sm text-slate-700 shadow-sm dark:border-slate-800 dark:from-slate-950/70 dark:to-slate-950/40 dark:text-slate-200 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <UserCircle2 className="h-8 w-8 text-slate-400 dark:text-slate-500" />
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-white">{seller.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{sellerDescriptor}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800 dark:text-slate-200 dark:hover:border-slate-700"
+                    onClick={() => openSellerDialog("change")}
+                  >
+                    Change
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800 dark:text-slate-200 dark:hover:border-slate-700"
+                    onClick={() => openSellerDialog("add")}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Document ID
+                  <input
+                    value={seller.document}
+                    onChange={(event) => handleSellerChange("document", event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                    placeholder="402-0000000-0"
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Phone number
+                  <input
+                    value={seller.phone}
+                    onChange={(event) => handleSellerChange("phone", event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                    placeholder="809-555-0101"
+                  />
+                </label>
+              </div>
               <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
                 Notes
-                <input
+                <textarea
                   value={seller.notes}
                   onChange={(event) => handleSellerChange("notes", event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                  className="mt-1 h-20 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
                   placeholder="Any red flags or return visits"
                 />
               </label>
@@ -352,7 +564,7 @@ export default function PosBuyPage() {
           >
             <div className="space-y-6">
               {items.map((item, index) => {
-                const offer = Math.max(0, Math.round(item.resaleValue * (1 - item.targetMargin / 100)));
+                const offer = Math.max(0, Number(item.offerAmount) || 0);
                 return (
                   <div
                     key={item.id}
@@ -499,45 +711,31 @@ export default function PosBuyPage() {
                           <span>#{index + 1}</span>
                         </header>
                         <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
-                          Expected resale price
+                          Offer to seller
                           <div className="mt-1 flex items-center gap-2">
                             <span className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                              {formatCurrency(item.resaleValue)}
+                              {formatCurrency(offer)}
                             </span>
                             <input
-                              type="range"
+                              type="number"
+                              inputMode="decimal"
                               min={0}
-                              max={80000}
-                              step={500}
-                              value={item.resaleValue}
-                              onChange={(event) => updateItem(item.id, { resaleValue: Number(event.target.value) })}
-                              className="h-1 w-full cursor-pointer appearance-none rounded-full bg-slate-200 dark:bg-slate-700"
+                              step={100}
+                              value={item.offerAmount > 0 ? item.offerAmount : ""}
+                              onChange={(event) => {
+                                const nextValue = Number(event.target.value);
+                                updateItem(item.id, {
+                                  offerAmount: Number.isFinite(nextValue) ? nextValue : 0,
+                                });
+                              }}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                              placeholder="0.00"
                             />
                           </div>
                         </label>
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">
-                          Target margin
-                          <div className="mt-1 flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                              <Percent className="h-3 w-3" /> {item.targetMargin}%
-                            </span>
-                            <input
-                              type="range"
-                              min={10}
-                              max={50}
-                              step={1}
-                              value={item.targetMargin}
-                              onChange={(event) => updateItem(item.id, { targetMargin: Number(event.target.value) })}
-                              className="h-1 w-full cursor-pointer appearance-none rounded-full bg-slate-200 dark:bg-slate-700"
-                            />
-                          </div>
-                        </label>
-                        <p className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-                          Offer to seller: {formatCurrency(offer)}
-                        </p>
                         <p className="text-[11px] leading-5 text-slate-500 dark:text-slate-400">
-                          Posting will create a purchase order, credit the inventory ledger, and push the cash
-                          movement to the current shift drawer.
+                          Enter the agreed payout amount for this item. Posting will log the cash movement for the
+                          active shift.
                         </p>
                       </div>
                     </div>
@@ -571,27 +769,11 @@ export default function PosBuyPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center gap-2 text-slate-500">
-                  <NotebookPen className="h-4 w-4" /> Total resale value
-                </span>
-                <span className="font-semibold text-slate-900 dark:text-slate-100">
-                  {formatCurrency(intakeSummary.resaleTotal)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-2 text-slate-500">
                   <BadgeDollarSign className="h-4 w-4" /> Total payout offer
                 </span>
                 <span className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">
                   {formatCurrency(intakeSummary.offerTotal)}
                 </span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Projected profit</span>
-                <span>{formatCurrency(intakeSummary.projectedProfit)}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Expected margin</span>
-                <span>{(intakeSummary.expectedMargin * 100).toFixed(1)}%</span>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
                 <p className="font-semibold text-slate-600 dark:text-slate-200">Cash drawer impact</p>
@@ -689,5 +871,152 @@ export default function PosBuyPage() {
         </div>
       </form>
     </main>
+    {isSellerDialogOpen ? (
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+        onClick={closeSellerDialog}
+      >
+        <form
+          className="w-full max-w-lg space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+          onClick={(event) => event.stopPropagation()}
+          onSubmit={handleSubmitSellerProfile}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                {sellerDialogMode === "change" ? "Change seller" : "Add seller"}
+              </h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Search CRM or enter a new profile to link to this purchase.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeSellerDialog}
+              className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+              aria-label="Close seller dialog"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+            Lookup CRM
+            <div className="mt-1 flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300">
+              <Search className="h-4 w-4 text-slate-400" />
+              <input
+                value={sellerLookup}
+                onChange={(event) => setSellerLookup(event.target.value)}
+                className="flex-1 bg-transparent focus:outline-none"
+                placeholder="Name, phone, or email"
+              />
+            </div>
+          </label>
+          {sellerSearchError ? (
+            <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
+              {sellerSearchError}
+            </p>
+          ) : null}
+          {isSearchingSellers ? (
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching CRM…
+            </div>
+          ) : null}
+          {sellerSearchResults.length > 0 ? (
+            <ul className="divide-y divide-slate-100 rounded-2xl border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+              {sellerSearchResults.map((result) => {
+                const contactLine = [result.email, result.phone].filter(Boolean).join(" • ") || "No contact details";
+                return (
+                  <li key={result.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm text-slate-700 dark:text-slate-200">
+                    <div>
+                      <p className="font-semibold text-slate-900 dark:text-white">{result.name}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{contactLine}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSeller(result)}
+                      className="rounded-full border border-sky-300 px-3 py-1 text-xs font-semibold text-sky-600 transition hover:border-sky-400 hover:text-sky-700 dark:border-sky-500/60 dark:text-sky-200"
+                    >
+                      Use
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : sellerLookup.trim().length >= 2 && !isSearchingSellers && !sellerSearchError ? (
+            <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-400">
+              No CRM sellers found. Try a different search.
+            </p>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleUseWalkInSeller}
+            className="w-full rounded-2xl border border-slate-200 px-4 py-2 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+          >
+            Use walk-in seller
+          </button>
+          <div className="space-y-3 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/50">
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Full name
+              <input
+                value={sellerForm.name}
+                onChange={(event) => handleSellerFormChange("name", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                placeholder="María Gómez"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Document ID
+              <input
+                value={sellerForm.document}
+                onChange={(event) => handleSellerFormChange("document", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                placeholder="402-0000000-0"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Phone number
+              <input
+                value={sellerForm.phone}
+                onChange={(event) => handleSellerFormChange("phone", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                placeholder="809-555-0101"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Notes
+              <textarea
+                value={sellerForm.notes}
+                onChange={(event) => handleSellerFormChange("notes", event.target.value)}
+                className="mt-1 h-20 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                placeholder="Any red flags or return visits"
+              />
+            </label>
+            {sellerFormError ? (
+              <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
+                {sellerFormError}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={closeSellerDialog}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-600/30 transition hover:bg-sky-500"
+            >
+              Save seller
+            </button>
+          </div>
+        </form>
+      </div>
+    ) : null}
+    </>
   );
 }
