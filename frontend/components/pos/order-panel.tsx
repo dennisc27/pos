@@ -43,7 +43,8 @@ export function OrderPanel({
   onPriceChange,
   tenderOptions,
   defaultTenderAmount,
-  cashTenderAmount
+  cashTenderAmount,
+  onOpenPaymentDialog
 }: {
   items: CartLine[];
   summary: SaleSummary;
@@ -62,6 +63,7 @@ export function OrderPanel({
   tenderOptions: { value: TenderBreakdown["method"]; label: string }[];
   defaultTenderAmount: number;
   cashTenderAmount: number;
+  onOpenPaymentDialog?: () => void;
 }) {
   const [isAddingTender, setIsAddingTender] = useState(false);
   const firstOption = useMemo(
@@ -519,7 +521,13 @@ export function OrderPanel({
         {!isAddingTender ? (
           <button
             type="button"
-            onClick={handleStartAddingTender}
+            onClick={() => {
+              if (onOpenPaymentDialog) {
+                onOpenPaymentDialog();
+                return;
+              }
+              handleStartAddingTender();
+            }}
             disabled={defaultTenderAmount <= 0 || tenderOptions.length === 0}
             className="w-full rounded-xl border border-sky-500/70 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white dark:disabled:border-slate-700 dark:disabled:text-slate-600"
           >

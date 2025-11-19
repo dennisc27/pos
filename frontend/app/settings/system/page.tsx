@@ -38,6 +38,12 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3
 
 type StatusMessage = { tone: "success" | "error"; message: string } | null;
 
+type BranchOption = {
+  id: number;
+  name: string;
+  code: string | null;
+};
+
 type MaskedSettingEntry<T> = {
   key: string;
   value: T | null;
@@ -572,6 +578,10 @@ export default function SettingsSystemPage() {
   const [activeScope, setActiveScope] = useState<"global" | "branch" | "user">("global");
   const [branchId, setBranchId] = useState("1");
   const [userId, setUserId] = useState("1");
+  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([]);
+  const [branchOptionsLoading, setBranchOptionsLoading] = useState(false);
+  const [branchOptionsError, setBranchOptionsError] = useState<string | null>(null);
+  const [primaryBranchId, setPrimaryBranchId] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<StatusMessage>(null);
@@ -645,6 +655,47 @@ export default function SettingsSystemPage() {
     return null;
   }, [scopeParams]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setBranchOptionsLoading(true);
+    setBranchOptionsError(null);
+
+    fetch(`${API_BASE_URL}/api/branches`)
+      .then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as { branches?: BranchOption[]; error?: string };
+        if (!response.ok) {
+          throw new Error(data?.error ?? "No se pudieron cargar las sucursales");
+        }
+
+        const options = (data.branches ?? []).map((branch) => ({
+          id: Number(branch.id),
+          name: branch.name,
+          code: branch.code ?? null,
+        }));
+
+        if (!cancelled) {
+          setBranchOptions(options);
+          if (options.length > 0) {
+            setPrimaryBranchId((current) => (current ? current : String(options[0].id)));
+          }
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setBranchOptionsError(error instanceof Error ? error.message : "No se pudieron cargar las sucursales");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBranchOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     setStatus(null);
@@ -711,7 +762,14 @@ export default function SettingsSystemPage() {
 
   const applyEntries = (entries: MaskedSettingEntry<unknown>[]) => {
     entries.forEach((entry) => {
-      if (entry.key === "system.settings" && entry.value && typeof entry.value === "object") {
+      if (entry.key === "system.activeBranchId") {
+        if (entry.value != null) {
+          const numeric = Number(entry.value);
+          setPrimaryBranchId(Number.isFinite(numeric) && numeric > 0 ? String(Math.trunc(numeric)) : "");
+        } else {
+          setPrimaryBranchId("");
+        }
+      } else if (entry.key === "system.settings" && entry.value && typeof entry.value === "object") {
         const raw = entry.value as Partial<SystemSettings>;
         setSystemSettings({
           pawnEnabled: Boolean(raw.pawnEnabled ?? defaultSystemSettings.pawnEnabled),
@@ -1013,7 +1071,13 @@ export default function SettingsSystemPage() {
     setSaving(true);
     setStatus(null);
     try {
+      const parsedPrimary = Number(primaryBranchId);
+      if (!Number.isInteger(parsedPrimary) || parsedPrimary <= 0) {
+        throw new Error("Selecciona una sucursal principal válida");
+      }
+
       const entries = [
+        { key: "system.activeBranchId", value: parsedPrimary },
         { key: "system.settings", value: systemSettings },
         { key: "company.profile", value: companyProfile },
         { key: "localization.settings", value: localization },
@@ -1070,6 +1134,9 @@ export default function SettingsSystemPage() {
 
       setStatus({ tone: "success", message: "Configuración guardada correctamente" });
       applyEntries(data.entries ?? []);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("active-branch:updated"));
+      }
     } catch (error) {
       setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error al guardar" });
     } finally {
@@ -1142,6 +1209,36 @@ export default function SettingsSystemPage() {
       case "system-settings":
         return (
           <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="primary-branch">
+                Sucursal principal
+              </label>
+              {branchOptionsLoading ? (
+                <span className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando sucursales…
+                </span>
+              ) : branchOptionsError ? (
+                <span className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+                  {branchOptionsError}
+                </span>
+              ) : (
+                <select
+                  id="primary-branch"
+                  value={primaryBranchId}
+                  onChange={(event) => setPrimaryBranchId(event.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  {branchOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Esta sucursal se aplicará en el POS, préstamos, layaway y operaciones que requieren una ubicación fija.
+              </p>
+            </div>
             <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 p-4">
               <div>
                 <p className="text-sm font-medium text-foreground">Módulo de empeños</p>

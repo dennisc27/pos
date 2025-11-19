@@ -1,6 +1,7 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 import {
   BadgeCheck,
@@ -12,8 +13,10 @@ import {
   FileText,
   Loader2,
   PackagePlus,
+  Search,
   ShieldCheck,
   User,
+  X,
 } from "lucide-react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -55,12 +58,6 @@ type IdImageUpload = {
 };
 
 type ApiError = Error & { status?: number };
-
-type BranchOption = {
-  id: number;
-  name: string;
-  code?: string | null;
-};
 
 type CustomerSummary = {
   id: number;
@@ -193,17 +190,17 @@ export default function LoansNewPage() {
   const [loadingModels, setLoadingModels] = useState(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
-  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([]);
-  const [branchesLoading, setBranchesLoading] = useState(true);
-  const [branchesError, setBranchesError] = useState<string | null>(null);
-
+  const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [branchId, setBranchId] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null);
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<CustomerSummary[]>([]);
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
-  const [ticketNumber, setTicketNumber] = useState(() => `PAWN-${Date.now()}`);
+  const [isCustomerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [ticketNumber, setTicketNumber] = useState("");
+  const [ticketLoading, setTicketLoading] = useState(false);
+  const [ticketError, setTicketError] = useState<string | null>(null);
   const [comments, setComments] = useState("");
 
   const [idUploads, setIdUploads] = useState<IdImageUpload[]>([]);
@@ -218,6 +215,22 @@ export default function LoansNewPage() {
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [principalAmount, setPrincipalAmount] = useState("");
   const [termCount, setTermCount] = useState(1);
+
+  useEffect(() => {
+    if (activeBranch) {
+      setBranchId(String(activeBranch.id));
+    }
+  }, [activeBranch]);
+
+  useEffect(() => {
+    setSelectedCustomer(null);
+    setCustomerQuery("");
+    setCustomerResults([]);
+    setCustomerSearchOpen(false);
+    setCustomerSearchError(null);
+    setCustomerSearchLoading(false);
+  }, [branchId]);
+
   const [startDate, setStartDate] = useState(todayIso());
   const [manualSchedule, setManualSchedule] = useState<LoanScheduleRow[]>([]);
 
@@ -228,6 +241,54 @@ export default function LoansNewPage() {
     ticketNumber: string;
     printableUrl?: string;
   }>(null);
+
+  const fallbackTicketNumber = useCallback(
+    () => `PAWN-${Math.floor(Math.random() * 1_000_000).toString().padStart(6, "0")}`,
+    []
+  );
+
+  const loadTicketNumber = useCallback(async () => {
+    setTicketLoading(true);
+    setTicketError(null);
+
+    try {
+      const params = new URLSearchParams();
+      const numericBranch = Number(branchId);
+      if (Number.isInteger(numericBranch) && numericBranch > 0) {
+        params.set("branchId", String(numericBranch));
+      }
+
+      const queryString = params.toString();
+      const data = await getJson<{ ticketNumber: string }>(
+        `/api/loans/next-ticket${queryString ? `?${queryString}` : ""}`
+      );
+
+      const generated = data.ticketNumber?.trim();
+      setTicketNumber(generated && generated.length > 0 ? generated : fallbackTicketNumber());
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo generar el ticket automáticamente.";
+      setTicketError(message);
+      setTicketNumber((previous) => previous || fallbackTicketNumber());
+    } finally {
+      setTicketLoading(false);
+    }
+  }, [branchId, fallbackTicketNumber]);
+
+  useEffect(() => {
+    if (!branchId) {
+      setTicketNumber((previous) => previous || fallbackTicketNumber());
+      return;
+    }
+
+    void loadTicketNumber();
+  }, [branchId, fallbackTicketNumber, loadTicketNumber]);
+
+  const closeCustomerSearchDialog = useCallback(() => {
+    setCustomerSearchOpen(false);
+    setCustomerSearchLoading(false);
+    setCustomerSearchError(null);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -255,38 +316,13 @@ export default function LoansNewPage() {
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
-    setBranchesLoading(true);
-    setBranchesError(null);
+    if (!isCustomerSearchOpen) {
+      return;
+    }
 
-    getJson<{ branches: BranchOption[] }>("/api/branches")
-      .then((payload) => {
-        if (!isMounted) return;
-        const options = payload?.branches ?? [];
-        setBranchOptions(options);
-        if (!branchId && options.length > 0) {
-          setBranchId(String(options[0].id));
-        }
-      })
-      .catch((error: ApiError) => {
-        if (!isMounted) return;
-        setBranchesError(error.message ?? "No se pudieron cargar las sucursales");
-      })
-      .finally(() => {
-        if (isMounted) {
-          setBranchesLoading(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [branchId]);
-
-  useEffect(() => {
     if (customerQuery.trim().length < 2) {
       setCustomerResults([]);
-      setCustomerSearchError(null);
+      setCustomerSearchError("Ingresa al menos 2 caracteres para buscar.");
       setCustomerSearchLoading(false);
       return;
     }
@@ -344,7 +380,7 @@ export default function LoansNewPage() {
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [branchId, customerQuery]);
+  }, [branchId, customerQuery, isCustomerSearchOpen]);
 
   useEffect(() => {
     const model = interestModels.find((item) => item.id === Number(selectedModelId));
@@ -472,6 +508,7 @@ export default function LoansNewPage() {
     setSelectedCustomer(customer);
     setCustomerQuery(customer.fullName);
     setCustomerResults([]);
+    closeCustomerSearchDialog();
   };
 
   const clearSelectedCustomer = () => {
@@ -554,7 +591,8 @@ export default function LoansNewPage() {
   };
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-12">
+    <>
+      <main className="mx-auto max-w-6xl px-6 py-12">
       <header className="mb-10 flex flex-col gap-2">
         <span className="text-xs uppercase tracking-wider text-slate-500">Préstamos</span>
         <h1 className="text-3xl font-semibold text-slate-900 dark:text-slate-100">Nuevo préstamo / empeño</h1>
@@ -608,72 +646,52 @@ export default function LoansNewPage() {
           <form className="grid gap-6 sm:grid-cols-2">
             <div className="sm:col-span-2 space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Sucursal</label>
-              {branchesLoading ? (
+              {branchLoading ? (
                 <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <Loader2 className="h-4 w-4 animate-spin text-indigo-500" /> Cargando sucursales...
+                  <Loader2 className="h-4 w-4 animate-spin text-indigo-500" /> Cargando sucursal…
                 </div>
-              ) : branchesError ? (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{branchesError}</div>
+              ) : branchError ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{branchError}</div>
+              ) : activeBranch ? (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                  {activeBranch.name}
+                </div>
               ) : (
-                <select
-                  value={branchId}
-                  onChange={(event) => {
-                    setBranchId(event.target.value);
-                    setSelectedCustomer(null);
-                    setCustomerQuery("");
-                    setCustomerResults([]);
-                  }}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
-                >
-                  <option value="">Seleccione una sucursal</option>
-                  {branchOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                  Configura una sucursal activa en ajustes antes de registrar préstamos.
+                </div>
               )}
             </div>
 
             <div className="sm:col-span-2 space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Buscar cliente</label>
-              <input
-                value={customerQuery}
-                onChange={(event) => {
-                  setCustomerQuery(event.target.value);
-                  if (selectedCustomer && event.target.value.trim() !== selectedCustomer.fullName) {
-                    setSelectedCustomer(null);
-                  }
-                }}
-                type="search"
-                placeholder="Nombre, correo o teléfono"
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
-              />
-              {customerSearchLoading ? (
-                <p className="text-sm text-slate-500">
-                  <Loader2 className="mr-2 inline h-4 w-4 animate-spin text-indigo-500" /> Buscando clientes...
-                </p>
-              ) : customerSearchError ? (
-                <p className="text-sm text-rose-600">{customerSearchError}</p>
-              ) : null}
-              {customerResults.length > 0 && !selectedCustomer ? (
-                <ul className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white text-sm shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                  {customerResults.map((customer) => (
-                    <li key={customer.id}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectCustomer(customer)}
-                        className="flex w-full flex-col items-start gap-1 px-3 py-2 text-left hover:bg-indigo-50 dark:hover:bg-slate-800"
-                      >
-                        <span className="font-medium text-slate-900 dark:text-slate-100">{customer.fullName}</span>
-                        <span className="text-xs text-slate-500 dark:text-slate-400">
-                          {customer.phone ?? customer.email ?? "Sin contacto"}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                <input
+                  value={customerQuery}
+                  onChange={(event) => {
+                    setCustomerQuery(event.target.value);
+                    if (selectedCustomer && event.target.value.trim() !== selectedCustomer.fullName) {
+                      setSelectedCustomer(null);
+                    }
+                  }}
+                  type="search"
+                  placeholder="Nombre, correo o teléfono"
+                  className="w-full flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomerSearchOpen(true);
+                    setCustomerSearchError(null);
+                  }}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-500/20"
+                >
+                  <Search className="h-4 w-4" /> Buscar
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Ingresa al menos dos caracteres y selecciona al cliente desde la lista.
+              </p>
 
               {selectedCustomer ? (
                 <div className="flex flex-col gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
@@ -696,25 +714,42 @@ export default function LoansNewPage() {
               ) : null}
             </div>
 
-            <div className="sm:col-span-2">
+            <div className="sm:col-span-2 space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Ticket</label>
-              <div className="mt-1 flex gap-2">
-                <input
-                  value={ticketNumber}
-                  onChange={(event) => setTicketNumber(event.target.value)}
-                  type="text"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
-                  placeholder="Ej. PAWN-00001"
-                />
-                <button
-                  type="button"
-                  onClick={() => setTicketNumber(`PAWN-${Math.floor(Math.random() * 1_000_000).toString().padStart(6, "0")}`)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-600 transition hover:bg-indigo-100"
-                >
-                  <ClipboardCheck className="h-4 w-4" />
-                  Generar
-                </button>
+              <input
+                value={ticketNumber}
+                onChange={(event) => setTicketNumber(event.target.value)}
+                type="text"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
+                placeholder="Ej. PAWN-000001"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <div className="flex items-center gap-2">
+                  {ticketLoading ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-500" /> Generando ticket según sucursal...
+                    </>
+                  ) : (
+                    <>
+                      <ClipboardCheck className="h-3.5 w-3.5 text-indigo-500" /> Ticket sugerido automáticamente para la sucursal activa.
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {ticketError ? (
+                    <button
+                      type="button"
+                      onClick={() => void loadTicketNumber()}
+                      className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 font-semibold text-amber-700 transition hover:border-amber-400 hover:text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200"
+                    >
+                      Reintentar
+                    </button>
+                  ) : null}
+                </div>
               </div>
+              {ticketError ? (
+                <p className="text-xs text-rose-600 dark:text-rose-300">{ticketError}</p>
+              ) : null}
             </div>
 
             <div className="sm:col-span-2">
@@ -1110,8 +1145,14 @@ export default function LoansNewPage() {
                 type="button"
                 onClick={() => {
                   setStepIndex(0);
-                  setCustomerId("");
-                  setTicketNumber(`PAWN-${Date.now()}`);
+                  setSelectedCustomer(null);
+                  setCustomerQuery("");
+                  setTicketNumber("");
+                  setTicketError(null);
+                  setTicketLoading(false);
+                  void loadTicketNumber();
+                  setCustomerResults([]);
+                  setCustomerSearchError(null);
                   setCapturedIdPaths([]);
                   setIdUploads([]);
                   setCollateralItems([{ description: "", estimatedValue: "", photoPath: "" }]);
@@ -1176,7 +1217,93 @@ export default function LoansNewPage() {
           </button>
         )}
       </div>
-    </main>
+      </main>
+      {isCustomerSearchOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={closeCustomerSearchDialog}
+        >
+          <div
+            className="w-full max-w-3xl space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Buscar cliente</h2>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Filtra clientes por nombre, correo o teléfono para vincularlos al nuevo préstamo.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeCustomerSearchDialog}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Cerrar búsqueda de clientes"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <label className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-300">
+              Nombre, correo o teléfono
+              <input
+                value={customerQuery}
+                onChange={(event) => {
+                  setCustomerQuery(event.target.value);
+                  if (selectedCustomer && event.target.value.trim() !== selectedCustomer.fullName) {
+                    setSelectedCustomer(null);
+                  }
+                }}
+                autoFocus
+                type="search"
+                placeholder="Ej. Ana Pérez o 809"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              />
+            </label>
+
+            {customerSearchError ? (
+              <div className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                {customerSearchError}
+              </div>
+            ) : null}
+
+            <div className="max-h-80 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-inner dark:border-slate-800 dark:bg-slate-950/40">
+              {customerSearchLoading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-500 dark:text-slate-400">
+                  <Loader2 className="h-4 w-4 animate-spin text-indigo-500" /> Buscando clientes...
+                </div>
+              ) : customerResults.length === 0 && !customerSearchError ? (
+                <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+                  No se encontraron coincidencias para la búsqueda actual.
+                </div>
+              ) : customerResults.length > 0 ? (
+                <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {customerResults.map((customer) => (
+                    <li key={customer.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCustomer(customer)}
+                        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-indigo-50 dark:hover:bg-slate-800"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{customer.fullName}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {customer.phone ?? customer.email ?? "Sin contacto"}
+                          </p>
+                        </div>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">ID #{customer.id}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
