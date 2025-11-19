@@ -13,7 +13,8 @@ export function ProductGallery({
   onSearchTermChange,
   onCategorySelect,
   selectedProductIds,
-  onToggleProduct
+  onToggleProduct,
+  onOpenInventory
 }: {
   categories: ProductCategory[];
   products: Product[];
@@ -23,6 +24,7 @@ export function ProductGallery({
   onCategorySelect: (categoryId: string) => void;
   selectedProductIds: string[];
   onToggleProduct: (product: Product) => void;
+  onOpenInventory?: () => void;
 }) {
   const selectedSet = useMemo(() => new Set(selectedProductIds), [selectedProductIds]);
 
@@ -32,8 +34,16 @@ export function ProductGallery({
       subtitle="Filter by category, search the catalog, and add items to the ticket"
       className="h-full"
       action={
-        <button className="text-xs font-medium text-sky-600 transition hover:text-sky-500 dark:text-sky-300 dark:hover:text-sky-200">
-          See all inventory
+        <button
+          type="button"
+          onClick={onOpenInventory}
+          disabled={!onOpenInventory}
+          className={cn(
+            "text-xs font-medium text-sky-600 transition hover:text-sky-500 dark:text-sky-300 dark:hover:text-sky-200",
+            !onOpenInventory && "cursor-not-allowed opacity-60 hover:text-sky-600"
+          )}
+        >
+          All products
         </button>
       }
     >

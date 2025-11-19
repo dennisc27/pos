@@ -2,7 +2,7 @@
 
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
 
-import { ClipboardList, Loader2, PackagePlus, Printer, Search, Trash2 } from "lucide-react";
+import { ClipboardList, Loader2, PackagePlus, Printer, Search, Trash2, X } from "lucide-react";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 import { formatCurrency } from "@/components/pos/utils";
@@ -95,6 +95,15 @@ type PurchaseResponse = {
   };
 };
 
+type SupplierDetails = {
+  name: string;
+  taxId: string;
+  contact: string;
+  phone: string;
+  email: string;
+  notes: string;
+};
+
 export default function PurchaseReceivePage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [availableLayouts, setAvailableLayouts] = useState<LayoutOption[]>([]);
@@ -116,6 +125,62 @@ export default function PurchaseReceivePage() {
   const [status, setStatus] = useState<StatusMessage>(null);
   const [submitting, setSubmitting] = useState(false);
   const [preview, setPreview] = useState<PurchaseResponse | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierDetails | null>(null);
+  const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [supplierForm, setSupplierForm] = useState<SupplierDetails>({
+    name: "",
+    taxId: "",
+    contact: "",
+    phone: "",
+    email: "",
+    notes: "",
+  });
+  const [supplierFormError, setSupplierFormError] = useState<string | null>(null);
+
+  const openSupplierDialog = () => {
+    setSupplierForm({
+      name: supplierName || selectedSupplier?.name || "",
+      taxId: selectedSupplier?.taxId ?? "",
+      contact: selectedSupplier?.contact ?? "",
+      phone: selectedSupplier?.phone ?? "",
+      email: selectedSupplier?.email ?? "",
+      notes: selectedSupplier?.notes ?? "",
+    });
+    setSupplierFormError(null);
+    setIsSupplierDialogOpen(true);
+  };
+
+  const closeSupplierDialog = () => {
+    setIsSupplierDialogOpen(false);
+    setSupplierFormError(null);
+  };
+
+  const handleSupplierFormChange = (field: keyof SupplierDetails, value: string) => {
+    setSupplierForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSupplierFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = supplierForm.name.trim();
+    if (!trimmedName) {
+      setSupplierFormError("Supplier name is required.");
+      return;
+    }
+
+    const nextSupplier: SupplierDetails = {
+      name: trimmedName,
+      taxId: supplierForm.taxId.trim(),
+      contact: supplierForm.contact.trim(),
+      phone: supplierForm.phone.trim(),
+      email: supplierForm.email.trim(),
+      notes: supplierForm.notes.trim(),
+    };
+
+    setSelectedSupplier(nextSupplier);
+    setSupplierName(trimmedName);
+    setSupplierFormError(null);
+    setIsSupplierDialogOpen(false);
+  };
 
   useEffect(() => {
     setBranchId((prev) => {
@@ -148,6 +213,22 @@ export default function PurchaseReceivePage() {
 
     loadMetadata();
   }, []);
+
+  useEffect(() => {
+    if (!isSupplierDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSupplierDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isSupplierDialogOpen]);
 
   const totals = useMemo(() => {
     let totalQuantity = 0;
@@ -401,7 +482,8 @@ export default function PurchaseReceivePage() {
   };
 
   return (
-    <div className="space-y-8">
+    <>
+      <div className="space-y-8">
       <header className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold text-slate-900">Recepción de compras</h1>
         <p className="text-sm text-slate-600">
@@ -468,8 +550,17 @@ export default function PurchaseReceivePage() {
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Proveedor
+          <div className="flex flex-col gap-2 text-sm text-slate-700">
+            <div className="flex items-center justify-between">
+              <span>Proveedor</span>
+              <button
+                type="button"
+                onClick={openSupplierDialog}
+                className="text-xs font-semibold text-sky-600 transition hover:text-sky-500"
+              >
+                Añadir proveedor
+              </button>
+            </div>
             <input
               type="text"
               className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
@@ -477,7 +568,18 @@ export default function PurchaseReceivePage() {
               onChange={(event) => setSupplierName(event.target.value)}
               placeholder="Nombre del proveedor"
             />
-          </label>
+            {selectedSupplier ? (
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
+                <p className="font-semibold text-slate-700 dark:text-slate-100">
+                  {selectedSupplier.contact || "Contacto principal"}
+                </p>
+                <p>
+                  {[selectedSupplier.phone, selectedSupplier.email].filter((value) => value).join(" • ") || "Sin datos de contacto"}
+                </p>
+                {selectedSupplier.taxId ? <p>RNC: {selectedSupplier.taxId}</p> : null}
+              </div>
+            ) : null}
+          </div>
 
           <label className="flex flex-col gap-1 text-sm text-slate-700">
             Factura / Documento
@@ -736,5 +838,114 @@ export default function PurchaseReceivePage() {
         </section>
       )}
     </div>
+    {isSupplierDialogOpen ? (
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+        onClick={closeSupplierDialog}
+      >
+        <form
+          className="w-full max-w-2xl space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+          onClick={(event) => event.stopPropagation()}
+          onSubmit={handleSupplierFormSubmit}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Registrar proveedor</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Captura el RNC, contacto y notas para reutilizarlo en recepciones futuras.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeSupplierDialog}
+              className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300"
+              aria-label="Cerrar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Nombre comercial
+              <input
+                value={supplierForm.name}
+                onChange={(event) => handleSupplierFormChange("name", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="Electro Caribe SRL"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              RNC / Tax ID
+              <input
+                value={supplierForm.taxId}
+                onChange={(event) => handleSupplierFormChange("taxId", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="1-01-12345-6"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Contacto principal
+              <input
+                value={supplierForm.contact}
+                onChange={(event) => handleSupplierFormChange("contact", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="María Gómez"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Teléfono
+              <input
+                value={supplierForm.phone}
+                onChange={(event) => handleSupplierFormChange("phone", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="809-555-0123"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300 sm:col-span-2">
+              Correo electrónico
+              <input
+                type="email"
+                value={supplierForm.email}
+                onChange={(event) => handleSupplierFormChange("email", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="compras@proveedor.com"
+              />
+            </label>
+          </div>
+          <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+            Notas
+            <textarea
+              value={supplierForm.notes}
+              onChange={(event) => handleSupplierFormChange("notes", event.target.value)}
+              className="mt-1 h-24 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              placeholder="Condiciones de pago, transportista preferido, etc."
+            />
+          </label>
+          {supplierFormError ? (
+            <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
+              {supplierFormError}
+            </p>
+          ) : null}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={closeSupplierDialog}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:bg-indigo-500"
+            >
+              Guardar proveedor
+            </button>
+          </div>
+        </form>
+      </div>
+    ) : null}
+    </>
   );
 }
