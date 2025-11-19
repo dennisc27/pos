@@ -14134,39 +14134,29 @@ async function loadActiveBranch(executor = db) {
     executor
   );
 
-  let desiredBranchId = null;
-
-  if (entry?.value != null) {
-    try {
-      desiredBranchId = parsePositiveInteger(entry.value, 'system.activeBranchId');
-    } catch (error) {
-      desiredBranchId = null;
-    }
+  if (entry?.value == null) {
+    throw new HttpError(404, 'Configura una sucursal activa en ajustes');
   }
 
-  const baseQuery = executor
+  let desiredBranchId;
+  try {
+    desiredBranchId = parsePositiveInteger(entry.value, 'system.activeBranchId');
+  } catch (error) {
+    throw new HttpError(400, 'La sucursal activa configurada es inválida');
+  }
+
+  const [branchRow] = await executor
     .select({
       id: branches.id,
       code: branches.code,
       name: branches.name,
     })
-    .from(branches);
-
-  let branchRow = null;
-
-  if (desiredBranchId != null) {
-    const [match] = await baseQuery.where(eq(branches.id, desiredBranchId)).limit(1);
-    if (match) {
-      branchRow = match;
-    }
-  }
+    .from(branches)
+    .where(eq(branches.id, desiredBranchId))
+    .limit(1);
 
   if (!branchRow) {
-    const [fallback] = await baseQuery.orderBy(asc(branches.name)).limit(1);
-    if (!fallback) {
-      throw new HttpError(404, 'No branches configured');
-    }
-    branchRow = fallback;
+    throw new HttpError(404, 'La sucursal activa configurada ya no existe');
   }
 
   return {
