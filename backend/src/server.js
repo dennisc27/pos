@@ -179,6 +179,12 @@ function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+function endOfDay(date) {
+  const end = startOfDay(date);
+  end.setHours(23, 59, 59, 999);
+  return end;
+}
+
 function startOfTomorrow(date) {
   const next = startOfDay(date);
   next.setDate(next.getDate() + 1);
@@ -829,19 +835,20 @@ async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = nu
   const lineRows = await client
     .select({
       id: orderItems.id,
-      productCodeVersionId: orderItems.productCodeVersionId,
+      codeId: orderItems.codeId,
       qty: orderItems.qty,
-      unitPriceCents: orderItems.unitPriceCents,
-      totalCents: orderItems.totalCents,
+      priceCents: orderItems.priceCents,
+      discountCents: orderItems.discountCents,
       code: productCodes.code,
       sku: productCodes.sku,
       name: productCodes.name,
       description: productCodes.description,
+      productCodeVersionId: productCodeVersions.id,
       isActive: productCodeVersions.isActive,
     })
     .from(orderItems)
-    .innerJoin(productCodeVersions, eq(orderItems.productCodeVersionId, productCodeVersions.id))
-    .innerJoin(productCodes, eq(productCodeVersions.productCodeId, productCodes.id))
+    .innerJoin(productCodes, eq(orderItems.codeId, productCodes.id))
+    .leftJoin(productCodeVersions, eq(productCodes.id, productCodeVersions.productCodeId))
     .where(eq(orderItems.orderId, invoiceRow.orderId))
     .orderBy(asc(orderItems.id));
 
@@ -851,8 +858,9 @@ async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = nu
 
   const lines = lineRows.map((row) => {
     const qty = Number(row.qty ?? 0);
-    const unitPriceCents = Number(row.unitPriceCents ?? 0);
-    const lineSubtotalCents = Math.max(0, unitPriceCents * qty);
+    const priceCents = Number(row.priceCents ?? 0);
+    const discountCents = Number(row.discountCents ?? 0);
+    const lineSubtotalCents = Math.max(0, priceCents * qty - discountCents);
     const lineTaxCents = Math.round(lineSubtotalCents * taxRatio);
     const lineTotalCents = lineSubtotalCents + lineTaxCents;
     const taxPerUnitCents = qty > 0 ? Math.round(lineTaxCents / qty) : 0;
@@ -860,12 +868,12 @@ async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = nu
     return {
       id: Number(row.id),
       orderItemId: Number(row.id),
-      productCodeVersionId: Number(row.productCodeVersionId),
+      productCodeVersionId: row.productCodeVersionId ? Number(row.productCodeVersionId) : null,
       sku: row.sku ?? row.code ?? null,
       code: row.code ?? null,
       description: row.name ?? 'Product',
       qty,
-      unitPriceCents,
+      unitPriceCents: priceCents,
       subtotalCents: lineSubtotalCents,
       taxCents: lineTaxCents,
       taxPerUnitCents,
@@ -2009,7 +2017,7 @@ function serializeLoanResponsePayload(payload) {
 async function reserveLayawayInventory(executor, { orderId, branchId }) {
   const items = await executor
     .select({
-      productCodeVersionId: orderItems.productCodeVersionId,
+      codeId: orderItems.codeId,
       qty: orderItems.qty,
     })
     .from(orderItems)
@@ -2036,8 +2044,12 @@ async function reserveLayawayInventory(executor, { orderId, branchId }) {
         name: productCodes.name,
       })
       .from(productCodeVersions)
-      .leftJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
-      .where(eq(productCodeVersions.id, item.productCodeVersionId))
+      .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+      .where(
+        branchId != null
+          ? and(eq(productCodes.id, item.codeId), eq(productCodeVersions.branchId, branchId))
+          : eq(productCodes.id, item.codeId)
+      )
       .limit(1);
 
     if (!versionRow) {
@@ -2067,7 +2079,7 @@ async function reserveLayawayInventory(executor, { orderId, branchId }) {
 async function releaseLayawayInventory(executor, orderId) {
   const items = await executor
     .select({
-      productCodeVersionId: orderItems.productCodeVersionId,
+      codeId: orderItems.codeId,
       qty: orderItems.qty,
     })
     .from(orderItems)
@@ -2080,17 +2092,26 @@ async function releaseLayawayInventory(executor, orderId) {
       continue;
     }
 
-    await executor
-      .update(productCodeVersions)
-      .set({ qtyReserved: sql`GREATEST(${productCodeVersions.qtyReserved} - ${qty}, 0)` })
-      .where(eq(productCodeVersions.id, item.productCodeVersionId));
+    // Find the version for this code
+    const [versionRow] = await executor
+      .select({ id: productCodeVersions.id })
+      .from(productCodeVersions)
+      .where(eq(productCodeVersions.productCodeId, item.codeId))
+      .limit(1);
+
+    if (versionRow) {
+      await executor
+        .update(productCodeVersions)
+        .set({ qtyReserved: sql`GREATEST(${productCodeVersions.qtyReserved} - ${qty}, 0)` })
+        .where(eq(productCodeVersions.id, versionRow.id));
+    }
   }
 }
 
 async function fulfillLayawayInventory(executor, layawayId, orderId) {
   const items = await executor
     .select({
-      productCodeVersionId: orderItems.productCodeVersionId,
+      codeId: orderItems.codeId,
       qty: orderItems.qty,
     })
     .from(orderItems)
@@ -2109,7 +2130,7 @@ async function fulfillLayawayInventory(executor, layawayId, orderId) {
         qtyOnHand: productCodeVersions.qtyOnHand,
       })
       .from(productCodeVersions)
-      .where(eq(productCodeVersions.id, item.productCodeVersionId))
+      .where(eq(productCodeVersions.productCodeId, item.codeId))
       .limit(1);
 
     if (!versionRow) {
@@ -2134,9 +2155,8 @@ async function fulfillLayawayInventory(executor, layawayId, orderId) {
       productCodeVersionId: versionRow.id,
       reason: 'sale',
       qtyChange: -qty,
-      referenceId: layawayId,
-      referenceType: 'layaway',
-      notes: 'Layaway completion',
+      refId: layawayId,
+      refTable: 'layaway',
     });
   }
 }
@@ -2185,8 +2205,8 @@ async function buildLayawayDashboardSnapshot(referenceDate = new Date()) {
         productCode: productCodes.code,
       })
       .from(orderItems)
-      .leftJoin(productCodeVersions, eq(productCodeVersions.id, orderItems.productCodeVersionId))
-      .leftJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+      .innerJoin(productCodes, eq(productCodes.id, orderItems.codeId))
+      .leftJoin(productCodeVersions, eq(productCodeVersions.productCodeId, productCodes.id))
       .where(inArray(orderItems.orderId, orderIds))
       .orderBy(orderItems.orderId, asc(orderItems.id));
 
@@ -2553,16 +2573,17 @@ async function getLayawayDetail(layawayId) {
   const itemRows = await db
     .select({
       id: orderItems.id,
-      productCodeVersionId: orderItems.productCodeVersionId,
+      codeId: orderItems.codeId,
       qty: orderItems.qty,
-      unitPriceCents: orderItems.unitPriceCents,
-      totalCents: orderItems.totalCents,
+      priceCents: orderItems.priceCents,
+      discountCents: orderItems.discountCents,
       productCode: productCodes.code,
       productName: productCodes.name,
+      productCodeVersionId: productCodeVersions.id,
     })
     .from(orderItems)
-    .leftJoin(productCodeVersions, eq(productCodeVersions.id, orderItems.productCodeVersionId))
-    .leftJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+    .innerJoin(productCodes, eq(productCodes.id, orderItems.codeId))
+    .leftJoin(productCodeVersions, eq(productCodeVersions.productCodeId, productCodes.id))
     .where(eq(orderItems.orderId, layawayRow.orderId))
     .orderBy(asc(orderItems.id));
 
@@ -2636,17 +2657,24 @@ async function getLayawayDetail(layawayId) {
           createdAt: orderRow.createdAt?.toISOString?.() ?? orderRow.createdAt,
         }
       : null,
-    items: itemRows.map((item) => ({
-      id: Number(item.id),
-      productCodeVersionId: Number(item.productCodeVersionId),
-      qty: Number(item.qty ?? 0),
-      unitPriceCents: Number(item.unitPriceCents ?? 0),
-      totalCents: Number(item.totalCents ?? 0),
-      productCode: item.productCode,
-      productName: item.productName,
-      totalFormatted: formatPesosFromCents(item.totalCents),
-      unitPriceFormatted: formatPesosFromCents(item.unitPriceCents),
-    })),
+    items: itemRows.map((item) => {
+      const qty = Number(item.qty ?? 0);
+      const priceCents = Number(item.priceCents ?? 0);
+      const discountCents = Number(item.discountCents ?? 0);
+      const totalCents = Math.round(qty * priceCents) - discountCents;
+      
+      return {
+        id: Number(item.id),
+        productCodeVersionId: item.productCodeVersionId ? Number(item.productCodeVersionId) : null,
+        qty,
+        unitPriceCents: priceCents,
+        totalCents,
+        productCode: item.productCode,
+        productName: item.productName,
+        totalFormatted: formatPesosFromCents(totalCents),
+        unitPriceFormatted: formatPesosFromCents(priceCents),
+      };
+    }),
     payments: paymentRows.map((payment) => ({
       id: Number(payment.id),
       amountCents: Number(payment.amountCents ?? 0),
@@ -4653,9 +4681,8 @@ app.post('/api/inventory/count-post', async (req, res, next) => {
             productCodeVersionId: line.productCodeVersionId,
             reason: 'count_post',
             qtyChange: delta,
-            referenceId: numericSessionId,
-            referenceType: 'inventory_count',
-            notes: 'Inventory count adjustment',
+            refId: numericSessionId,
+            refTable: 'inventory_count',
           });
         }
       }
@@ -4966,9 +4993,8 @@ app.post('/api/inventory/transfers/ship', async (req, res, next) => {
           productCodeVersionId: version.id,
           reason: 'transfer_out',
           qtyChange: -qty,
-          referenceId: numericTransferId,
-          referenceType: 'inventory_transfer',
-          notes: 'Inventory transfer shipped',
+          refId: numericTransferId,
+          refTable: 'inventory_transfer',
         });
       }
 
@@ -5119,9 +5145,8 @@ app.post('/api/inventory/transfers/receive', async (req, res, next) => {
           productCodeVersionId: targetVersionId,
           reason: 'transfer_in',
           qtyChange: qty,
-          referenceId: numericTransferId,
-          referenceType: 'inventory_transfer',
-          notes: 'Inventory transfer received',
+          refId: numericTransferId,
+          refTable: 'inventory_transfer',
         });
       }
 
@@ -5230,9 +5255,8 @@ app.post('/api/inventory/quarantine/queue', async (req, res, next) => {
         productCodeVersionId: numericVersionId,
         reason: 'quarantine_out',
         qtyChange: -normalizedQty,
-        referenceId: entry.id,
-        referenceType: 'quarantine',
-        notes: 'Item queued for quarantine',
+        refId: entry.id,
+        refTable: 'quarantine',
       });
 
       return getQuarantineEntry(tx, entry.id);
@@ -5301,9 +5325,8 @@ app.post('/api/inventory/quarantine/resolve', async (req, res, next) => {
           productCodeVersionId: entry.productCodeVersionId,
           reason: 'quarantine_in',
           qtyChange: qty,
-          referenceId: numericQuarantineId,
-          referenceType: 'quarantine',
-          notes: 'Quarantine resolved - returned to stock',
+          refId: numericQuarantineId,
+          refTable: 'quarantine',
         });
       }
 
@@ -6371,9 +6394,8 @@ app.post('/api/loans/:id/forfeit', async (req, res, next) => {
         productCodeVersionId: versionRow.id,
         reason: 'pawn_forfeit_in',
         qtyChange: 1,
-        referenceId: loanId,
-        referenceType: 'loan',
-        notes: `Forfeit collateral ${collateralRow.id}`,
+        refId: loanId,
+        refTable: 'loan',
       });
 
       const [ledgerRow] = await tx
@@ -6382,16 +6404,15 @@ app.post('/api/loans/:id/forfeit', async (req, res, next) => {
           productCodeVersionId: stockLedger.productCodeVersionId,
           reason: stockLedger.reason,
           qtyChange: stockLedger.qtyChange,
-          referenceId: stockLedger.referenceId,
-          referenceType: stockLedger.referenceType,
-          notes: stockLedger.notes,
+          refId: stockLedger.refId,
+          refTable: stockLedger.refTable,
           createdAt: stockLedger.createdAt,
         })
         .from(stockLedger)
         .where(
           and(
             eq(stockLedger.productCodeVersionId, versionRow.id),
-            eq(stockLedger.referenceId, loanId),
+            eq(stockLedger.refId, loanId),
             eq(stockLedger.reason, 'pawn_forfeit_in')
           )
         )
@@ -6764,6 +6785,206 @@ app.post('/api/loans/outreach', async (req, res, next) => {
       summary,
     });
   } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/reports/sales', async (req, res, next) => {
+  try {
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+
+    let startDate = null;
+    let endDate = null;
+    let branchIdFilter = null;
+
+    if (startDateRaw) {
+      const parsed = parseOptionalDate(startDateRaw, 'startDate');
+      if (parsed) {
+        startDate = parsed;
+      }
+    }
+
+    if (endDateRaw) {
+      const parsed = parseOptionalDate(endDateRaw, 'endDate');
+      if (parsed) {
+        endDate = parsed;
+      }
+    }
+
+    if (branchIdRaw !== null && branchIdRaw !== undefined && String(branchIdRaw).trim().length > 0) {
+      try {
+        branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
+      } catch (error) {
+        if (error instanceof HttpError) {
+          branchIdFilter = null;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    // Build conditions for invoices
+    const invoiceConditions = [isNotNull(invoices.invoiceNo)];
+
+    if (startDate) {
+      invoiceConditions.push(gte(invoices.createdAt, startOfDay(startDate)));
+    }
+
+    if (endDate) {
+      invoiceConditions.push(lte(invoices.createdAt, endOfDay(endDate)));
+    }
+
+    if (branchIdFilter) {
+      invoiceConditions.push(eq(orders.branchId, branchIdFilter));
+    }
+
+    // Get all invoices in date range
+    const invoiceRows = await db
+      .select({
+        id: invoices.id,
+        invoiceNo: invoices.invoiceNo,
+        orderId: invoices.orderId,
+        totalCents: invoices.totalCents,
+        taxCents: invoices.taxCents,
+        createdAt: invoices.createdAt,
+        branchId: orders.branchId,
+        customerId: orders.customerId,
+      })
+      .from(invoices)
+      .innerJoin(orders, eq(invoices.orderId, orders.id))
+      .where(and(...invoiceConditions))
+      .orderBy(desc(invoices.createdAt));
+
+    // Get all payments for these invoices
+    const invoiceIds = invoiceRows.map((row) => Number(row.id));
+    let paymentRows = [];
+    if (invoiceIds.length > 0) {
+      paymentRows = await db
+        .select({
+          id: payments.id,
+          invoiceId: payments.invoiceId,
+          method: payments.method,
+          amountCents: payments.amountCents,
+          createdAt: payments.createdAt,
+        })
+        .from(payments)
+        .where(inArray(payments.invoiceId, invoiceIds));
+    }
+
+    // Get all sales returns for these invoices
+    let returnRows = [];
+    if (invoiceIds.length > 0) {
+      returnRows = await db
+        .select({
+          id: salesReturns.id,
+          invoiceId: salesReturns.invoiceId,
+          createdAt: salesReturns.createdAt,
+        })
+        .from(salesReturns)
+        .where(inArray(salesReturns.invoiceId, invoiceIds));
+
+      // Get return items to calculate refund amounts
+      if (returnRows.length > 0) {
+        const returnIds = returnRows.map((row) => Number(row.id));
+        const returnItemRows = await db
+          .select({
+            salesReturnId: salesReturnItems.salesReturnId,
+            refundCents: salesReturnItems.refundCents,
+          })
+          .from(salesReturnItems)
+          .where(inArray(salesReturnItems.salesReturnId, returnIds));
+
+        // Map return items to returns
+        const returnItemsMap = new Map();
+        for (const item of returnItemRows) {
+          const returnId = Number(item.salesReturnId);
+          const current = returnItemsMap.get(returnId) || 0;
+          returnItemsMap.set(returnId, current + Number(item.refundCents || 0));
+        }
+
+        // Add refund amounts to returns
+        returnRows = returnRows.map((ret) => ({
+          ...ret,
+          refundCents: returnItemsMap.get(Number(ret.id)) || 0,
+        }));
+      }
+    }
+
+    // Calculate metrics
+    const totalSoldCents = invoiceRows.reduce((sum, inv) => sum + Number(inv.totalCents || 0), 0);
+    const totalReturnsCents = returnRows.reduce((sum, ret) => sum + Number(ret.refundCents || 0), 0);
+
+    // Calculate payment method breakdown
+    const paymentsByMethod = new Map();
+    let totalPaymentsCents = 0;
+
+    for (const payment of paymentRows) {
+      const method = payment.method || 'unknown';
+      const amount = Number(payment.amountCents || 0);
+      const current = paymentsByMethod.get(method) || { totalCents: 0, count: 0 };
+      paymentsByMethod.set(method, {
+        totalCents: current.totalCents + amount,
+        count: current.count + 1,
+      });
+      totalPaymentsCents += amount;
+    }
+
+    // Convert to percentage
+    const paymentMethodBreakdown = Array.from(paymentsByMethod.entries()).map(([method, data]) => ({
+      method,
+      totalCents: data.totalCents,
+      count: data.count,
+      percentage: totalPaymentsCents > 0 ? (data.totalCents / totalPaymentsCents) * 100 : 0,
+    }));
+
+    // Build sales table data
+    const salesTable = invoiceRows.map((inv) => {
+      const invoicePayments = paymentRows.filter((p) => Number(p.invoiceId) === Number(inv.id));
+      const invoiceReturns = returnRows.filter((r) => Number(r.invoiceId) === Number(inv.id));
+      const returnTotalCents = invoiceReturns.reduce((sum, r) => sum + Number(r.refundCents || 0), 0);
+      const totalCents = Number(inv.totalCents || 0);
+      const taxCents = Number(inv.taxCents || 0);
+      const subtotalCents = totalCents - taxCents; // Calculate subtotal (total already includes tax)
+
+      return {
+        id: Number(inv.id),
+        invoiceNo: inv.invoiceNo,
+        createdAt: toIsoString(inv.createdAt),
+        subtotalCents,
+        taxCents,
+        totalCents,
+        returnCents: returnTotalCents,
+        paymentMethods: invoicePayments.map((p) => ({
+          method: p.method,
+          amountCents: Number(p.amountCents || 0),
+        })),
+      };
+    });
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+        branchId: branchIdFilter,
+      },
+      summary: {
+        totalSoldCents,
+        totalReturnsCents,
+        netSalesCents: totalSoldCents - totalReturnsCents,
+        totalInvoices: invoiceRows.length,
+        totalReturns: returnRows.length,
+      },
+      paymentMethodBreakdown,
+      sales: salesTable,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
     next(error);
   }
 });
@@ -8507,8 +8728,8 @@ app.post('/api/purchases', async (req, res, next) => {
           productCodeVersionId: line.productCodeVersionId,
           reason: 'purchase',
           qtyChange: line.quantity,
-          referenceId: purchaseRow.id,
-          referenceType: 'purchase',
+          refId: purchaseRow.id,
+          refTable: 'purchase',
           notes: supplierName ? `Compra ${supplierName}` : 'Purchase receipt',
         });
       }
@@ -8817,8 +9038,8 @@ app.post('/api/purchase-returns', async (req, res, next) => {
           productCodeVersionId: line.productCodeVersionId,
           qtyChange: -line.quantity,
           reason: 'return',
-          referenceType: 'purchase_return',
-          referenceId: Number(returnRow.id),
+          refTable: 'purchase_return',
+          refId: Number(returnRow.id),
           notes:
             reason ??
             (meta?.code ? `Devolución ${meta.code}` : 'Supplier return'),
@@ -9077,8 +9298,8 @@ app.post('/api/inventory/split', async (req, res, next) => {
           productCodeVersionId: parentVersionId,
           qtyChange: -requestedQty,
           reason: 'split_out',
-          referenceType: 'inventory_split',
-          referenceId: parentVersionId,
+          refTable: 'inventory_split',
+          refId: parentVersionId,
           notes: `Split into ${components.length} component(s)`,
         },
       ];
@@ -9113,8 +9334,8 @@ app.post('/api/inventory/split', async (req, res, next) => {
           productCodeVersionId: entry.versionId,
           qtyChange: qtyIncrease,
           reason: 'split_in',
-          referenceType: 'inventory_split',
-          referenceId: parentVersionId,
+          refTable: 'inventory_split',
+          refId: parentVersionId,
           notes: `From ${parent.code}`,
         });
       }
@@ -9274,8 +9495,8 @@ app.post('/api/inventory/combine', async (req, res, next) => {
           productCodeVersionId: entry.versionId,
           qtyChange: -qtyDecrease,
           reason: 'combine_out',
-          referenceType: 'inventory_combine',
-          referenceId: parentVersionId,
+          refTable: 'inventory_combine',
+          refId: parentVersionId,
           notes: `Combined into ${parent.code}`,
         });
       }
@@ -9298,9 +9519,8 @@ app.post('/api/inventory/combine', async (req, res, next) => {
         productCodeVersionId: parentVersionId,
         qtyChange: requestedQty,
         reason: 'combine_in',
-        referenceType: 'inventory_combine',
-        referenceId: parentVersionId,
-        notes: `Combined from ${components.length} component(s)`,
+        refTable: 'inventory_combine',
+        refId: parentVersionId,
       });
 
       await tx.insert(stockLedger).values(ledgerEntries);
@@ -10637,9 +10857,8 @@ app.post('/api/pos/buys', async (req, res, next) => {
           productCodeVersionId: Number(versionRow.id),
           reason: 'purchase',
           qtyChange: 1,
-          referenceType: 'purchase',
-          referenceId: Number(purchaseRow.id),
-          notes: `Customer buy intake ${code}`,
+          refTable: 'purchase',
+          refId: Number(purchaseRow.id),
         });
 
         lineSummaries.push({
@@ -10775,10 +10994,14 @@ app.post('/api/orders', async (req, res, next) => {
       };
     });
 
-    const subtotalCents = normalizedItems.reduce((sum, item) => sum + item.totalCents, 0);
+    // Prices from frontend already include tax, so we need to extract subtotal
+    // totalPrice = subtotal * (1 + taxRate)
+    // subtotal = totalPrice / (1 + taxRate)
+    const totalPriceCents = normalizedItems.reduce((sum, item) => sum + item.totalCents, 0);
     const taxPercent = Number(taxRate) || 0;
-    const taxCents = Math.round(subtotalCents * taxPercent);
-    const totalCents = subtotalCents + taxCents;
+    const subtotalCents = Math.round(totalPriceCents / (1 + taxPercent));
+    const taxCents = totalPriceCents - subtotalCents;
+    const totalCents = totalPriceCents; // Total is the original price (already includes tax)
     const orderNumber = `ORD-${Date.now()}`;
 
     const createdOrder = await db.transaction(async (tx) => {
@@ -10806,13 +11029,32 @@ app.post('/api/orders', async (req, res, next) => {
 
       const orderId = orderRow.id;
 
+      // Get product code IDs from product code versions
+      const versionIds = normalizedItems.map((item) => item.productCodeVersionId);
+      const versionRows = await tx
+        .select({
+          id: productCodeVersions.id,
+          productCodeId: productCodeVersions.productCodeId,
+        })
+        .from(productCodeVersions)
+        .where(inArray(productCodeVersions.id, versionIds));
+
+      const versionToCodeMap = new Map(
+        versionRows.map((row) => [Number(row.id), Number(row.productCodeId)])
+      );
+
       for (const item of normalizedItems) {
+        const codeId = versionToCodeMap.get(item.productCodeVersionId);
+        if (!codeId) {
+          throw new Error(`Product code version ${item.productCodeVersionId} not found`);
+        }
+
         await tx.insert(orderItems).values({
           orderId,
-          productCodeVersionId: item.productCodeVersionId,
+          codeId,
           qty: item.qty,
-          unitPriceCents: item.unitPriceCents,
-          totalCents: item.totalCents,
+          priceCents: item.unitPriceCents,
+          discountCents: 0,
         });
       }
 
@@ -10865,7 +11107,9 @@ app.post('/api/invoices', async (req, res, next) => {
     const lineItems = await db
       .select({
         id: orderItems.id,
-        totalCents: orderItems.totalCents,
+        qty: orderItems.qty,
+        priceCents: orderItems.priceCents,
+        discountCents: orderItems.discountCents,
       })
       .from(orderItems)
       .where(eq(orderItems.orderId, orderId));
@@ -10874,12 +11118,29 @@ app.post('/api/invoices', async (req, res, next) => {
       return res.status(400).json({ error: 'Order has no items' });
     }
 
-    const subtotalCents = lineItems.reduce((sum, item) => sum + item.totalCents, 0);
+    // Prices in orderItems already include tax (from frontend)
+    // Calculate total price first, then extract subtotal
+    const totalPriceCents = lineItems.reduce((sum, item) => {
+      const qty = Number(item.qty || 0);
+      const price = Number(item.priceCents || 0);
+      const discount = Number(item.discountCents || 0);
+      return sum + Math.round(qty * price) - discount;
+    }, 0);
+    
     const computedTaxRate = taxRate === null ? null : Number(taxRate);
-    const taxCents = computedTaxRate !== null && Number.isFinite(computedTaxRate)
-      ? Math.round(subtotalCents * computedTaxRate)
-      : order.taxCents;
-    const totalCents = subtotalCents + taxCents;
+    let subtotalCents, taxCents, totalCents;
+    
+    if (computedTaxRate !== null && Number.isFinite(computedTaxRate)) {
+      // Prices include tax, so extract subtotal: subtotal = totalPrice / (1 + taxRate)
+      subtotalCents = Math.round(totalPriceCents / (1 + computedTaxRate));
+      taxCents = totalPriceCents - subtotalCents;
+      totalCents = totalPriceCents; // Total is the original price (already includes tax)
+    } else {
+      // Use existing order values if taxRate not provided
+      subtotalCents = order.subtotalCents;
+      taxCents = order.taxCents;
+      totalCents = order.totalCents;
+    }
     const invoiceNo = requestedInvoiceNo || `INV-${Date.now()}`;
 
     const createdInvoice = await db.transaction(async (tx) => {
@@ -11093,7 +11354,7 @@ app.post('/api/payments', async (req, res, next) => {
           const [ledgerRow] = await tx
             .select({ existingCount: sql`COUNT(*)` })
             .from(stockLedger)
-            .where(and(eq(stockLedger.referenceId, invoiceId), eq(stockLedger.referenceType, 'invoice')));
+            .where(and(eq(stockLedger.refId, invoiceId), eq(stockLedger.refTable, 'invoice')));
 
           const paidAmount = paidRow ? Number(paidRow.totalPaid ?? 0) : 0;
           const alreadyLedgered = ledgerRow ? Number(ledgerRow.existingCount ?? 0) > 0 : false;
@@ -11101,7 +11362,7 @@ app.post('/api/payments', async (req, res, next) => {
           if (!alreadyLedgered && paidAmount >= Number(invoiceRow.totalCents)) {
             const itemsForOrder = await tx
               .select({
-                productCodeVersionId: orderItems.productCodeVersionId,
+                codeId: orderItems.codeId,
                 qty: orderItems.qty,
               })
               .from(orderItems)
@@ -11110,19 +11371,29 @@ app.post('/api/payments', async (req, res, next) => {
             for (const item of itemsForOrder) {
               const qtyChange = -Math.abs(Number(item.qty));
 
+              // Find the version for this code
+              const [versionRow] = await tx
+                .select({ id: productCodeVersions.id })
+                .from(productCodeVersions)
+                .where(eq(productCodeVersions.productCodeId, item.codeId))
+                .limit(1);
+
+              if (!versionRow) {
+                continue; // Skip if version not found
+              }
+
               await tx.insert(stockLedger).values({
-                productCodeVersionId: item.productCodeVersionId,
+                productCodeVersionId: versionRow.id,
                 reason: 'sale',
                 qtyChange,
-                referenceId: invoiceRow.id,
-                referenceType: 'invoice',
-                notes: 'Auto ledger entry on invoice payment',
+                refId: invoiceRow.id,
+                refTable: 'invoice',
               });
 
               await tx
                 .update(productCodeVersions)
                 .set({ qtyOnHand: sql`${productCodeVersions.qtyOnHand} + ${qtyChange}` })
-                .where(eq(productCodeVersions.id, item.productCodeVersionId));
+                .where(eq(productCodeVersions.id, versionRow.id));
             }
           }
         }
@@ -11308,13 +11579,8 @@ app.post('/api/refunds', async (req, res, next) => {
             productCodeVersionId: line.productCodeVersionId,
             reason: 'return',
             qtyChange: line.qty,
-            referenceType: 'sales_return',
-            referenceId: Number(salesReturnRow.id),
-            notes:
-              normalizedReason ??
-              (detail.invoice.invoiceNo
-                ? `Refund ${detail.invoice.invoiceNo}`
-                : `Refund invoice ${detail.invoice.id}`),
+            refTable: 'sales_return',
+            refId: Number(salesReturnRow.id),
           })),
         );
       }
@@ -11849,8 +12115,8 @@ app.post('/api/repairs/:id/materials/issue', async (req, res, next) => {
         productCodeVersionId,
         reason: 'repair_issue',
         qtyChange: -quantity,
-        referenceId: repairId,
-        referenceType: 'repair',
+        refId: repairId,
+        refTable: 'repair',
         notes: `Materials issued for repair ${repairRow.jobNumber}`,
       });
 
@@ -11927,8 +12193,8 @@ app.post('/api/repairs/:id/materials/return', async (req, res, next) => {
         productCodeVersionId,
         reason: 'repair_return',
         qtyChange: quantity,
-        referenceId: repairId,
-        referenceType: 'repair',
+        refId: repairId,
+        refTable: 'repair',
         notes: `Materials returned for repair ${repairRow.jobNumber}`,
       });
 
@@ -12568,8 +12834,8 @@ app.post('/api/layaways/:id/pawn', async (req, res, next) => {
           productCode: productCodes.code,
         })
         .from(orderItems)
-        .leftJoin(productCodeVersions, eq(productCodeVersions.id, orderItems.productCodeVersionId))
-        .leftJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+        .innerJoin(productCodes, eq(productCodes.id, orderItems.codeId))
+        .leftJoin(productCodeVersions, eq(productCodeVersions.productCodeId, productCodes.id))
         .where(eq(orderItems.orderId, layawayRow.orderId));
 
       const collateralEntries = orderItemsForCollateral.map((item) => {

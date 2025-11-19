@@ -33,11 +33,6 @@ export function MetricList({ metrics }: { metrics: Metric[] }) {
             >
               {metric.value}
             </span>
-            {metric.trend ? (
-              <span className={`text-xs font-medium ${trendColor[metric.trend.direction]}`}>
-                {metric.trend.label}
-              </span>
-            ) : null}
           </dd>
         </div>
       ))}

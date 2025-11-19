@@ -225,10 +225,10 @@ export const orders = mysqlTable('orders', {
 export const orderItems = mysqlTable('order_items', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   orderId: bigint('order_id', { mode: 'number' }).notNull(),
-  productCodeVersionId: bigint('product_code_version_id', { mode: 'number' }).notNull(),
-  qty: int('qty').notNull(),
-  unitPriceCents: bigint('unit_price_cents', { mode: 'number' }).notNull(),
-  totalCents: bigint('total_cents', { mode: 'number' }).notNull(),
+  codeId: bigint('code_id', { mode: 'number' }).notNull(),
+  qty: decimal('qty', { precision: 18, scale: 4 }).notNull(),
+  priceCents: bigint('price_cents', { mode: 'number' }).notNull(),
+  discountCents: bigint('discount_cents', { mode: 'number' }).default(0),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -556,9 +556,8 @@ export const stockLedger = mysqlTable('stock_ledger', {
     'repair_return',
   ]).notNull(),
   qtyChange: int('qty_change').notNull(),
-  referenceId: bigint('reference_id', { mode: 'number' }),
-  referenceType: varchar('reference_type', { length: 40 }),
-  notes: text('notes'),
+  refId: bigint('ref_id', { mode: 'number' }),
+  refTable: varchar('ref_table', { length: 40 }),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

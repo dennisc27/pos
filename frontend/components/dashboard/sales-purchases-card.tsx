@@ -10,15 +10,14 @@ export async function SalesPurchasesCard() {
     return (
       <DashboardCard
         title="Sales & Purchases"
-        subtitle={`Sales total ${formatCurrency(data.salesTotalToday)} · ${data.salesTrend.label}`}
+        subtitle={`Sales total ${formatCurrency(data.salesTotalToday)}`}
       >
         <MetricList
           metrics={[
             { label: "Sales Qty Today", value: data.salesQtyToday.toString(), emphasis: true },
             {
               label: "Sales Total Today",
-              value: formatCurrency(data.salesTotalToday),
-              trend: { label: data.salesTrend.label, direction: data.salesTrend.direction }
+              value: formatCurrency(data.salesTotalToday)
             },
             { label: "Purchases Today", value: formatCurrency(data.purchasesToday) }
           ]}

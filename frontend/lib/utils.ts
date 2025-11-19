@@ -14,11 +14,13 @@ type MonetaryMetric = {
 
 export function formatCurrency(metric: MonetaryMetric) {
   const currency = metric.currency ?? "DOP";
-  return new Intl.NumberFormat("en-US", {
+  const formatted = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
     maximumFractionDigits: 0
   }).format(metric.amount);
+  // Replace "DOP" with "$" to save space
+  return formatted.replace(/DOP\s*/g, "$");
 }
 
 /**
@@ -59,9 +61,11 @@ export function calculateITBISBreakdown(priceInCents: number): {
  */
 export function formatCurrencyFromCents(cents: number, currency: Currency = "DOP"): string {
   const display = centsToDisplay(cents);
-  return new Intl.NumberFormat("en-US", {
+  const formatted = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
     maximumFractionDigits: 2
   }).format(display);
+  // Replace "DOP" with "$" to save space
+  return formatted.replace(/DOP\s*/g, "$");
 }

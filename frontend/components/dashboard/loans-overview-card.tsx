@@ -10,7 +10,7 @@ export async function LoansOverviewCard() {
     return (
       <DashboardCard
         title="Loans & Pawns"
-        subtitle={`Principal out: ${formatCurrency(data.principalOut)} · ${data.renewalsTrend.label}`}
+        subtitle={`Principal out: ${formatCurrency(data.principalOut)}`}
       >
         <MetricList
           metrics={[
@@ -18,8 +18,7 @@ export async function LoansOverviewCard() {
             { label: "Pawns Past Due", value: data.pawnsPastDue.toString() },
             {
               label: "Renewals Today",
-              value: data.renewalsToday.toString(),
-              trend: { label: data.renewalsTrend.label, direction: data.renewalsTrend.direction }
+              value: data.renewalsToday.toString()
             }
           ]}
         />
