@@ -1,7 +1,9 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
+import { UserCircle2, X } from "lucide-react";
 
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 import { formatCurrency } from "@/components/pos/utils";
@@ -57,13 +59,30 @@ const paymentMethods = [
   { value: "cash", label: "Cash" },
   { value: "card", label: "Card" },
   { value: "transfer", label: "Bank transfer" },
-  { value: "store_credit", label: "Store credit" },
   { value: "other", label: "Other" },
 ];
 
+const WALK_IN_CUSTOMER = "Walk-in customer";
+const WALK_IN_DESCRIPTOR = "Default walk-in profile";
+
+type CustomerSearchResult = {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  lastActivityAt: string | null;
+};
+
 export default function RepairsIntakePage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
-  const [customerId, setCustomerId] = useState("");
+  const [customerName, setCustomerName] = useState(WALK_IN_CUSTOMER);
+  const [customerDescriptor, setCustomerDescriptor] = useState(WALK_IN_DESCRIPTOR);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [customerDialogMode, setCustomerDialogMode] = useState<"change" | "add" | null>(null);
+  const [customerInput, setCustomerInput] = useState("");
+  const [customerSearchResults, setCustomerSearchResults] = useState<CustomerSearchResult[]>([]);
+  const [isSearchingCustomers, setIsSearchingCustomers] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
   const [jobNumber, setJobNumber] = useState("");
   const [itemDescription, setItemDescription] = useState("");
   const [issueDescription, setIssueDescription] = useState("");
@@ -71,7 +90,6 @@ export default function RepairsIntakePage() {
   const [estimate, setEstimate] = useState("");
   const [deposit, setDeposit] = useState("");
   const [depositMethod, setDepositMethod] = useState("cash");
-  const [depositReference, setDepositReference] = useState("");
   const [depositNote, setDepositNote] = useState("");
   const [promisedAt, setPromisedAt] = useState("");
   const [notes, setNotes] = useState("");
@@ -103,13 +121,166 @@ export default function RepairsIntakePage() {
     setPhotos((prev) => prev.filter((_, idx) => idx !== index));
   }
 
+  const closeCustomerDialog = useCallback(() => {
+    setCustomerDialogMode(null);
+    setCustomerInput("");
+    setCustomerSearchResults([]);
+    setCustomerSearchError(null);
+    setIsSearchingCustomers(false);
+  }, []);
+
+  useEffect(() => {
+    if (!customerDialogMode) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCustomerDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [customerDialogMode, closeCustomerDialog]);
+
+  useEffect(() => {
+    if (!customerDialogMode) {
+      return;
+    }
+
+    const query = customerInput.trim();
+
+    if (query.length < 2) {
+      setCustomerSearchResults([]);
+      setCustomerSearchError(null);
+      setIsSearchingCustomers(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsSearchingCustomers(true);
+    setCustomerSearchError(null);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: query, limit: "10" });
+        const response = await fetch(`${API_BASE_URL}/api/customers?${params.toString()}`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Search failed with status ${response.status}`);
+        }
+
+        const payload: {
+          customers?: Array<{
+            id: number;
+            firstName: string | null;
+            lastName: string | null;
+            email: string | null;
+            phone: string | null;
+            lastActivityAt?: string | null;
+          }>;
+        } = await response.json();
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const results = (payload.customers ?? []).map((customer) => {
+          const first = customer.firstName?.trim() ?? "";
+          const last = customer.lastName?.trim() ?? "";
+          const name = `${first} ${last}`.trim() || "Unnamed customer";
+
+          return {
+            id: Number(customer.id),
+            name,
+            email: customer.email ?? null,
+            phone: customer.phone ?? null,
+            lastActivityAt: customer.lastActivityAt ?? null,
+          } satisfies CustomerSearchResult;
+        });
+
+        setCustomerSearchResults(results);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("Customer search failed", error);
+        setCustomerSearchError("Unable to search customers. Try again.");
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingCustomers(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [customerDialogMode, customerInput]);
+
+  const openCustomerDialog = useCallback(
+    (mode: "change" | "add") => {
+      setCustomerDialogMode(mode);
+      setCustomerInput(mode === "change" ? customerName : "");
+      setCustomerSearchResults([]);
+      setCustomerSearchError(null);
+      setIsSearchingCustomers(false);
+    },
+    [customerName]
+  );
+
+  const handleSubmitCustomer = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const trimmed = customerInput.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      setCustomerName(trimmed);
+      setCustomerDescriptor("Manual entry");
+      setSelectedCustomerId(null);
+      closeCustomerDialog();
+    },
+    [closeCustomerDialog, customerInput]
+  );
+
+  const handleSelectCustomer = useCallback(
+    (customer: CustomerSearchResult) => {
+      const descriptorParts = [customer.email, customer.phone].filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0
+      );
+
+      setCustomerName(customer.name);
+      setCustomerDescriptor(
+        descriptorParts.length > 0 ? descriptorParts.join(" • ") : "CRM customer"
+      );
+      setSelectedCustomerId(customer.id);
+      closeCustomerDialog();
+    },
+    [closeCustomerDialog]
+  );
+
+  const handleUseWalkInCustomer = useCallback(() => {
+    setSelectedCustomerId(null);
+    setCustomerName(WALK_IN_CUSTOMER);
+    setCustomerDescriptor(WALK_IN_DESCRIPTOR);
+    closeCustomerDialog();
+  }, [closeCustomerDialog]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     setStatus(null);
     setSubmitting(true);
 
-    const numericCustomerId = Number.parseInt(customerId, 10);
     const estimateCents = parseCurrencyToCents(estimate);
     const depositCents = parseCurrencyToCents(deposit);
 
@@ -122,8 +293,8 @@ export default function RepairsIntakePage() {
       return;
     }
 
-    if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
-      setStatus({ tone: "error", message: "Customer ID must be a positive number." });
+    if (!selectedCustomerId) {
+      setStatus({ tone: "error", message: "Please select a customer." });
       setSubmitting(false);
       return;
     }
@@ -137,14 +308,13 @@ export default function RepairsIntakePage() {
     try {
       const payload: Record<string, unknown> = {
         branchId: activeBranch.id,
-        customerId: numericCustomerId,
+        customerId: selectedCustomerId,
         itemDescription: itemDescription.trim() || null,
         issueDescription: issueDescription.trim() || null,
         diagnosis: diagnosis.trim() || null,
         estimateCents,
         depositCents,
         depositMethod,
-        depositReference: depositReference.trim() || null,
         depositNote: depositNote.trim() || null,
         notes: notes.trim() || null,
         photos: sanitizedPhotos,
@@ -227,17 +397,32 @@ export default function RepairsIntakePage() {
                 </span>
               )}
             </div>
-            <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
-              <span>Customer ID</span>
-              <input
-                type="number"
-                min={1}
-                required
-                value={customerId}
-                onChange={(event) => setCustomerId(event.target.value)}
-                className="rounded border border-slate-300 px-3 py-2 text-base text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-              />
-            </label>
+            <div className="flex flex-col gap-2 text-sm text-slate-700 dark:text-slate-200">
+              <span>Customer</span>
+              <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-gradient-to-b from-white to-slate-50 px-4 py-3 shadow-sm dark:border-slate-800 dark:from-slate-950/70 dark:to-slate-950/40">
+                <UserCircle2 className="h-5 w-5 text-slate-400 dark:text-slate-500" />
+                <div className="flex-1 leading-tight">
+                  <p className="font-medium text-slate-900 dark:text-white">{customerName}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{customerDescriptor ?? "Guest"}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-200 dark:hover:border-slate-700"
+                    onClick={() => openCustomerDialog("change")}
+                  >
+                    Change
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-200 dark:hover:border-slate-700"
+                    onClick={() => openCustomerDialog("add")}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
             <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
               <span>Job number (optional)</span>
               <input
@@ -331,16 +516,7 @@ export default function RepairsIntakePage() {
             </label>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
-              <span>Deposit reference</span>
-              <input
-                type="text"
-                value={depositReference}
-                onChange={(event) => setDepositReference(event.target.value)}
-                className="rounded border border-slate-300 px-3 py-2 text-base text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-              />
-            </label>
+          <div className="grid grid-cols-1 gap-4">
             <label className="flex flex-col gap-1 text-sm text-slate-700 dark:text-slate-200">
               <span>Deposit note</span>
               <input

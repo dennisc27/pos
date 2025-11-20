@@ -15,7 +15,9 @@ import {
   Shirt,
   Smartphone,
   Watch,
-  X
+  X,
+  Loader2,
+  AlertCircle
 } from "lucide-react";
 
 import { ProductGallery } from "@/components/pos/product-gallery";
@@ -215,6 +217,11 @@ export default function PosPage() {
   const [fullInventoryError, setFullInventoryError] = useState<string | null>(null);
   const [inventoryModalSearch, setInventoryModalSearch] = useState("");
   const [inventoryModalCategory, setInventoryModalCategory] = useState<string>("all");
+  const [isCreditNoteDialogOpen, setCreditNoteDialogOpen] = useState(false);
+  const [creditNotes, setCreditNotes] = useState<Array<{ id: number; balanceCents: number; reason: string | null; createdAt: string | null }>>([]);
+  const [isLoadingCreditNotes, setIsLoadingCreditNotes] = useState(false);
+  const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
+  const [pendingTenderAmount, setPendingTenderAmount] = useState<number>(0);
 
   const resolveProductVersionId = useCallback((productId: string) => {
     const numeric = Number(productId);
@@ -316,13 +323,6 @@ export default function PosPage() {
       setIsLoadingFullInventory(false);
     }
   }, []);
-
-  const handleOpenInventoryModal = useCallback(() => {
-    setInventoryModalOpen(true);
-    if (fullInventory.length === 0 && !isLoadingFullInventory) {
-      void loadFullInventory();
-    }
-  }, [fullInventory.length, isLoadingFullInventory, loadFullInventory]);
 
   const handleCloseInventoryModal = useCallback(() => {
     setInventoryModalOpen(false);
@@ -488,7 +488,7 @@ export default function PosPage() {
   );
 
   const handleAddTender = useCallback(
-    ({ method, amount, reference }: { method: TenderBreakdown["method"]; amount: number; reference?: string }) => {
+    ({ method, amount, reference, creditNoteId }: { method: TenderBreakdown["method"]; amount: number; reference?: string; creditNoteId?: number }) => {
       setTenderBreakdown((previous) => [
         ...previous,
         {
@@ -497,11 +497,77 @@ export default function PosPage() {
           label: TENDER_LABELS[method],
           amount,
           reference,
+          creditNoteId,
           status: TENDER_DEFAULT_STATUS[method]
         }
       ]);
     },
     []
+  );
+
+  // Get list of credit note IDs already used in tenders
+  const usedCreditNoteIds = useMemo(() => {
+    return new Set(
+      tenderBreakdown
+        .filter((tender) => tender.method === "store_credit" && tender.creditNoteId != null)
+        .map((tender) => tender.creditNoteId!)
+    );
+  }, [tenderBreakdown]);
+
+  const loadCreditNotes = useCallback(async (customerId: number) => {
+    setIsLoadingCreditNotes(true);
+    setCreditNoteError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/customers/${customerId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load customer (${response.status})`);
+      }
+      const data = await response.json();
+      // Filter out credit notes that are already used and have no balance
+      const activeNotes = (data.creditNotes?.notes ?? []).filter(
+        (note: { id: number; balanceCents: number }) =>
+          note.balanceCents > 0 && !usedCreditNoteIds.has(note.id)
+      );
+      setCreditNotes(activeNotes);
+    } catch (error) {
+      console.error("Failed to load credit notes", error);
+      setCreditNoteError(error instanceof Error ? error.message : "Unable to load credit notes");
+    } finally {
+      setIsLoadingCreditNotes(false);
+    }
+  }, [usedCreditNoteIds]);
+
+  const handleAddTenderWithCreditNoteCheck = useCallback(
+    ({ method, amount, reference }: { method: TenderBreakdown["method"]; amount: number; reference?: string }) => {
+      if (method === "store_credit") {
+        if (!selectedCustomerId) {
+          alert("Please select a customer first to use store credit.");
+          return;
+        }
+        setPendingTenderAmount(amount);
+        setCreditNoteDialogOpen(true);
+        // loadCreditNotes will automatically filter out already-used credit notes
+        void loadCreditNotes(selectedCustomerId);
+      } else {
+        handleAddTender({ method, amount, reference });
+      }
+    },
+    [selectedCustomerId, handleAddTender, loadCreditNotes]
+  );
+
+  const handleSelectCreditNote = useCallback(
+    (creditNote: { id: number; balanceCents: number }) => {
+      const amount = Math.min(creditNote.balanceCents / 100, pendingTenderAmount);
+      handleAddTender({
+        method: "store_credit",
+        amount,
+        creditNoteId: creditNote.id,
+      });
+      setCreditNoteDialogOpen(false);
+      setPendingTenderAmount(0);
+      setCreditNotes([]);
+    },
+    [pendingTenderAmount, handleAddTender]
   );
 
   const handleAdjustTender = useCallback((tenderId: string) => {
@@ -655,11 +721,21 @@ export default function PosPage() {
 
         const method = PAYMENT_METHOD_MAP[tender.method];
 
-        if ((method === "gift_card" || method === "credit_note")) {
-          throw new Error("Finalize flow does not support gift cards or store credit yet");
+        if (method === "gift_card") {
+          throw new Error("Finalize flow does not support gift cards yet");
         }
 
         setFinalizeMessage(`Recording ${tender.label.toLowerCase()} payment...`);
+
+        // Build payment meta
+        let paymentMeta: { reference?: string; creditNoteId?: number } | null = null;
+        if (tender.reference) {
+          paymentMeta = { reference: tender.reference };
+        }
+        if (method === "credit_note" && tender.creditNoteId) {
+          paymentMeta = paymentMeta || {};
+          paymentMeta.creditNoteId = tender.creditNoteId;
+        }
 
         const paymentResponse = await fetch(`${API_BASE_URL}/api/payments`, {
           method: "POST",
@@ -671,7 +747,7 @@ export default function PosPage() {
             orderId: order.id,
             method,
             amountCents: Math.round(tender.amount * 100),
-            meta: tender.reference ? { reference: tender.reference } : null,
+            meta: paymentMeta,
           }),
         });
 
@@ -868,6 +944,8 @@ export default function PosPage() {
         descriptorParts.length > 0 ? descriptorParts.join(" • ") : "CRM customer"
       );
       setSelectedCustomerId(customer.id);
+      // Remove all credit note tenders when customer changes
+      setTenderBreakdown((previous) => previous.filter((tender) => tender.method !== "store_credit"));
       closeCustomerDialog();
     },
     [closeCustomerDialog]
@@ -877,6 +955,8 @@ export default function PosPage() {
     setSelectedCustomerId(null);
     setCustomerName(WALK_IN_CUSTOMER);
     setCustomerDescriptor(WALK_IN_DESCRIPTOR);
+    // Remove all credit note tenders when switching to walk-in customer
+    setTenderBreakdown((previous) => previous.filter((tender) => tender.method !== "store_credit"));
     closeCustomerDialog();
   }, [closeCustomerDialog]);
 
@@ -950,7 +1030,6 @@ export default function PosPage() {
               onCategorySelect={setActiveCategoryId}
               selectedProductIds={selectedProductIds}
               onToggleProduct={handleToggleProduct}
-              onOpenInventory={handleOpenInventoryModal}
             />
           </div>
           <div className="space-y-6">
@@ -964,7 +1043,7 @@ export default function PosPage() {
               onRemoveItem={handleRemoveLine}
               onQuantityChange={handleQuantityChange}
               onPriceChange={handlePriceChange}
-              onAddTender={handleAddTender}
+              onAddTender={handleAddTenderWithCreditNoteCheck}
               onAdjustTender={handleAdjustTender}
               onRemoveTender={handleRemoveTender}
               onChangeCustomer={handleChangeCustomer}
@@ -1396,6 +1475,123 @@ export default function PosPage() {
                 className="rounded-lg border border-emerald-600/70 bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-600 hover:text-emerald-600 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200 dark:hover:border-emerald-400/80 dark:hover:text-emerald-100"
               >
                 Start New Sale
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {isCreditNoteDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={() => {
+            setCreditNoteDialogOpen(false);
+            setPendingTenderAmount(0);
+            setCreditNotes([]);
+          }}
+        >
+          <div
+            className="w-full max-w-2xl space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Select Store Credit</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Choose a credit note to apply. Amount: {formatCurrency(pendingTenderAmount)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreditNoteDialogOpen(false);
+                  setPendingTenderAmount(0);
+                  setCreditNotes([]);
+                }}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close credit note dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+              {isLoadingCreditNotes ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                </div>
+              ) : creditNoteError ? (
+                <div className="rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4" />
+                    {creditNoteError}
+                  </div>
+                </div>
+              ) : creditNotes.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
+                  {usedCreditNoteIds.size > 0
+                    ? "All available credit notes have already been used in this transaction."
+                    : "No active credit notes available for this customer."}
+                </div>
+              ) : (
+                creditNotes.map((note) => {
+                  const balance = note.balanceCents / 100;
+                  const canUseFull = balance >= pendingTenderAmount;
+                  const amountToUse = Math.min(balance, pendingTenderAmount);
+                  return (
+                    <button
+                      key={note.id}
+                      type="button"
+                      onClick={() => handleSelectCreditNote(note)}
+                      className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-emerald-300 hover:bg-emerald-50/50 dark:border-slate-800 dark:bg-slate-900/60 dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/10"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-900 dark:text-white">
+                              Credit Note #{note.id}
+                            </span>
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                              Active
+                            </span>
+                          </div>
+                          {note.reason && (
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{note.reason}</p>
+                          )}
+                          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                            Balance: <span className="font-semibold">{formatCurrency(balance)}</span>
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            Will use: <span className="font-medium">{formatCurrency(amountToUse)}</span>
+                            {!canUseFull && (
+                              <span className="ml-1 text-amber-600 dark:text-amber-400">
+                                (partial - {formatCurrency(balance - amountToUse)} remaining)
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                        <div className="ml-4 text-right">
+                          <div className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">
+                            {formatCurrency(amountToUse)}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setCreditNoteDialogOpen(false);
+                  setPendingTenderAmount(0);
+                  setCreditNotes([]);
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+              >
+                Cancel
               </button>
             </div>
           </div>

@@ -29,6 +29,7 @@ export type TenderBreakdown = {
   label: string;
   amount: number;
   reference?: string;
+  creditNoteId?: number; // For store_credit method
   status?: "captured" | "pending" | "offline";
 };
 

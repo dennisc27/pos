@@ -2,7 +2,7 @@
 
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
 
-import { ClipboardList, Loader2, PackagePlus, Printer, Search, Trash2, X } from "lucide-react";
+import { ClipboardList, Loader2, PackagePlus, Plus, Printer, Search, Trash2, X } from "lucide-react";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 import { formatCurrency } from "@/components/pos/utils";
@@ -27,7 +27,10 @@ const formatDisplayDate = (value: string | null | undefined) => {
   });
 };
 
-function parseAmountToCents(value: string) {
+function parseAmountToCents(value: string): number | null {
+  if (!value || !value.trim()) {
+    return null;
+  }
   const normalized = value.replace(/\s+/g, "").replace(",", ".");
   const parsed = Number(normalized);
 
@@ -68,7 +71,7 @@ type CodeResult = {
 
 type PurchaseLineInput = {
   key: string;
-  productCodeVersionId: number;
+  productCodeVersionId: number | null; // null for new products
   code: string;
   name: string;
   branchId: number;
@@ -77,6 +80,16 @@ type PurchaseLineInput = {
   quantity: string;
   unitCost: string;
   labelQuantity: string;
+  isNew?: boolean; // Flag to indicate this is a new product
+  newProductData?: {
+    // Data for creating new product
+    code: string;
+    name: string;
+    sku: string | null;
+    description: string | null;
+    priceCents: number;
+    costCents: number;
+  };
 };
 
 type StatusMessage = { tone: "success" | "error"; message: string } | null;
@@ -145,12 +158,23 @@ type SavedPurchaseResponse = {
 };
 
 type SupplierDetails = {
+  id?: number;
   name: string;
-  taxId: string;
-  contact: string;
-  phone: string;
-  email: string;
-  notes: string;
+  taxId: string | null;
+  contact: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+};
+
+type SupplierSearchResult = {
+  id: number;
+  name: string;
+  taxId: string | null;
+  contact: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
 };
 
 export default function PurchaseReceivePage() {
@@ -170,6 +194,15 @@ export default function PurchaseReceivePage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<CodeResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [isNewProductDialogOpen, setIsNewProductDialogOpen] = useState(false);
+  const [newProductForm, setNewProductForm] = useState({
+    name: "",
+    sku: "",
+    description: "",
+    price: "",
+    cost: "",
+  });
+  const [newProductFormError, setNewProductFormError] = useState<string | null>(null);
 
   const [status, setStatus] = useState<StatusMessage>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -178,7 +211,14 @@ export default function PurchaseReceivePage() {
   const [verifyingSave, setVerifyingSave] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierDetails | null>(null);
   const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
-  const [supplierForm, setSupplierForm] = useState<SupplierDetails>({
+  const [supplierForm, setSupplierForm] = useState<{
+    name: string;
+    taxId: string;
+    contact: string;
+    phone: string;
+    email: string;
+    notes: string;
+  }>({
     name: "",
     taxId: "",
     contact: "",
@@ -187,10 +227,13 @@ export default function PurchaseReceivePage() {
     notes: "",
   });
   const [supplierFormError, setSupplierFormError] = useState<string | null>(null);
+  const [supplierSearchResults, setSupplierSearchResults] = useState<SupplierSearchResult[]>([]);
+  const [isSearchingSuppliers, setIsSearchingSuppliers] = useState(false);
+  const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
 
-  const openSupplierDialog = () => {
+  const openSupplierDialog = (prefillName?: string) => {
     setSupplierForm({
-      name: supplierName || selectedSupplier?.name || "",
+      name: prefillName || supplierName || selectedSupplier?.name || "",
       taxId: selectedSupplier?.taxId ?? "",
       contact: selectedSupplier?.contact ?? "",
       phone: selectedSupplier?.phone ?? "",
@@ -210,7 +253,7 @@ export default function PurchaseReceivePage() {
     setSupplierForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSupplierFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSupplierFormSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedName = supplierForm.name.trim();
     if (!trimmedName) {
@@ -218,19 +261,123 @@ export default function PurchaseReceivePage() {
       return;
     }
 
-    const nextSupplier: SupplierDetails = {
-      name: trimmedName,
-      taxId: supplierForm.taxId.trim(),
-      contact: supplierForm.contact.trim(),
-      phone: supplierForm.phone.trim(),
-      email: supplierForm.email.trim(),
-      notes: supplierForm.notes.trim(),
-    };
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/suppliers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: trimmedName,
+          taxId: supplierForm.taxId.trim() || null,
+          contact: supplierForm.contact.trim() || null,
+          phone: supplierForm.phone.trim() || null,
+          email: supplierForm.email.trim() || null,
+          notes: supplierForm.notes.trim() || null,
+        }),
+      });
 
-    setSelectedSupplier(nextSupplier);
-    setSupplierName(trimmedName);
-    setSupplierFormError(null);
-    setIsSupplierDialogOpen(false);
+      const body = (await response.json().catch(() => ({}))) as {
+        supplier?: SupplierSearchResult;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body?.error ?? "No se pudo guardar el proveedor");
+      }
+
+      if (body.supplier) {
+        const nextSupplier: SupplierDetails = {
+          id: body.supplier.id,
+          name: body.supplier.name,
+          taxId: body.supplier.taxId,
+          contact: body.supplier.contact,
+          phone: body.supplier.phone,
+          email: body.supplier.email,
+          notes: body.supplier.notes,
+        };
+
+        setSelectedSupplier(nextSupplier);
+        setSupplierName(trimmedName);
+        setSupplierFormError(null);
+        setIsSupplierDialogOpen(false);
+        setShowSupplierDropdown(false);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo guardar el proveedor";
+      setSupplierFormError(message);
+    }
+  };
+
+  const searchSuppliers = async (query: string) => {
+    if (query.trim().length < 2) {
+      setSupplierSearchResults([]);
+      setShowSupplierDropdown(false);
+      return;
+    }
+
+    setIsSearchingSuppliers(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("q", query.trim());
+      
+      const response = await fetch(`${API_BASE_URL}/api/suppliers/search?${params.toString()}`);
+      const body = (await response.json().catch(() => ({}))) as {
+        suppliers?: SupplierSearchResult[];
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body?.error ?? "No se pudieron cargar los proveedores");
+      }
+
+      setSupplierSearchResults(Array.isArray(body.suppliers) ? body.suppliers : []);
+      setShowSupplierDropdown(true);
+    } catch (error) {
+      console.error("Error searching suppliers", error);
+      setSupplierSearchResults([]);
+      setShowSupplierDropdown(false);
+    } finally {
+      setIsSearchingSuppliers(false);
+    }
+  };
+
+  const handleSupplierNameChange = (value: string) => {
+    setSupplierName(value);
+    setSelectedSupplier(null);
+    void searchSuppliers(value);
+  };
+
+  const handleSupplierNameKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const trimmed = supplierName.trim();
+      
+      // If there are search results, select the first one
+      if (supplierSearchResults.length > 0) {
+        const firstResult = supplierSearchResults[0];
+        handleSelectSupplier(firstResult);
+      } else if (trimmed.length >= 2) {
+        // If no results but has text, open dialog with the name
+        openSupplierDialog(trimmed);
+        setShowSupplierDropdown(false);
+      }
+    } else if (event.key === "Escape") {
+      setShowSupplierDropdown(false);
+    }
+  };
+
+  const handleSelectSupplier = (supplier: SupplierSearchResult) => {
+    setSupplierName(supplier.name);
+    setSelectedSupplier({
+      id: supplier.id,
+      name: supplier.name,
+      taxId: supplier.taxId ?? "",
+      contact: supplier.contact ?? "",
+      phone: supplier.phone ?? "",
+      email: supplier.email ?? "",
+      notes: supplier.notes ?? "",
+    });
+    setShowSupplierDropdown(false);
+    setSupplierSearchResults([]);
   };
 
   useEffect(() => {
@@ -418,6 +565,103 @@ export default function PurchaseReceivePage() {
     setSearchResults([]);
   };
 
+  const generateProductCode = (): string => {
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `PROD-${timestamp}-${random}`.slice(0, 64);
+  };
+
+  const openNewProductDialog = () => {
+    setNewProductForm({
+      name: "",
+      sku: "",
+      description: "",
+      price: "",
+      cost: "",
+    });
+    setNewProductFormError(null);
+    setIsNewProductDialogOpen(true);
+  };
+
+  const closeNewProductDialog = () => {
+    setIsNewProductDialogOpen(false);
+    setNewProductFormError(null);
+  };
+
+  const handleNewProductFormChange = (field: keyof typeof newProductForm, value: string) => {
+    setNewProductForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleNewProductSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setNewProductFormError(null);
+
+    // Generate code automatically
+    const code = generateProductCode();
+    const name = newProductForm.name.trim();
+    const sku = newProductForm.sku.trim() || null;
+    const description = newProductForm.description.trim() || null;
+    const price = parseAmountToCents(newProductForm.price);
+    const cost = parseAmountToCents(newProductForm.cost);
+
+    if (!name) {
+      setNewProductFormError("El nombre del producto es requerido.");
+      return;
+    }
+
+    if (price === null || price <= 0) {
+      setNewProductFormError("El precio debe ser mayor a cero.");
+      return;
+    }
+
+    if (cost === null || cost <= 0) {
+      setNewProductFormError("El costo debe ser mayor a cero.");
+      return;
+    }
+
+    if (!activeBranch) {
+      setNewProductFormError("Configura una sucursal activa antes de agregar productos.");
+      return;
+    }
+
+    // Check if code already exists in lines (unlikely but possible)
+    const codeExists = lines.some((line) => line.code === code);
+    if (codeExists) {
+      // Regenerate code if collision (very unlikely)
+      const newCode = generateProductCode();
+      setNewProductFormError("Código generado duplicado. Intenta nuevamente.");
+      return;
+    }
+
+    // Add as new product line
+    setLines((previous) => [
+      ...previous,
+      {
+        key: makeLineKey(),
+        productCodeVersionId: null, // null indicates new product
+        code,
+        name,
+        branchId: activeBranch.id,
+        branchName: activeBranch.name,
+        sku,
+        quantity: "1",
+        unitCost: (cost / 100).toFixed(2),
+        labelQuantity: "1",
+        isNew: true,
+        newProductData: {
+          code,
+          name,
+          sku,
+          description,
+          priceCents: price,
+          costCents: cost,
+        },
+      },
+    ]);
+
+    closeNewProductDialog();
+  };
+
   const removeLine = (key: string) => {
     setLines((previous) => previous.filter((line) => line.key !== key));
   };
@@ -448,10 +692,18 @@ export default function PurchaseReceivePage() {
     }
 
     const parsedLines: Array<{
-      productCodeVersionId: number;
+      productCodeVersionId: number | null;
       quantity: number;
       unitCostCents: number;
       labelQuantity: number;
+    }> = [];
+    const newProducts: Array<{
+      code: string;
+      name: string;
+      sku: string | null;
+      description: string | null;
+      priceCents: number;
+      costCents: number;
     }> = [];
     let totalLabels = 0;
 
@@ -488,12 +740,29 @@ export default function PurchaseReceivePage() {
       }
 
       totalLabels += labelQuantity;
-      parsedLines.push({
-        productCodeVersionId: line.productCodeVersionId,
-        quantity,
-        unitCostCents,
-        labelQuantity,
-      });
+
+      if (line.isNew && line.newProductData) {
+        newProducts.push(line.newProductData);
+        parsedLines.push({
+          productCodeVersionId: null, // Will be set after product creation
+          quantity,
+          unitCostCents,
+          labelQuantity,
+        });
+      } else if (line.productCodeVersionId != null) {
+        parsedLines.push({
+          productCodeVersionId: line.productCodeVersionId,
+          quantity,
+          unitCostCents,
+          labelQuantity,
+        });
+      } else {
+        setStatus({
+          tone: "error",
+          message: `Error en la línea ${line.code}: falta información del producto.`,
+        });
+        return;
+      }
     }
 
     if (totalLabels > MAX_LABELS) {
@@ -514,6 +783,7 @@ export default function PurchaseReceivePage() {
       layout: layoutId || null,
       includePrice,
       labelNote: labelNote.trim() || null,
+      newProducts: newProducts.length > 0 ? newProducts : undefined,
       lines: parsedLines.map((line) => ({
         productCodeVersionId: line.productCodeVersionId,
         quantity: line.quantity,
@@ -654,19 +924,56 @@ export default function PurchaseReceivePage() {
               <span>Proveedor</span>
               <button
                 type="button"
-                onClick={openSupplierDialog}
+                onClick={() => openSupplierDialog()}
                 className="text-xs font-semibold text-sky-600 transition hover:text-sky-500"
               >
                 Añadir proveedor
               </button>
             </div>
-            <input
-              type="text"
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
-              value={supplierName}
-              onChange={(event) => setSupplierName(event.target.value)}
-              placeholder="Nombre del proveedor"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
+                value={supplierName}
+                onChange={(event) => handleSupplierNameChange(event.target.value)}
+                onKeyDown={handleSupplierNameKeyDown}
+                onFocus={() => {
+                  if (supplierName.trim().length >= 2) {
+                    void searchSuppliers(supplierName);
+                  }
+                }}
+                onBlur={() => {
+                  // Delay hiding dropdown to allow click on results
+                  setTimeout(() => setShowSupplierDropdown(false), 200);
+                }}
+                placeholder="Nombre del proveedor"
+              />
+              {showSupplierDropdown && supplierSearchResults.length > 0 && (
+                <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
+                  <ul className="max-h-60 overflow-auto py-1">
+                    {supplierSearchResults.map((supplier) => (
+                      <li key={supplier.id}>
+                        <button
+                          type="button"
+                          className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                          onClick={() => handleSelectSupplier(supplier)}
+                        >
+                          <div className="font-medium">{supplier.name}</div>
+                          {supplier.taxId && (
+                            <div className="text-xs text-slate-500">RNC: {supplier.taxId}</div>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {isSearchingSuppliers && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                </div>
+              )}
+            </div>
             {selectedSupplier ? (
               <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
                 <p className="font-semibold text-slate-700 dark:text-slate-100">
@@ -773,6 +1080,13 @@ export default function PurchaseReceivePage() {
               >
                 <ClipboardList className="h-4 w-4" /> {searching ? "Buscando" : "Buscar"}
               </button>
+              <button
+                type="button"
+                onClick={openNewProductDialog}
+                className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+              >
+                <Plus className="h-4 w-4" /> Agregar
+              </button>
             </div>
             {searchResults.length > 0 && (
               <div className="grid gap-2 md:grid-cols-2">
@@ -815,8 +1129,15 @@ export default function PurchaseReceivePage() {
                   </tr>
                 )}
                 {lines.map((line) => (
-                  <tr key={line.key} className="hover:bg-slate-50">
-                    <td className="px-4 py-2 font-medium text-slate-900">{line.code}</td>
+                  <tr key={line.key} className={`hover:bg-slate-50 ${line.isNew ? "bg-blue-50" : ""}`}>
+                    <td className="px-4 py-2 font-medium text-slate-900">
+                      {line.code}
+                      {line.isNew && (
+                        <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700">
+                          Nuevo
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-slate-700">{line.name}</td>
                     <td className="px-4 py-2">
                       <input
@@ -1130,6 +1451,117 @@ export default function PurchaseReceivePage() {
               className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:bg-indigo-500"
             >
               Guardar proveedor
+            </button>
+          </div>
+        </form>
+      </div>
+    ) : null}
+    {isNewProductDialogOpen ? (
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+        onClick={closeNewProductDialog}
+      >
+        <form
+          className="w-full max-w-2xl space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+          onClick={(event) => event.stopPropagation()}
+          onSubmit={handleNewProductSubmit}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Agregar nuevo producto</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Crea un producto nuevo que se está comprando por primera vez.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeNewProductDialog}
+              className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300"
+              aria-label="Cerrar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              SKU
+              <input
+                value={newProductForm.sku}
+                onChange={(event) => handleNewProductFormChange("sku", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="SKU-001"
+              />
+            </label>
+            <div className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Código
+              <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                Se generará automáticamente
+              </div>
+            </div>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300 sm:col-span-2">
+              Nombre *
+              <input
+                value={newProductForm.name}
+                onChange={(event) => handleNewProductFormChange("name", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="Nombre del producto"
+                required
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300 sm:col-span-2">
+              Descripción
+              <textarea
+                value={newProductForm.description}
+                onChange={(event) => handleNewProductFormChange("description", event.target.value)}
+                className="mt-1 h-24 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="Descripción del producto"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Precio de venta (RD$) *
+              <input
+                type="text"
+                inputMode="decimal"
+                value={newProductForm.price}
+                onChange={(event) => handleNewProductFormChange("price", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="0.00"
+                required
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Costo unitario (RD$) *
+              <input
+                type="text"
+                inputMode="decimal"
+                value={newProductForm.cost}
+                onChange={(event) => handleNewProductFormChange("cost", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="0.00"
+                required
+              />
+            </label>
+          </div>
+          {newProductFormError ? (
+            <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
+              {newProductFormError}
+            </p>
+          ) : null}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={closeNewProductDialog}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:bg-indigo-500"
+            >
+              Agregar producto
             </button>
           </div>
         </form>

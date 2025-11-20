@@ -74,6 +74,7 @@ import {
   shiftOpenedByUsers,
   supplierCreditLedger,
   supplierCredits,
+  suppliers,
   shiftReports,
   shifts,
   stockLedger,
@@ -99,6 +100,10 @@ import {
 
 // Load environment variables
 dotenv.config();
+
+// IMPORTANT: See PRICING_MODEL.md for pricing calculation rules
+// All unit prices (unitPriceCents) ALREADY INCLUDE ITBIS (tax)
+// DO NOT add taxCents to unitPriceCents - that would double-count the tax
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -748,8 +753,10 @@ function normalizePurchaseLines(rawLines) {
       throw new HttpError(400, `lines[${index}] must be an object`);
     }
 
-    const versionId = parsePositiveInteger(
-      entry.productCodeVersionId ?? entry.versionId,
+    // Allow null productCodeVersionId for new products
+    const versionIdRaw = entry.productCodeVersionId ?? entry.versionId;
+    const versionId = versionIdRaw === null || versionIdRaw === undefined ? null : parsePositiveInteger(
+      versionIdRaw,
       `lines[${index}].productCodeVersionId`
     );
     const quantity = parsePositiveInteger(entry.quantity ?? entry.qty, `lines[${index}].quantity`);
@@ -863,16 +870,23 @@ async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = nu
     .orderBy(asc(orderItems.id));
 
   const subtotalCents = Number(invoiceRow.subtotalCents ?? 0);
-  const taxCents = Number(invoiceRow.taxCents ?? 0);
-  const taxRatio = subtotalCents > 0 ? taxCents / subtotalCents : 0;
+  // IMPORTANT: priceCents already includes ITBIS (see PRICING_MODEL.md)
+  // Calculate tax for display/reporting only, don't add it to total
+  const DEFAULT_TAX_RATE = 0.18; // 18% ITBIS
 
   const lines = lineRows.map((row) => {
     const qty = Number(row.qty ?? 0);
-    const priceCents = Number(row.priceCents ?? 0);
+    const priceCents = Number(row.priceCents ?? 0); // Already includes ITBIS
     const discountCents = Number(row.discountCents ?? 0);
-    const lineSubtotalCents = Math.max(0, priceCents * qty - discountCents);
-    const lineTaxCents = Math.round(lineSubtotalCents * taxRatio);
-    const lineTotalCents = lineSubtotalCents + lineTaxCents;
+    
+    // Calculate line total: price * qty - discount (price already includes tax)
+    const lineTotalCents = Math.max(0, priceCents * qty - discountCents);
+    
+    // Extract tax for display/reporting only (don't add to total)
+    // Since price includes tax, extract the tax portion: tax = total / (1 + rate) * rate
+    // Or: net = total / (1 + rate), tax = total - net
+    const lineNetCents = Math.round(lineTotalCents / (1 + DEFAULT_TAX_RATE));
+    const lineTaxCents = lineTotalCents - lineNetCents;
     const taxPerUnitCents = qty > 0 ? Math.round(lineTaxCents / qty) : 0;
 
     return {
@@ -883,11 +897,11 @@ async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = nu
       code: row.code ?? null,
       description: row.name ?? 'Product',
       qty,
-      unitPriceCents: priceCents,
-      subtotalCents: lineSubtotalCents,
-      taxCents: lineTaxCents,
+      unitPriceCents: priceCents, // Already includes ITBIS
+      subtotalCents: lineNetCents, // Net amount (for display only)
+      taxCents: lineTaxCents, // Tax portion (for reporting only)
       taxPerUnitCents,
-      totalCents: lineTotalCents,
+      totalCents: lineTotalCents, // Total (price already includes tax, so no tax addition)
       restockable: Boolean(row.isActive ?? true),
     };
   });
@@ -2871,7 +2885,7 @@ const repairStatuses = [
 ];
 
 const repairApprovalStatuses = ['not_requested', 'pending', 'approved', 'denied'];
-const repairPaymentMethods = ['cash', 'card', 'transfer', 'store_credit', 'other'];
+const repairPaymentMethods = ['cash', 'card', 'transfer', 'other'];
 
 function generateRepairJobNumber() {
   const now = new Date();
@@ -6901,7 +6915,8 @@ app.get('/api/reports/sales', async (req, res, next) => {
         const returnItemRows = await db
           .select({
             salesReturnId: salesReturnItems.salesReturnId,
-            refundCents: salesReturnItems.refundCents,
+            unitPriceCents: salesReturnItems.unitPriceCents,
+            taxCents: salesReturnItems.taxCents,
           })
           .from(salesReturnItems)
           .where(inArray(salesReturnItems.salesReturnId, returnIds));
@@ -6911,7 +6926,10 @@ app.get('/api/reports/sales', async (req, res, next) => {
         for (const item of returnItemRows) {
           const returnId = Number(item.salesReturnId);
           const current = returnItemsMap.get(returnId) || 0;
-          returnItemsMap.set(returnId, current + Number(item.refundCents || 0));
+          // unitPriceCents already includes ITBIS, so we only use unitPriceCents
+          // taxCents is stored for reporting but not added again
+          const refundCents = Number(item.unitPriceCents || 0);
+          returnItemsMap.set(returnId, current + refundCents);
         }
 
         // Add refund amounts to returns
@@ -9924,6 +9942,106 @@ app.get('/api/purchases/:id', async (req, res, next) => {
   }
 });
 
+app.get('/api/suppliers/search', async (req, res, next) => {
+  try {
+    const queryRaw = typeof req.query?.q === 'string' ? req.query.q.trim() : '';
+    
+    if (queryRaw.length < 2) {
+      return res.json({ suppliers: [] });
+    }
+
+    const pattern = `%${queryRaw.replace(/\s+/g, '%')}%`;
+    
+    // Search suppliers from the suppliers table
+    const supplierRows = await db
+      .select({
+        id: suppliers.id,
+        name: suppliers.name,
+        taxId: suppliers.taxId,
+        contact: suppliers.contact,
+        phone: suppliers.phone,
+        email: suppliers.email,
+        notes: suppliers.notes,
+      })
+      .from(suppliers)
+      .where(like(suppliers.name, pattern))
+      .orderBy(asc(suppliers.name))
+      .limit(10);
+
+    res.json({ suppliers: supplierRows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/suppliers', async (req, res, next) => {
+  try {
+    const nameRaw = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!nameRaw || nameRaw.length === 0) {
+      throw new HttpError(400, 'Supplier name is required');
+    }
+
+    const taxId = typeof req.body?.taxId === 'string' ? req.body.taxId.trim() || null : null;
+    const contact = typeof req.body?.contact === 'string' ? req.body.contact.trim() || null : null;
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() || null : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim() || null : null;
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim() || null : null;
+
+    // Try to find existing supplier by name
+    const [existing] = await db
+      .select()
+      .from(suppliers)
+      .where(eq(suppliers.name, nameRaw))
+      .limit(1);
+
+    let supplier;
+    if (existing) {
+      // Update existing supplier
+      await db
+        .update(suppliers)
+        .set({
+          taxId,
+          contact,
+          phone,
+          email,
+          notes,
+          updatedAt: new Date(),
+        })
+        .where(eq(suppliers.id, existing.id));
+
+      supplier = { ...existing, taxId, contact, phone, email, notes };
+    } else {
+      // Create new supplier
+      await db
+        .insert(suppliers)
+        .values({
+          name: nameRaw,
+          taxId,
+          contact,
+          phone,
+          email,
+          notes,
+        });
+
+      // Fetch the newly created supplier
+      const [newSupplier] = await db
+        .select()
+        .from(suppliers)
+        .where(eq(suppliers.name, nameRaw))
+        .limit(1);
+
+      supplier = newSupplier;
+    }
+
+    res.json({ supplier });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 app.post('/api/purchases', async (req, res, next) => {
   try {
     const branchId = parsePositiveInteger(req.body?.branchId ?? req.body?.branch_id, 'branchId');
@@ -9948,6 +10066,32 @@ app.post('/api/purchases', async (req, res, next) => {
       req.body?.includePrice === undefined ? true : Boolean(req.body.includePrice);
     const labelNote = normalizeLabelNote(req.body?.labelNote ?? req.body?.label_note);
 
+    // Parse new products if provided
+    const rawNewProducts = req.body?.newProducts;
+    const newProducts = Array.isArray(rawNewProducts) ? rawNewProducts : [];
+
+    // Validate new products
+    for (let i = 0; i < newProducts.length; i += 1) {
+      const np = newProducts[i];
+      if (!np || typeof np !== 'object') {
+        throw new HttpError(400, `newProducts[${i}] must be an object`);
+      }
+      if (typeof np.code !== 'string' || !np.code.trim()) {
+        throw new HttpError(400, `newProducts[${i}].code is required`);
+      }
+      if (typeof np.name !== 'string' || !np.name.trim()) {
+        throw new HttpError(400, `newProducts[${i}].name is required`);
+      }
+      const priceCents = parsePositiveInteger(np.priceCents, `newProducts[${i}].priceCents`);
+      const costCents = parsePositiveInteger(np.costCents, `newProducts[${i}].costCents`);
+      if (priceCents <= 0) {
+        throw new HttpError(400, `newProducts[${i}].priceCents must be greater than 0`);
+      }
+      if (costCents <= 0) {
+        throw new HttpError(400, `newProducts[${i}].costCents must be greater than 0`);
+      }
+    }
+
     const { normalizedLines, totalQuantity, totalCostCents, totalLabels } = normalizePurchaseLines(
       req.body?.lines ?? req.body?.items
     );
@@ -9966,9 +10110,17 @@ app.post('/api/purchases', async (req, res, next) => {
       throw new HttpError(404, 'Branch not found');
     }
 
-    const versionIds = Array.from(new Set(normalizedLines.map((line) => line.productCodeVersionId)));
+    // Separate lines with existing products from new products
+    const existingLines = normalizedLines.filter((line) => line.productCodeVersionId != null);
+    const newProductLines = normalizedLines.filter((line) => line.productCodeVersionId == null);
 
-    const versionRows = await db
+    if (newProductLines.length !== newProducts.length) {
+      throw new HttpError(400, 'Mismatch between new products and lines with null productCodeVersionId');
+    }
+
+    const versionIds = Array.from(new Set(existingLines.map((line) => line.productCodeVersionId)));
+
+    const versionRows = existingLines.length > 0 ? await db
       .select({
         productCodeVersionId: productCodeVersions.id,
         productCodeId: productCodes.id,
@@ -9984,7 +10136,7 @@ app.post('/api/purchases', async (req, res, next) => {
       .from(productCodeVersions)
       .innerJoin(productCodes, eq(productCodeVersions.productCodeId, productCodes.id))
       .leftJoin(branches, eq(productCodeVersions.branchId, branches.id))
-      .where(inArray(productCodeVersions.id, versionIds));
+      .where(inArray(productCodeVersions.id, versionIds)) : [];
 
     if (versionRows.length !== versionIds.length) {
       const foundIds = new Set(versionRows.map((row) => Number(row.productCodeVersionId)));
@@ -10022,8 +10174,93 @@ app.post('/api/purchases', async (req, res, next) => {
 
     const lineInserts = [];
     const ledgerEntries = [];
+    const newProductVersionMap = new Map(); // Maps new product index to productCodeVersionId
 
     const createdPurchase = await db.transaction(async (tx) => {
+      // Create new products first
+      for (let i = 0; i < newProducts.length; i += 1) {
+        const np = newProducts[i];
+        const code = np.code.trim().slice(0, 64);
+        const name = np.name.trim().slice(0, 200);
+        const sku = typeof np.sku === 'string' && np.sku.trim() ? np.sku.trim().slice(0, 60) : null;
+        const description = typeof np.description === 'string' && np.description.trim() ? np.description.trim() : null;
+
+        // Check if code already exists
+        const [existingCode] = await tx
+          .select({ id: productCodes.id })
+          .from(productCodes)
+          .where(eq(productCodes.code, code))
+          .limit(1);
+
+        if (existingCode) {
+          throw new HttpError(409, `Product code "${code}" already exists`);
+        }
+
+        // Create product
+        await tx.insert(products).values({
+          name: name.slice(0, 240),
+          description,
+        });
+
+        const [productRow] = await tx
+          .select({ id: products.id })
+          .from(products)
+          .orderBy(desc(products.id))
+          .limit(1);
+
+        if (!productRow) {
+          throw new HttpError(500, 'FAILED_TO_CREATE_PRODUCT');
+        }
+
+        // Create product code
+        await tx.insert(productCodes).values({
+          productId: Number(productRow.id),
+          code,
+          name,
+          sku,
+          description,
+        });
+
+        const [codeRow] = await tx
+          .select({ id: productCodes.id })
+          .from(productCodes)
+          .where(eq(productCodes.code, code))
+          .orderBy(desc(productCodes.id))
+          .limit(1);
+
+        if (!codeRow) {
+          throw new HttpError(500, 'FAILED_TO_CREATE_PRODUCT_CODE');
+        }
+
+        // Create product code version
+        await tx.insert(productCodeVersions).values({
+          productCodeId: Number(codeRow.id),
+          branchId,
+          priceCents: np.priceCents,
+          costCents: np.costCents,
+          qtyOnHand: 0, // Will be updated when processing the line
+          qtyReserved: 0,
+        });
+
+        const [versionRow] = await tx
+          .select({ id: productCodeVersions.id })
+          .from(productCodeVersions)
+          .where(
+            and(
+              eq(productCodeVersions.productCodeId, Number(codeRow.id)),
+              eq(productCodeVersions.branchId, branchId)
+            )
+          )
+          .orderBy(desc(productCodeVersions.id))
+          .limit(1);
+
+        if (!versionRow) {
+          throw new HttpError(500, 'FAILED_TO_CREATE_PRODUCT_CODE_VERSION');
+        }
+
+        newProductVersionMap.set(i, Number(versionRow.id));
+      }
+
       await tx.insert(purchases).values({
         branchId,
         supplierName,
@@ -10050,7 +10287,8 @@ app.post('/api/purchases', async (req, res, next) => {
         throw new Error('FAILED_TO_CREATE_PURCHASE');
       }
 
-      for (const line of normalizedLines) {
+      // Process existing product lines
+      for (const line of existingLines) {
         const state = versionState.get(line.productCodeVersionId);
         if (!state) {
           throw new HttpError(404, `Product version ${line.productCodeVersionId} not found`);
@@ -10095,6 +10333,46 @@ app.post('/api/purchases', async (req, res, next) => {
           refId: purchaseRow.id,
           refTable: 'purchase',
           notes: supplierName ? `Compra ${supplierName}` : 'Purchase receipt',
+        });
+      }
+
+      // Process new product lines
+      for (let i = 0; i < newProductLines.length; i += 1) {
+        const line = newProductLines[i];
+        const versionId = newProductVersionMap.get(i);
+        if (!versionId) {
+          throw new HttpError(500, `Failed to get version ID for new product at index ${i}`);
+        }
+
+        const np = newProducts[i];
+        const newQty = line.quantity;
+        const newCostCents = line.unitCostCents;
+
+        await tx
+          .update(productCodeVersions)
+          .set({
+            qtyOnHand: sql`${productCodeVersions.qtyOnHand} + ${line.quantity}`,
+            costCents: newCostCents,
+          })
+          .where(eq(productCodeVersions.id, versionId));
+
+        lineInserts.push({
+          purchaseId: purchaseRow.id,
+          productCodeVersionId: versionId,
+          quantity: line.quantity,
+          unitCostCents: line.unitCostCents,
+          lineTotalCents: line.lineTotalCents,
+          labelQuantity: line.labelQuantity,
+          notes: null,
+        });
+
+        ledgerEntries.push({
+          productCodeVersionId: versionId,
+          reason: 'purchase',
+          qtyChange: line.quantity,
+          refId: purchaseRow.id,
+          refTable: 'purchase',
+          notes: supplierName ? `Compra ${supplierName} - Producto nuevo` : 'Purchase receipt - New product',
         });
       }
 
@@ -12170,7 +12448,25 @@ app.post('/api/pos/buys', async (req, res, next) => {
         const item = normalizedItems[index];
         const code = generateCustomerBuyCode(index);
 
+        // Create a product first (required for product_codes.product_id)
+        await tx.insert(products).values({
+          name: item.description.slice(0, 240),
+          description: item.notes,
+        });
+
+        const [productRow] = await tx
+          .select({ id: products.id })
+          .from(products)
+          .orderBy(desc(products.id))
+          .limit(1);
+
+        if (!productRow) {
+          throw new HttpError(500, 'FAILED_TO_CREATE_PRODUCT');
+        }
+
+        // Now create the product code with the product_id
         await tx.insert(productCodes).values({
+          productId: Number(productRow.id),
           code,
           name: item.description,
           description: item.notes,
@@ -12187,11 +12483,14 @@ app.post('/api/pos/buys', async (req, res, next) => {
           throw new HttpError(500, 'FAILED_TO_CREATE_PRODUCT_CODE');
         }
 
+        // Ensure costCents is never null - use 0 as fallback if offerCents is 0 or invalid
+        const costCentsValue = item.offerCents != null && item.offerCents >= 0 ? item.offerCents : 0;
+        
         await tx.insert(productCodeVersions).values({
           productCodeId: Number(codeRow.id),
           branchId,
           priceCents: item.resaleValueCents,
-          costCents: item.offerCents,
+          costCents: costCentsValue,
           qtyOnHand: 1,
           qtyReserved: 0,
         });
@@ -12838,11 +13137,21 @@ app.post('/api/refunds', async (req, res, next) => {
       }
 
       const restock = entry.restock === undefined ? source.restockable : Boolean(entry.restock);
-      const unitPriceCents = Number(source.unitPriceCents ?? 0);
-      const subtotalCents = unitPriceCents * qty;
-      const taxPerUnitCents = Number(source.taxPerUnitCents ?? 0);
-      const taxCents = taxPerUnitCents * qty;
-      const totalCents = subtotalCents + taxCents;
+      
+      // IMPORTANT: unitPriceCents already includes ITBIS (see PRICING_MODEL.md)
+      // Calculate proportional refund - price already includes ITBIS, so we use totalCents directly
+      const originalTotalCents = Number(source.totalCents ?? 0);
+      const originalQty = Number(source.qty ?? 0);
+      const refundQty = qty;
+      
+      // Calculate refund amount proportionally: (refundQty / originalQty) * originalTotal
+      // Since originalTotal already includes ITBIS, the refund also includes ITBIS
+      const totalCents = originalQty > 0 ? Math.round((originalTotalCents * refundQty) / originalQty) : 0;
+      const unitPriceCents = refundQty > 0 ? Math.round(totalCents / refundQty) : 0;
+      
+      // taxCents is stored for reporting but not added again since unitPrice already includes it
+      const taxCents = Number(source.taxCents ?? 0);
+      const subtotalCents = totalCents; // For display purposes, same as total since price includes tax
 
       normalizedLines.push({
         orderItemId,
@@ -12856,9 +13165,10 @@ app.post('/api/refunds', async (req, res, next) => {
       });
     });
 
-    const subtotalRefundCents = normalizedLines.reduce((sum, line) => sum + line.subtotalCents, 0);
-    const taxRefundCents = normalizedLines.reduce((sum, line) => sum + line.taxCents, 0);
-    const totalRefundCents = subtotalRefundCents + taxRefundCents;
+    // unitPriceCents already includes ITBIS, so total refund is just the sum of totalCents
+    const totalRefundCents = normalizedLines.reduce((sum, line) => sum + line.totalCents, 0);
+    const subtotalRefundCents = totalRefundCents; // For display purposes
+    const taxRefundCents = normalizedLines.reduce((sum, line) => sum + line.taxCents, 0); // For reporting only
     const restockValueCents = normalizedLines.reduce(
       (sum, line) => sum + (line.restock ? line.subtotalCents : 0),
       0,
@@ -13140,10 +13450,6 @@ app.post('/api/repairs', async (req, res, next) => {
       return res.status(400).json({ error: 'depositMethod is invalid' });
     }
 
-    const depositReference = normalizeNullableText(
-      req.body?.depositReference ?? req.body?.deposit_reference,
-      120
-    );
     const depositNote = normalizeReasonInput(req.body?.depositNote ?? req.body?.deposit_note);
 
     const photoPaths = (Array.isArray(req.body?.photos) ? req.body.photos : [])
@@ -13219,7 +13525,7 @@ app.post('/api/repairs', async (req, res, next) => {
           repairId,
           amountCents: depositCents,
           method: depositMethod,
-          reference: depositReference,
+          reference: null,
           note: depositNote,
         });
       }
@@ -14394,7 +14700,7 @@ async function loadCustomerDetail(customerId) {
 
   const customer = serializeCustomer(customerRow);
 
-  const [images, notes, loyaltyEntries] = await Promise.all([
+  const [images, notes, loyaltyEntries, creditNoteRows] = await Promise.all([
     db
       .select({
         id: idImages.id,
@@ -14430,10 +14736,58 @@ async function loadCustomerDetail(customerId) {
       .where(eq(loyaltyLedger.customerId, customerId))
       .orderBy(desc(loyaltyLedger.createdAt))
       .limit(100),
+    db
+      .select({
+        id: creditNotes.id,
+        customerId: creditNotes.customerId,
+        balanceCents: creditNotes.balanceCents,
+        reason: creditNotes.reason,
+        createdAt: creditNotes.createdAt,
+      })
+      .from(creditNotes)
+      .where(eq(creditNotes.customerId, customerId))
+      .orderBy(desc(creditNotes.createdAt)),
   ]);
+
+  // Load ledger entries for all credit notes
+  const creditNoteIds = creditNoteRows.map((row) => Number(row.id));
+  const creditNoteLedgerEntries = creditNoteIds.length > 0
+    ? await db
+        .select({
+          id: creditNoteLedger.id,
+          creditNoteId: creditNoteLedger.creditNoteId,
+          deltaCents: creditNoteLedger.deltaCents,
+          refTable: creditNoteLedger.refTable,
+          refId: creditNoteLedger.refId,
+          createdAt: creditNoteLedger.createdAt,
+        })
+        .from(creditNoteLedger)
+        .where(inArray(creditNoteLedger.creditNoteId, creditNoteIds))
+        .orderBy(desc(creditNoteLedger.createdAt))
+    : [];
 
   const transactions = await collectCustomerTransactions(customerId);
   const messages = await collectCustomerMessages(customerId);
+
+  // Group ledger entries by credit note ID
+  const ledgerByCreditNoteId = new Map();
+  for (const entry of creditNoteLedgerEntries) {
+    const noteId = Number(entry.creditNoteId);
+    if (!ledgerByCreditNoteId.has(noteId)) {
+      ledgerByCreditNoteId.set(noteId, []);
+    }
+    ledgerByCreditNoteId.get(noteId).push({
+      id: Number(entry.id),
+      creditNoteId: noteId,
+      deltaCents: Number(entry.deltaCents),
+      refTable: entry.refTable,
+      refId: entry.refId == null ? null : Number(entry.refId),
+      createdAt: entry.createdAt?.toISOString?.() ?? entry.createdAt,
+    });
+  }
+
+  // Calculate total available credit (sum of all active credit notes)
+  const totalCreditCents = creditNoteRows.reduce((sum, note) => sum + Number(note.balanceCents ?? 0), 0);
 
   return {
     customer,
@@ -14459,6 +14813,17 @@ async function loadCustomerDetail(customerId) {
         refTable: entry.refTable,
         refId: entry.refId == null ? null : Number(entry.refId),
         createdAt: entry.createdAt?.toISOString?.() ?? entry.createdAt,
+      })),
+    },
+    creditNotes: {
+      totalCents: totalCreditCents,
+      notes: creditNoteRows.map((note) => ({
+        id: Number(note.id),
+        customerId: Number(note.customerId),
+        balanceCents: Number(note.balanceCents),
+        reason: note.reason,
+        createdAt: note.createdAt?.toISOString?.() ?? note.createdAt,
+        ledger: ledgerByCreditNoteId.get(Number(note.id)) ?? [],
       })),
     },
     messages,

@@ -619,9 +619,22 @@ export const purchaseReturnLines = mysqlTable('purchase_return_lines', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+export const suppliers = mysqlTable('suppliers', {
+  id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+  name: varchar('name', { length: 160 }).notNull().unique(),
+  taxId: varchar('tax_id', { length: 40 }),
+  contact: varchar('contact', { length: 120 }),
+  phone: varchar('phone', { length: 40 }),
+  email: varchar('email', { length: 190 }),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
 export const supplierCredits = mysqlTable('supplier_credits', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   branchId: bigint('branch_id', { mode: 'number' }).notNull(),
+  supplierId: bigint('supplier_id', { mode: 'number' }),
   supplierName: varchar('supplier_name', { length: 160 }),
   supplierInvoice: varchar('supplier_invoice', { length: 80 }),
   purchaseId: bigint('purchase_id', { mode: 'number' }),

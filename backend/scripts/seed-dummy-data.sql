@@ -223,15 +223,17 @@ VALUES
   (@order_ana, @invoice_ana, NULL, 'card', 9500000, JSON_OBJECT('authCode', 'A1B2C3')),
   (@order_luis, @invoice_luis, NULL, 'cash', 3000000, JSON_OBJECT('drawer', 'main'));
 
-INSERT INTO sales_returns (invoice_id, reason, `condition`, refund_method)
+INSERT INTO sales_returns (invoice_id, order_id, branch_id, customer_id, created_by, refund_method, total_refund_cents, restock_value_cents, reason)
 VALUES
-  (@invoice_luis, 'Cliente cambió de opinión', 'used', 'store_credit');
+  (@invoice_luis, @order_luis, @branch_sdq, @customer_luis, @user_cashier, 'store_credit', 3000000, 0, 'Cliente cambió de opinión');
 
 SET @sales_return := LAST_INSERT_ID();
 
-INSERT INTO sales_return_items (sales_return_id, code_id, qty, refund_cents)
+SET @order_item_ring := (SELECT id FROM order_items WHERE order_id = @order_luis AND code_id = @code_ring LIMIT 1);
+
+INSERT INTO sales_return_items (sales_return_id, order_item_id, product_code_version_id, qty, unit_price_cents, tax_cents, restock)
 VALUES
-  (@sales_return, @code_ring, 1, 3000000);
+  (@sales_return, @order_item_ring, @pcv_ring, 1, 3000000, 0, TRUE);
 
 -- === Loans / Pawns ===
 INSERT INTO interest_models (name, description, rate_type, period_days, interest_rate_bps, grace_days, min_principal_cents, max_principal_cents, late_fee_bps)

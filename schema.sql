@@ -266,9 +266,23 @@ CREATE TABLE IF NOT EXISTS purchase_return_lines (
   FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
 );
 
+CREATE TABLE IF NOT EXISTS suppliers (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(160) NOT NULL,
+  tax_id VARCHAR(40),
+  contact VARCHAR(120),
+  phone VARCHAR(40),
+  email VARCHAR(190),
+  notes TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_supplier_name (name)
+);
+
 CREATE TABLE IF NOT EXISTS supplier_credits (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
+  supplier_id BIGINT NULL,
   supplier_name VARCHAR(160),
   supplier_invoice VARCHAR(80),
   purchase_id BIGINT NULL,
@@ -280,6 +294,7 @@ CREATE TABLE IF NOT EXISTS supplier_credits (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (branch_id) REFERENCES branches(id),
+  FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
   FOREIGN KEY (purchase_id) REFERENCES purchases(id),
   FOREIGN KEY (purchase_return_id) REFERENCES purchase_returns(id)
 );
@@ -425,21 +440,36 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE TABLE IF NOT EXISTS sales_returns (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   invoice_id BIGINT NOT NULL,
-  reason TEXT,
-  `condition` ENUM('new','used','damaged') DEFAULT 'used',
+  order_id BIGINT NOT NULL,
+  branch_id BIGINT NOT NULL,
+  customer_id BIGINT NULL,
+  created_by BIGINT NULL,
   refund_method ENUM('cash','store_credit') NOT NULL,
+  total_refund_cents BIGINT NOT NULL,
+  restock_value_cents BIGINT DEFAULT 0,
+  reason TEXT,
+  notes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+  FOREIGN KEY (invoice_id) REFERENCES invoices(id),
+  FOREIGN KEY (order_id) REFERENCES orders(id),
+  FOREIGN KEY (branch_id) REFERENCES branches(id),
+  FOREIGN KEY (customer_id) REFERENCES customers(id),
+  FOREIGN KEY (created_by) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS sales_return_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   sales_return_id BIGINT NOT NULL,
-  code_id BIGINT NOT NULL,
-  qty DECIMAL(18,4) NOT NULL,
-  refund_cents BIGINT NOT NULL,
+  order_item_id BIGINT NOT NULL,
+  product_code_version_id BIGINT NOT NULL,
+  qty INT NOT NULL,
+  unit_price_cents BIGINT NOT NULL,
+  tax_cents BIGINT DEFAULT 0,
+  restock BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (sales_return_id) REFERENCES sales_returns(id),
-  FOREIGN KEY (code_id) REFERENCES product_codes(id)
+  FOREIGN KEY (order_item_id) REFERENCES order_items(id),
+  FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)
 );
 
 -- ========= LOANS / PAWNS =========

@@ -250,4 +250,12 @@ o Block id
 - [x] Rework - Implement the "Loan Book" report with metrics, table, and date dialog using schema.sql data.
 - [x] Rework - Implement the "Products Aged" report with metrics, table, and date dialog using schema.sql data.
 - [x] Rework - Implement the "Voids / Refund by staff who sold it" report with metrics, table, and date dialog using schema.sql data.
+- [ ] On point o sale - new sale page: when the sale is paid and completed, the products doesn't update the new quantities available in stock unless the page is refreshed. Please update them after completing the sale, so the user can make another sale right away with the right qty of available item in stock.
+- [ ] repairs intake page: the change and add buttons for customer are not working. check the implementation on new sale for guidance. Also make the job number auto generated and make it disabled so the user can change it.\
+- [ ] make sure the repairs intake page is properly connected to the database and uses the right columns on schema.sql
+- [ ] make sure the entire app uses the format for date dd/MM/yyyy and not the mm/dd/yyyy.
+- [ ] on the inventory section on the left bar, add a dashboard ops button that will include a title, metrics (zones, active counts, sucursales), and an inventory count history table with its status.
+
+
+
 

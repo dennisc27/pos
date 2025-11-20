@@ -221,7 +221,11 @@ export default function InventorySplitCombinePage() {
   }, [snapshot.versions]);
 
   const splitParent = typeof splitParentId === "number" ? versionsById.get(splitParentId) : undefined;
-  const splitParentCostPerUnit = splitParent?.costCents != null ? Number(splitParent.costCents) : null;
+  // Allow costCents to be 0, only reject if it's null or undefined
+  const splitParentCostPerUnit = 
+    splitParent?.costCents != null && splitParent.costCents !== undefined 
+      ? Number(splitParent.costCents) 
+      : null;
 
   const splitChildCostPerUnit = useMemo(() => {
     let total = 0;
@@ -333,7 +337,7 @@ export default function InventorySplitCombinePage() {
 
     const parentCostCents = splitParentCostPerUnit;
     if (parentCostCents == null) {
-      setFlash({ tone: "error", message: "El costo del código padre no está definido" });
+      setFlash({ tone: "error", message: "El costo del código padre no está definido. Este producto necesita tener un costo asignado para poder dividirlo. Puedes editar el producto y asignarle un costo." });
       return;
     }
 

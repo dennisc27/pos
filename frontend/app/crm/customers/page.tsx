@@ -60,6 +60,29 @@ type LoyaltyLedger = {
   entries: LoyaltyEntry[];
 };
 
+type CreditNoteLedgerEntry = {
+  id: number;
+  creditNoteId: number;
+  deltaCents: number;
+  refTable: string | null;
+  refId: number | null;
+  createdAt: string | null;
+};
+
+type CreditNote = {
+  id: number;
+  customerId: number;
+  balanceCents: number;
+  reason: string | null;
+  createdAt: string | null;
+  ledger: CreditNoteLedgerEntry[];
+};
+
+type CreditNotes = {
+  totalCents: number;
+  notes: CreditNote[];
+};
+
 type CustomerMessage = {
   id: number;
   channel: "sms" | "whatsapp" | "email";
@@ -91,6 +114,7 @@ type CustomerDetail = {
   idImages: CustomerImage[];
   notes: CustomerNote[];
   loyaltyLedger: LoyaltyLedger;
+  creditNotes: CreditNotes;
   messages: CustomerMessage[];
   transactions: CustomerTransaction[];
 };
@@ -516,6 +540,89 @@ export default function CrmCustomersPage() {
                       ))
                     )}
                   </ul>
+                </section>
+
+                <section>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Store Credit</h3>
+                  <div className="mt-2 flex flex-wrap items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm dark:border-emerald-500/40 dark:bg-emerald-500/10">
+                    <div>
+                      <p className="text-xs uppercase text-emerald-600 dark:text-emerald-300">Total Available</p>
+                      <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-200">
+                        {formatCurrencyFromCents(detail.creditNotes.totalCents)}
+                      </p>
+                    </div>
+                    <div className="text-xs text-emerald-600 dark:text-emerald-300">
+                      {detail.creditNotes.notes.length} {detail.creditNotes.notes.length === 1 ? "credit note" : "credit notes"}
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {detail.creditNotes.notes.length === 0 ? (
+                      <div className="rounded bg-slate-100/60 px-3 py-2 text-center text-xs text-slate-500 dark:bg-slate-800/40 dark:text-slate-400">
+                        No credit notes yet.
+                      </div>
+                    ) : (
+                      detail.creditNotes.notes.map((creditNote) => (
+                        <div
+                          key={creditNote.id}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-900/60"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                                  Credit Note #{creditNote.id}
+                                </span>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                    creditNote.balanceCents > 0
+                                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                                  }`}
+                                >
+                                  {creditNote.balanceCents > 0 ? "Active" : "Used"}
+                                </span>
+                              </div>
+                              <p className="mt-1 font-medium text-slate-700 dark:text-slate-200">
+                                Balance: {formatCurrencyFromCents(creditNote.balanceCents)}
+                              </p>
+                              {creditNote.reason && (
+                                <p className="mt-1 text-slate-600 dark:text-slate-400">{creditNote.reason}</p>
+                              )}
+                              <p className="mt-1 text-slate-500 dark:text-slate-500">
+                                Created: {formatDateTime(creditNote.createdAt)}
+                              </p>
+                              {creditNote.ledger.length > 0 && (
+                                <details className="mt-2">
+                                  <summary className="cursor-pointer text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200">
+                                    {creditNote.ledger.length} {creditNote.ledger.length === 1 ? "transaction" : "transactions"}
+                                  </summary>
+                                  <ul className="mt-2 space-y-1 border-t border-slate-200 pt-2 dark:border-slate-700">
+                                    {creditNote.ledger.map((entry) => (
+                                      <li
+                                        key={entry.id}
+                                        className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400"
+                                      >
+                                        <span>
+                                          {entry.deltaCents > 0 ? "+" : ""}
+                                          {formatCurrencyFromCents(entry.deltaCents)}
+                                          {entry.refTable && (
+                                            <span className="ml-1 text-slate-400 dark:text-slate-500">
+                                              ({entry.refTable})
+                                            </span>
+                                          )}
+                                        </span>
+                                        <span>{formatDateTime(entry.createdAt)}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </details>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </section>
 
                 <section>

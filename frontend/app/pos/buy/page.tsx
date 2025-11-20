@@ -141,6 +141,15 @@ export default function PosBuyPage() {
   const [isSearchingSellers, setIsSearchingSellers] = useState(false);
   const [sellerForm, setSellerForm] = useState<SellerProfile>(initialSeller);
   const [sellerFormError, setSellerFormError] = useState<string | null>(null);
+  const [isSuccessDialogOpen, setSuccessDialogOpen] = useState(false);
+  const [purchaseData, setPurchaseData] = useState<{
+    id: number;
+    totalCostCents: number;
+    totalQuantity: number;
+    supplierName: string;
+    payoutMethod: string;
+    items: Array<{ code: string; description: string; resaleValueCents: number; offerCents: number }>;
+  } | null>(null);
 
   useEffect(() => {
     if (!isPrinting) return;
@@ -255,15 +264,11 @@ export default function PosBuyPage() {
   }, [items]);
 
   const sellerDescriptor = useMemo(() => {
-    const parts = [seller.document.trim(), seller.phone.trim()].filter((value) => value.length > 0);
-    if (parts.length > 0) {
-      return parts.join(" • ");
-    }
     if (linkedSellerId) {
       return "Linked CRM seller";
     }
     return "Manual entry";
-  }, [linkedSellerId, seller.document, seller.phone]);
+  }, [linkedSellerId]);
 
   const updateItem = (id: string, patch: Partial<IntakeItem>) => {
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
@@ -308,6 +313,28 @@ export default function PosBuyPage() {
 
   const removeItem = (itemId: string) => {
     setItems((prev) => (prev.length === 1 ? prev : prev.filter((item) => item.id !== itemId)));
+  };
+
+  const resetPage = () => {
+    setSeller(WALK_IN_SELLER);
+    setLinkedSellerId(null);
+    setItems([
+      {
+        id: createId(),
+        description: "",
+        category: categories[0] ?? "Other",
+        condition: "used",
+        serial: "",
+        accessories: "",
+        notes: "",
+        offerAmount: 0,
+        photos: [],
+      },
+    ]);
+    setPayoutMethod("cash");
+    setManagerNotes("");
+    setStatus(null);
+    setPurchaseData(null);
   };
 
   const handleSellerChange = (field: keyof SellerProfile, value: string) => {
@@ -363,8 +390,8 @@ export default function PosBuyPage() {
     const nextSeller: SellerProfile = {
       name: result.name,
       document: "",
-      phone: result.phone ?? "",
-      notes: seller.notes,
+      phone: "",
+      notes: "",
     };
 
     setSeller(nextSeller);
@@ -412,7 +439,7 @@ export default function PosBuyPage() {
         seller: seller,
         items: items.map((item) => ({
           description: item.description,
-          offerAmount: item.offerAmount,
+          resaleValue: item.offerAmount, // Backend expects resaleValue, we use offerAmount as the resale value
           accessories: item.accessories,
           notes: item.notes,
           serial: item.serial,
@@ -434,7 +461,15 @@ export default function PosBuyPage() {
       }
 
       const data = await response.json();
-      setStatus({ tone: "success", message: `Purchase #${data?.purchase?.id ?? ""} recorded successfully.` });
+      setPurchaseData({
+        id: data.purchase.id,
+        totalCostCents: data.purchase.totalCostCents,
+        totalQuantity: data.purchase.totalQuantity,
+        supplierName: data.purchase.supplierName,
+        payoutMethod: data.purchase.payoutMethod,
+        items: data.items ?? [],
+      });
+      setSuccessDialogOpen(true);
       setIsPrinting(true);
     } catch (error) {
       setStatus({ tone: "error", message: error instanceof Error ? error.message : "Unable to submit intake." });
@@ -517,35 +552,6 @@ export default function PosBuyPage() {
                   </button>
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                  Document ID
-                  <input
-                    value={seller.document}
-                    onChange={(event) => handleSellerChange("document", event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                    placeholder="402-0000000-0"
-                  />
-                </label>
-                <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                  Phone number
-                  <input
-                    value={seller.phone}
-                    onChange={(event) => handleSellerChange("phone", event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                    placeholder="809-555-0101"
-                  />
-                </label>
-              </div>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                Notes
-                <textarea
-                  value={seller.notes}
-                  onChange={(event) => handleSellerChange("notes", event.target.value)}
-                  className="mt-1 h-20 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                  placeholder="Any red flags or return visits"
-                />
-              </label>
             </div>
           </PosCard>
 
@@ -878,10 +884,9 @@ export default function PosBuyPage() {
         className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
         onClick={closeSellerDialog}
       >
-        <form
+        <div
           className="w-full max-w-lg space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
           onClick={(event) => event.stopPropagation()}
-          onSubmit={handleSubmitSellerProfile}
         >
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -956,65 +961,122 @@ export default function PosBuyPage() {
           >
             Use walk-in seller
           </button>
-          <div className="space-y-3 rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/50">
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-              Full name
-              <input
-                value={sellerForm.name}
-                onChange={(event) => handleSellerFormChange("name", event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                placeholder="María Gómez"
-              />
-            </label>
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-              Document ID
-              <input
-                value={sellerForm.document}
-                onChange={(event) => handleSellerFormChange("document", event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                placeholder="402-0000000-0"
-              />
-            </label>
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-              Phone number
-              <input
-                value={sellerForm.phone}
-                onChange={(event) => handleSellerFormChange("phone", event.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                placeholder="809-555-0101"
-              />
-            </label>
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-              Notes
-              <textarea
-                value={sellerForm.notes}
-                onChange={(event) => handleSellerFormChange("notes", event.target.value)}
-                className="mt-1 h-20 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
-                placeholder="Any red flags or return visits"
-              />
-            </label>
-            {sellerFormError ? (
-              <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
-                {sellerFormError}
-              </p>
-            ) : null}
-          </div>
-          <div className="flex items-center justify-end gap-3 pt-2">
+          <div className="flex items-center justify-end">
             <button
               type="button"
               onClick={closeSellerDialog}
-              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-600/30 transition hover:bg-sky-500"
-            >
-              Save seller
+              Close
             </button>
           </div>
-        </form>
+        </div>
+      </div>
+    ) : null}
+    {isSuccessDialogOpen && purchaseData ? (
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+        onClick={() => {
+          setSuccessDialogOpen(false);
+          resetPage();
+        }}
+      >
+        <div
+          className="w-full max-w-2xl space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20">
+                <CheckCircle2 className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Purchase Successful</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Purchase #{purchaseData.id} recorded and receipt printed
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSuccessDialogOpen(false);
+                resetPage();
+              }}
+              className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+              aria-label="Close success dialog"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/50">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Seller</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{purchaseData.supplierName}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Payout Method</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white capitalize">
+                  {purchaseData.payoutMethod === "cash" ? "Cash drawer" : "Bank transfer"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Items Purchased</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{purchaseData.totalQuantity}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Payout</p>
+                <p className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">
+                  {formatCurrency(purchaseData.totalCostCents / 100)}
+                </p>
+              </div>
+            </div>
+
+            {purchaseData.items.length > 0 && (
+              <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">Items Summary</p>
+                <div className="space-y-2">
+                  {purchaseData.items.map((item, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900/60"
+                    >
+                      <div className="flex-1">
+                        <p className="font-medium text-slate-900 dark:text-white">{item.description}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Code: {item.code}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-slate-900 dark:text-white">
+                          {formatCurrency(item.offerCents / 100)}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Resale: {formatCurrency(item.resaleValueCents / 100)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setSuccessDialogOpen(false);
+                resetPage();
+              }}
+              className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
       </div>
     ) : null}
     </>

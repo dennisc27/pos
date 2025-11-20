@@ -2,9 +2,9 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   ArrowLeftRight,
   BadgeInfo,
+  CheckCircle2,
   ClipboardList,
   CreditCard,
   DollarSign,
@@ -21,6 +21,7 @@ import {
 
 import { PosCard } from "@/components/pos/pos-card";
 import { formatCurrency } from "@/components/pos/utils";
+import { breakdownPriceWithTax, calculateLineTotal } from "@/lib/price-calculations";
 
 type ApiInvoice = {
   id: number;
@@ -61,6 +62,7 @@ type InvoiceDetail = {
 type RefundLineSelection = {
   selected: boolean;
   restock: boolean;
+  qty: number; // Quantity to refund (can be less than original)
 };
 
 type RefundTotals = {
@@ -121,6 +123,8 @@ export default function PosRefundPage() {
   const [historyResults, setHistoryResults] = useState<InvoiceSearchResult[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [isSuccessDialogOpen, setSuccessDialogOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!activeInvoice) {
@@ -134,6 +138,7 @@ export default function PosRefundPage() {
         acc[key] = {
           selected: line.restockable,
           restock: line.restockable,
+          qty: line.qty, // Initialize with original quantity
         };
         return acc;
       }, {}),
@@ -157,14 +162,15 @@ export default function PosRefundPage() {
   const totals = useMemo(() => {
     if (!activeInvoice) {
       return {
+        totalQty: 0,
         subtotalCents: 0,
         taxCents: 0,
         totalCents: 0,
-        restockCount: 0,
         restockValueCents: 0,
       };
     }
 
+    // IMPORTANT: unitPriceCents already includes ITBIS (see PRICING_MODEL.md)
     return activeInvoice.lines.reduce(
       (acc, line) => {
         const selection = lineSelections[String(line.orderItemId)];
@@ -172,18 +178,28 @@ export default function PosRefundPage() {
           return acc;
         }
 
-        acc.subtotalCents += line.subtotalCents;
-        acc.taxCents += line.taxCents;
-        acc.totalCents += line.totalCents;
+        const refundQty = selection.qty || 0;
+        const unitPriceCents = line.unitPriceCents; // Already includes ITBIS
+        
+        // Calculate line total: unitPrice * qty (price already includes tax)
+        const lineTotalCents = calculateLineTotal(unitPriceCents, refundQty);
+        
+        // Extract net and tax for display (price includes tax, so we break it down)
+        const breakdown = breakdownPriceWithTax(lineTotalCents, 0.18);
+        
+        acc.totalQty += refundQty;
+        acc.subtotalCents += breakdown.netCents; // Net without tax
+        acc.taxCents += breakdown.taxCents; // Tax portion
+        acc.totalCents += lineTotalCents; // Total (includes tax)
 
         if (selection.restock && line.restockable) {
-          acc.restockCount += 1;
-          acc.restockValueCents += line.subtotalCents;
+          // Restock value is the net amount (without tax) for the refunded quantity
+          acc.restockValueCents += breakdown.netCents;
         }
 
         return acc;
       },
-      { subtotalCents: 0, taxCents: 0, totalCents: 0, restockCount: 0, restockValueCents: 0 },
+      { totalQty: 0, subtotalCents: 0, taxCents: 0, totalCents: 0, restockValueCents: 0 },
     );
   }, [activeInvoice, lineSelections]);
 
@@ -279,6 +295,20 @@ export default function PosRefundPage() {
     setHistoryDialogOpen(false);
   }, []);
 
+  const resetPage = useCallback(() => {
+    setSearch("");
+    setActiveInvoice(null);
+    setLineSelections({});
+    setRefundMethod("cash");
+    setReasonCode("Wrong color / mismatch");
+    setNoteInput("");
+    setSubmitState("idle");
+    setSubmitMessage(null);
+    setLookupError(null);
+    setSuccessDialogOpen(false);
+    setSuccessMessage(null);
+  }, []);
+
   const handleSelectHistoryInvoice = useCallback(
     async (entry: InvoiceSearchResult) => {
       const identifier = entry.invoiceNo ?? String(entry.id);
@@ -292,7 +322,7 @@ export default function PosRefundPage() {
   const toggleSelection = (line: ApiInvoiceLine, field: keyof RefundLineSelection) => {
     setLineSelections((prev) => {
       const key = String(line.orderItemId);
-      const current = prev[key] ?? { selected: false, restock: false };
+      const current = prev[key] ?? { selected: false, restock: false, qty: line.qty };
 
       if (field === "restock" && !line.restockable) {
         return prev;
@@ -303,6 +333,24 @@ export default function PosRefundPage() {
         [key]: {
           ...current,
           [field]: field === "restock" ? !current.restock : !current.selected,
+        },
+      };
+    });
+  };
+
+  const updateQuantity = (line: ApiInvoiceLine, newQty: number) => {
+    const qty = Math.max(0, Math.min(newQty, line.qty)); // Clamp between 0 and original qty
+    setLineSelections((prev) => {
+      const key = String(line.orderItemId);
+      const current = prev[key] ?? { selected: false, restock: false, qty: line.qty };
+      
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          qty,
+          // Auto-select if qty > 0, auto-deselect if qty = 0
+          selected: qty > 0 ? (current.selected || true) : false,
         },
       };
     });
@@ -319,12 +367,29 @@ export default function PosRefundPage() {
       return;
     }
 
-    const selectedLines = activeInvoice.lines.filter((line) => lineSelections[String(line.orderItemId)]?.selected);
+    const selectedLines = activeInvoice.lines
+      .map((line) => {
+        const selection = lineSelections[String(line.orderItemId)];
+        if (!selection?.selected || !selection.qty || selection.qty <= 0) {
+          return null;
+        }
+        return { line, selection };
+      })
+      .filter((item): item is { line: ApiInvoiceLine; selection: RefundLineSelection } => item !== null);
 
     if (selectedLines.length === 0) {
       setSubmitState("error");
-      setSubmitMessage("Select at least one line item to refund.");
+      setSubmitMessage("Select at least one line item with quantity > 0 to refund.");
       return;
+    }
+
+    // Validate quantities
+    for (const { line, selection } of selectedLines) {
+      if (selection.qty > line.qty) {
+        setSubmitState("error");
+        setSubmitMessage(`Quantity for ${line.description ?? "item"} cannot exceed ${line.qty} (original quantity).`);
+        return;
+      }
     }
 
     setSubmitState("submitting");
@@ -334,10 +399,10 @@ export default function PosRefundPage() {
       const payload = {
         invoiceNo: activeInvoice.invoice.invoiceNo,
         method: refundMethod,
-        lines: selectedLines.map((line) => ({
+        lines: selectedLines.map(({ line, selection }) => ({
           orderItemId: line.orderItemId,
-          qty: line.qty,
-          restock: Boolean(lineSelections[String(line.orderItemId)]?.restock && line.restockable),
+          qty: selection.qty,
+          restock: Boolean(selection.restock && line.restockable),
         })),
         reason: reasonCode,
         notes: noteInput.trim() || null,
@@ -356,18 +421,22 @@ export default function PosRefundPage() {
 
       const data = (await response.json()) as RefundResponse;
 
-      const amountFormatted = formatCurrency(data.totals.totalCents / 100);
+      // IMPORTANT: totalRefundCents already includes ITBIS (see PRICING_MODEL.md)
+      // Use salesReturn.totalRefundCents which is the actual refund amount
+      const refundAmountCents = data.salesReturn.totalRefundCents;
+      const amountFormatted = formatCurrency(refundAmountCents / 100);
+      let message = "";
       if (refundMethod === "store_credit" && data.creditNote) {
-        setSubmitMessage(
-          `Store credit refund posted. Credit note #${data.creditNote.id} balance: ${formatCurrency(
-            data.creditNote.balanceCents / 100,
-          )}.`,
-        );
+        message = `Store credit refund posted. Credit note #${data.creditNote.id} balance: ${formatCurrency(
+          data.creditNote.balanceCents / 100,
+        )}.`;
       } else {
-        setSubmitMessage(`Cash refund posted for ${amountFormatted}.`);
+        message = `Cash refund posted for ${amountFormatted}.`;
       }
 
+      setSuccessMessage(message);
       setSubmitState("success");
+      setSuccessDialogOpen(true);
     } catch (error) {
       setSubmitState("error");
       setSubmitMessage(error instanceof Error ? error.message : "Unable to post refund");
@@ -532,9 +601,16 @@ export default function PosRefundPage() {
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {activeInvoice.lines.map((line) => {
                       const key = String(line.orderItemId);
-                      const selection = lineSelections[key] ?? { selected: false, restock: false };
-                      const lineSubtotal = line.subtotalCents / 100;
-                      const lineTax = line.taxCents / 100;
+                      const selection = lineSelections[key] ?? { selected: false, restock: false, qty: line.qty };
+                      
+                      // Calculate unit price per unit (already includes ITBIS)
+                      const unitPriceCents = line.unitPriceCents;
+                      const unitPrice = unitPriceCents / 100;
+                      
+                      // Calculate ITBIS per unit for display (extract from price that includes tax)
+                      const unitBreakdown = breakdownPriceWithTax(unitPriceCents, 0.18);
+                      const unitTax = unitBreakdown.taxCents / 100;
+                      
                       return (
                         <tr
                           key={line.orderItemId}
@@ -553,12 +629,29 @@ export default function PosRefundPage() {
                                 {line.sku && (
                                   <p className="text-xs text-slate-500 dark:text-slate-400">SKU {line.sku}</p>
                                 )}
+                                <p className="text-xs text-slate-400 dark:text-slate-500">Original qty: {line.qty}</p>
                               </div>
                             </label>
                           </td>
-                          <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{line.qty}</td>
-                          <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{formatCurrency(lineSubtotal)}</td>
-                          <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{formatCurrency(lineTax)}</td>
+                          <td className="px-4 py-3 text-right">
+                            {selection.selected ? (
+                              <input
+                                type="number"
+                                min="0"
+                                max={line.qty}
+                                value={selection.qty}
+                                onChange={(e) => {
+                                  const newQty = parseInt(e.target.value, 10) || 0;
+                                  updateQuantity(line, newQty);
+                                }}
+                                className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1 text-right text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-800/60"
+                              />
+                            ) : (
+                              <span className="text-slate-600 dark:text-slate-300">{line.qty}</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{formatCurrency(unitPrice)}</td>
+                          <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-300">{formatCurrency(unitTax)}</td>
                           <td className="px-4 py-3 text-center text-xs">
                             <button
                               type="button"
@@ -624,13 +717,13 @@ export default function PosRefundPage() {
                 <span className="inline-flex items-center gap-2 text-slate-500">
                   <Package className="h-4 w-4" /> Items returned
                 </span>
-                <span className="font-semibold text-slate-900 dark:text-slate-100">{selectedCount}</span>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">{totals.totalQty}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center gap-2 text-slate-500">
                   <Store className="h-4 w-4" /> Restocking
                 </span>
-                <span className="text-xs text-slate-500">{totals.restockCount} lines · {formatCurrency(totals.restockValueCents / 100)}</span>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(totals.restockValueCents / 100)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center gap-2 text-slate-500">
@@ -721,10 +814,6 @@ export default function PosRefundPage() {
                   placeholder="Add context for the manager approval and inspection results"
                 />
               </label>
-              <p className="flex items-start gap-2 rounded-xl border border-rose-200/70 bg-rose-50/70 p-3 text-xs leading-5 text-rose-600 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
-                <AlertTriangle className="mt-0.5 h-4 w-4" /> Refunds above RD$25,000 require manager PIN entry and capture of the
-                customer&apos;s signature.
-              </p>
               {submitMessage && (
                 <p
                   className={`rounded-xl border px-3 py-2 text-xs ${
@@ -866,6 +955,50 @@ export default function PosRefundPage() {
                   })}
                 </ul>
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {isSuccessDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={resetPage}
+        >
+          <div
+            className="w-full max-w-md space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-3">
+                <div className="rounded-full bg-emerald-100 p-2 dark:bg-emerald-500/20">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-300" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-emerald-600 dark:text-emerald-300">Refund Successful</h2>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                    {successMessage ?? "The refund has been processed successfully."}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={resetPage}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close success dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={resetPage}
+                className="rounded-lg border border-emerald-500/70 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-500 hover:bg-emerald-500/25 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-100 dark:hover:border-emerald-400/80 dark:hover:bg-emerald-500/30"
+              >
+                Continue
+              </button>
             </div>
           </div>
         </div>
