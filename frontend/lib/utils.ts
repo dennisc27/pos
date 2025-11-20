@@ -70,20 +70,36 @@ export function formatCurrencyFromCents(cents: number, currency: Currency = "DOP
   return formatted.replace(/DOP\s*/g, "$");
 }
 
-export function formatDateForDisplay(value?: string | null): string {
+export function formatDateForDisplay(value?: string | number | Date | null): string {
   if (!value) {
     return "—";
   }
 
-  const parsed = new Date(value);
+  const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return value;
+    return typeof value === "string" ? value : "—";
   }
 
   const day = String(parsed.getDate()).padStart(2, "0");
   const month = String(parsed.getMonth() + 1).padStart(2, "0");
   const year = parsed.getFullYear();
   return `${day}/${month}/${year}`;
+}
+
+export function formatDateTimeForDisplay(value?: string | number | Date | null): string {
+  if (!value) {
+    return "—";
+  }
+
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return typeof value === "string" ? value : "—";
+  }
+
+  const hours = String(parsed.getHours()).padStart(2, "0");
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+
+  return `${formatDateForDisplay(parsed)} ${hours}:${minutes}`;
 }
 
 export function todayIsoDate(): string {

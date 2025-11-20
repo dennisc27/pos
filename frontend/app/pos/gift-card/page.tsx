@@ -5,9 +5,9 @@ import { useState } from "react";
 import { Gift, RefreshCcw, Ticket, Wallet } from "lucide-react";
 
 import { formatCurrency } from "@/components/pos/utils";
+import { formatDateForDisplay } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
-const dateFormatter = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
 
 const normalizeCode = (code: string) => code.trim().toUpperCase();
 
@@ -324,11 +324,11 @@ export default function PosGiftCardPage() {
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <span className="text-slate-500 dark:text-slate-400">Issued</span>
                   <span className="font-medium text-slate-700 dark:text-slate-200">
-                    {dateFormatter.format(new Date(activeCard.createdAt))}
+                  {formatDateForDisplay(activeCard.createdAt)}
                   </span>
                   <span className="text-slate-500 dark:text-slate-400">Expires</span>
                   <span className="font-medium text-slate-700 dark:text-slate-200">
-                    {activeCard.expiresOn ? dateFormatter.format(new Date(activeCard.expiresOn)) : "No expiry"}
+                  {activeCard.expiresOn ? formatDateForDisplay(activeCard.expiresOn) : "No expiry"}
                   </span>
                 </div>
               </div>

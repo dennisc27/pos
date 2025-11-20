@@ -19,6 +19,7 @@ import type {
   MessageThread,
 } from "@/components/crm/types";
 import { formatCurrency } from "@/components/crm/utils";
+import { formatDateForDisplay } from "@/lib/utils";
 
 const SUMMARY_METRICS: CrmSummaryMetric[] = [
   {
@@ -608,7 +609,7 @@ export default function CrmPage() {
     const newBalance = Math.max(0, currentBalance - 500);
     const redemption: LoyaltyLedgerEntry = {
       id: `led-${Date.now()}`,
-      date: new Date().toLocaleDateString("es-DO", { day: "2-digit", month: "short" }),
+      date: formatDateForDisplay(new Date()),
       description: `Redención aplicada (ref ${entryId})`,
       points: -500,
       balance: newBalance,

@@ -4,6 +4,14 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: "2mb"
     }
+  },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "api.qrserver.com"
+      }
+    ]
   }
 };
 

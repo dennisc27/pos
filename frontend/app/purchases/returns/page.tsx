@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, ClipboardCheck, Plus, Search, Trash2 } from "lucide-react";
 
 import { formatCurrency } from "@/components/pos/utils";
+import { formatDateForDisplay } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -435,7 +436,7 @@ export default function PurchaseReturnsPage() {
                       {branchNameById.get(item.branchId) ?? `Sucursal #${item.branchId}`}
                     </td>
                     <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
-                      {item.receivedAt ? new Date(item.receivedAt).toLocaleDateString() : "—"}
+                      {item.receivedAt ? formatDateForDisplay(item.receivedAt) : "—"}
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-slate-700 dark:text-slate-200">
                       {centsToCurrency(item.totalCostCents)}

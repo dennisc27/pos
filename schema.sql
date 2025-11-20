@@ -165,6 +165,9 @@ CREATE TABLE IF NOT EXISTS product_code_versions (
   cost_cents BIGINT,
   qty_on_hand INT DEFAULT 0,
   qty_reserved INT DEFAULT 0,
+  reorder_point INT DEFAULT 0,
+  reorder_qty INT DEFAULT 0,
+  bin_location VARCHAR(120),
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -314,6 +317,11 @@ CREATE TABLE IF NOT EXISTS supplier_credit_ledger (
 CREATE TABLE IF NOT EXISTS inv_count_sessions (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   branch_id BIGINT NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  location_scope VARCHAR(200) NULL,
+  start_date DATE NULL,
+  due_date DATE NULL,
+  freeze_movements BOOLEAN DEFAULT FALSE,
   scope ENUM('full','cycle') DEFAULT 'cycle',
   status ENUM('open','review','posted','cancelled') DEFAULT 'open',
   snapshot_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -325,6 +333,17 @@ CREATE TABLE IF NOT EXISTS inv_count_sessions (
   FOREIGN KEY (branch_id) REFERENCES branches(id)
 );
 
+CREATE TABLE IF NOT EXISTS inv_count_assignments (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  session_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  device_label VARCHAR(120) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_session_user (session_id, user_id),
+  FOREIGN KEY (session_id) REFERENCES inv_count_sessions(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 CREATE TABLE IF NOT EXISTS inv_count_lines (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   session_id BIGINT NOT NULL,
@@ -332,6 +351,7 @@ CREATE TABLE IF NOT EXISTS inv_count_lines (
   expected_qty DECIMAL(18,4) NOT NULL,
   counted_qty DECIMAL(18,4) NOT NULL,
   status ENUM('counted','recount','resolved') DEFAULT 'counted',
+  comment TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (session_id) REFERENCES inv_count_sessions(id),
   FOREIGN KEY (product_code_version_id) REFERENCES product_code_versions(id)

@@ -15,6 +15,7 @@ import type {
   UpsellInsight,
 } from "@/components/layaways/types";
 import { formatContactTimestamp, formatCurrency, formatPercent } from "@/components/layaways/utils";
+import { formatDateForDisplay, formatDateTimeForDisplay } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -108,41 +109,38 @@ function formatPlanDateLabel(value: string | null) {
   if (!value) {
     return "Sin fecha";
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  const datePart = date.toLocaleDateString("es-DO", { day: "2-digit", month: "short" });
-  const timePart = date.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" });
-  return `${datePart} · ${timePart}`;
+
+  const formatted = formatDateTimeForDisplay(value);
+  return formatted === "—" ? value : formatted;
 }
 
 function formatShortDateLabel(value: string | null) {
   if (!value) {
     return "—";
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleDateString("es-DO", { day: "2-digit", month: "short" });
+
+  const formatted = formatDateForDisplay(value);
+  return formatted === "—" ? value : formatted;
 }
 
 function formatReminderTimestamp(value: string | null) {
   if (!value) {
     return "Sin fecha";
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
     return value;
   }
+
   const now = new Date();
-  const sameDay = now.toDateString() === date.toDateString();
-  const timePart = date.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" });
+  const sameDay = now.toDateString() === parsed.toDateString();
+  const timePart = parsed.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" });
   if (sameDay) {
     return `Hoy · ${timePart}`;
   }
-  const datePart = date.toLocaleDateString("es-DO", { day: "2-digit", month: "short" });
+
+  const datePart = formatDateForDisplay(parsed);
   return `${datePart} · ${timePart}`;
 }
 
@@ -178,7 +176,7 @@ function toLayawayPlan(plan: DashboardPlan): LayawayPlan {
 function toScheduleItem(entry: DashboardScheduleEntry): PaymentScheduleItem {
   const formattedDate = entry.dueDate ? new Date(entry.dueDate) : null;
   const dateLabel = formattedDate && !Number.isNaN(formattedDate.getTime())
-    ? formattedDate.toLocaleDateString("es-DO", { day: "2-digit", month: "short" })
+    ? formatDateForDisplay(formattedDate)
     : entry.dueDate ?? "Sin fecha";
 
   return {
@@ -260,10 +258,7 @@ function createReminderFromInsight(insight: UpsellInsight): EngagementReminder {
     customer: insight.title,
     message: insight.description,
     channel: "Email",
-    scheduledFor: new Date().toLocaleDateString("es-DO", {
-      day: "2-digit",
-      month: "short",
-    }),
+    scheduledFor: formatDateForDisplay(new Date()),
     status: "scheduled",
   };
 }

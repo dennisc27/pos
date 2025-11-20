@@ -10,9 +10,11 @@ import {
   BadgeDollarSign,
   BarChart3,
   Boxes,
+  ClipboardCheck,
   ClipboardList,
   Clock,
   Cog,
+  FileCheck2,
   FileText,
   Gift,
   GitBranch,
@@ -79,8 +81,12 @@ const sections: NavSection[] = [
   {
     title: "Inventory",
     items: [
+      { name: "Ops dashboard", href: "/inventory/ops/dashboard", icon: LayoutDashboard },
       { name: "Catalog", href: "/inventory", icon: Boxes },
       { name: "Ops", href: "/inventory/ops", icon: FileText },
+      { name: "Conteos", href: "/inventory/ops/count-sessions", icon: ClipboardList },
+      { name: "Captura", href: "/inventory/ops/count", icon: ClipboardCheck },
+      { name: "Revisión", href: "/inventory/ops/review", icon: FileCheck2 },
       { name: "Split & combine", href: "/inventory/split-combine", icon: GitBranch },
       { name: "Barcode", href: "/inventory/barcode", icon: QrCode },
     ],
@@ -122,6 +128,7 @@ const sections: NavSection[] = [
       { name: "All reports", href: "/reports/all", icon: ListTree },
       { name: "Shift-end", href: "/reports/shift-end", icon: FileText },
       { name: "Loans aging", href: "/reports/loans-aging", icon: BarChart3 },
+      { name: "Inventory OPS", href: "/reports/inventory/ops", icon: BarChart3 },
     ],
   },
   {
