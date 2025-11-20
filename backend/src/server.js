@@ -69,6 +69,7 @@ import {
   salesReturnItems,
   salesReturns,
   settings,
+  roles,
   shiftClosedByUsers,
   shiftOpenedByUsers,
   supplierCreditLedger,
@@ -189,6 +190,15 @@ function startOfTomorrow(date) {
   const next = startOfDay(date);
   next.setDate(next.getDate() + 1);
   return next;
+}
+
+function differenceInDays(later, earlier) {
+  if (!(later instanceof Date) || !(earlier instanceof Date)) {
+    return null;
+  }
+
+  const diffMs = later.getTime() - earlier.getTime();
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
 }
 
 const purchaseSelection = {
@@ -6979,6 +6989,1360 @@ app.get('/api/reports/sales', async (req, res, next) => {
       },
       paymentMethodBreakdown,
       sales: salesTable,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/purchases', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const conditions = [eq(purchases.branchId, branchId)];
+    if (startDate) {
+      conditions.push(gte(purchases.createdAt, startOfDay(startDate)));
+    }
+
+    if (endDate) {
+      conditions.push(lt(purchases.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const whereClause = and(...conditions);
+
+    const [summaryRow] = await db
+      .select({
+        totalBoughtCents: sql`COALESCE(SUM(${purchases.totalCostCents}), 0)`,
+        totalQuantity: sql`COALESCE(SUM(${purchases.totalQuantity}), 0)`,
+        suppliersCount: sql`COUNT(DISTINCT ${purchases.supplierName})`,
+      })
+      .from(purchases)
+      .where(whereClause);
+
+    const purchaseRows = await db
+      .select({
+        id: purchases.id,
+        supplierName: purchases.supplierName,
+        supplierInvoice: purchases.supplierInvoice,
+        referenceNo: purchases.referenceNo,
+        receivedAt: purchases.receivedAt,
+        createdAt: purchases.createdAt,
+        totalCostCents: purchases.totalCostCents,
+        totalQuantity: purchases.totalQuantity,
+      })
+      .from(purchases)
+      .where(whereClause)
+      .orderBy(desc(purchases.receivedAt), desc(purchases.createdAt))
+      .limit(250);
+
+    const response = {
+      generatedAt: new Date().toISOString(),
+      filters: {
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+        branchId,
+      },
+      summary: {
+        totalBoughtCents: Number(summaryRow?.totalBoughtCents ?? 0),
+        totalQuantity: Number(summaryRow?.totalQuantity ?? 0),
+        suppliersCount: Number(summaryRow?.suppliersCount ?? 0),
+      },
+      purchases: purchaseRows.map((row) => ({
+        id: Number(row.id),
+        supplierName: row.supplierName ?? null,
+        supplierInvoice: row.supplierInvoice ?? null,
+        referenceNo: row.referenceNo ?? null,
+        receivedAt: toIsoString(row.receivedAt),
+        createdAt: toIsoString(row.createdAt),
+        totalCostCents: Number(row.totalCostCents ?? 0),
+        totalQuantity: Number(row.totalQuantity ?? 0),
+      })),
+    };
+
+    res.json(response);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/inventory', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const versionConditions = [eq(productCodeVersions.branchId, branchId)];
+    if (startDate) {
+      versionConditions.push(gte(productCodeVersions.updatedAt, startOfDay(startDate)));
+    }
+
+    if (endDate) {
+      versionConditions.push(lt(productCodeVersions.updatedAt, startOfTomorrow(endDate)));
+    }
+
+    const whereClause = and(...versionConditions);
+
+    const versionRows = await db
+      .select({
+        id: productCodeVersions.id,
+        code: productCodes.code,
+        name: productCodes.name,
+        qtyOnHand: productCodeVersions.qtyOnHand,
+        qtyReserved: productCodeVersions.qtyReserved,
+        costCents: productCodeVersions.costCents,
+        createdAt: productCodeVersions.createdAt,
+        updatedAt: productCodeVersions.updatedAt,
+      })
+      .from(productCodeVersions)
+      .innerJoin(productCodes, eq(productCodeVersions.productCodeId, productCodes.id))
+      .where(whereClause)
+      .orderBy(desc(productCodeVersions.updatedAt))
+      .limit(300);
+
+    const referenceDate = endDate ?? new Date();
+    const agedThreshold = new Date(referenceDate.getTime());
+    agedThreshold.setMonth(agedThreshold.getMonth() - 3);
+
+    const [agedRow] = await db
+      .select({
+        agedCount: sql`COUNT(*)`,
+      })
+      .from(productCodeVersions)
+      .where(
+        and(
+          eq(productCodeVersions.branchId, branchId),
+          gt(productCodeVersions.qtyOnHand, 0),
+          lte(productCodeVersions.createdAt, agedThreshold),
+        ),
+      );
+
+    const [qtyRow] = await db
+      .select({
+        totalQtyOnHand: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand}), 0)`,
+      })
+      .from(productCodeVersions)
+      .where(eq(productCodeVersions.branchId, branchId));
+
+    const quarantineConditions = [eq(inventoryQuarantines.branchId, branchId)];
+    if (startDate) {
+      quarantineConditions.push(gte(inventoryQuarantines.createdAt, startOfDay(startDate)));
+    }
+
+    if (endDate) {
+      quarantineConditions.push(lt(inventoryQuarantines.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const [damagedRow] = await db
+      .select({ totalDamaged: sql`COALESCE(SUM(${inventoryQuarantines.qty}), 0)` })
+      .from(inventoryQuarantines)
+      .where(and(...quarantineConditions));
+
+    const inventory = versionRows.map((row) => {
+      const created = row.createdAt ? new Date(row.createdAt) : null;
+      const daysOnHand = created ? Math.max(0, Math.floor((referenceDate - created) / (1000 * 60 * 60 * 24))) : null;
+
+      return {
+        id: Number(row.id),
+        code: row.code ?? null,
+        name: row.name ?? null,
+        qtyOnHand: Number(row.qtyOnHand ?? 0),
+        qtyReserved: Number(row.qtyReserved ?? 0),
+        costCents: row.costCents == null ? null : Number(row.costCents),
+        createdAt: toIsoString(row.createdAt),
+        updatedAt: toIsoString(row.updatedAt),
+        daysOnHand,
+      };
+    });
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        agedItems: Number(agedRow?.agedCount ?? 0),
+        totalDamagedQty: Number(damagedRow?.totalDamaged ?? 0),
+        totalQtyOnHand: Number(qtyRow?.totalQtyOnHand ?? 0),
+      },
+      inventory,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/marketing', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    const branchId = branchIdRaw == null || String(branchIdRaw).trim() === '' ? null : parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const campaignConditions = [];
+    if (startDate) {
+      campaignConditions.push(gte(marketingCampaigns.createdAt, startOfDay(startDate)));
+    }
+
+    if (endDate) {
+      campaignConditions.push(lt(marketingCampaigns.createdAt, startOfTomorrow(endDate)));
+    }
+
+    let campaignQuery = db
+      .select({
+        id: marketingCampaigns.id,
+        name: marketingCampaigns.name,
+        status: marketingCampaigns.status,
+        scheduledAt: marketingCampaigns.scheduledAt,
+        createdAt: marketingCampaigns.createdAt,
+        segmentName: marketingSegments.name,
+        channel: marketingTemplates.channel,
+        creatorBranchId: users.branchId,
+      })
+      .from(marketingCampaigns)
+      .innerJoin(marketingTemplates, eq(marketingCampaigns.templateId, marketingTemplates.id))
+      .innerJoin(marketingSegments, eq(marketingCampaigns.segmentId, marketingSegments.id))
+      .innerJoin(users, eq(marketingCampaigns.createdBy, users.id));
+
+    if (campaignConditions.length > 0 || branchId) {
+      const conditions = [...campaignConditions];
+      if (branchId) {
+        conditions.push(eq(users.branchId, branchId));
+      }
+      campaignQuery = campaignQuery.where(and(...conditions));
+    }
+
+    const campaigns = await campaignQuery.orderBy(desc(marketingCampaigns.createdAt)).limit(150);
+    const campaignIds = campaigns.map((c) => Number(c.id));
+
+    let sendStats = [];
+    if (campaignIds.length > 0) {
+      const sendConditions = [inArray(marketingSends.campaignId, campaignIds)];
+      if (startDate) {
+        sendConditions.push(gte(marketingSends.createdAt, startOfDay(startDate)));
+      }
+      if (endDate) {
+        sendConditions.push(lt(marketingSends.createdAt, startOfTomorrow(endDate)));
+      }
+
+      sendStats = await db
+        .select({
+          campaignId: marketingSends.campaignId,
+          total: sql`COUNT(*)`,
+          sent: sql`SUM(CASE WHEN ${marketingSends.status} = 'sent' THEN 1 ELSE 0 END)`,
+          failed: sql`SUM(CASE WHEN ${marketingSends.status} = 'failed' THEN 1 ELSE 0 END)`,
+        })
+        .from(marketingSends)
+        .where(and(...sendConditions))
+        .groupBy(marketingSends.campaignId);
+    }
+
+    const statsMap = new Map();
+    for (const stat of sendStats) {
+      statsMap.set(Number(stat.campaignId), {
+        total: Number(stat.total ?? 0),
+        sent: Number(stat.sent ?? 0),
+        failed: Number(stat.failed ?? 0),
+      });
+    }
+
+    let totalMessages = 0;
+    let totalDelivered = 0;
+
+    const responseCampaigns = campaigns.map((campaign) => {
+      const stats = statsMap.get(Number(campaign.id)) ?? { total: 0, sent: 0, failed: 0 };
+      totalMessages += stats.total;
+      totalDelivered += stats.sent;
+
+      return {
+        id: Number(campaign.id),
+        name: campaign.name,
+        status: campaign.status,
+        channel: campaign.channel,
+        scheduledAt: toIsoString(campaign.scheduledAt),
+        createdAt: toIsoString(campaign.createdAt),
+        segmentName: campaign.segmentName ?? null,
+        totalMessages: stats.total,
+        delivered: stats.sent,
+        failed: stats.failed,
+      };
+    });
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        totalCampaigns: campaigns.length,
+        totalDeliveries: totalDelivered,
+        deliveryRate: totalMessages > 0 ? Number(((totalDelivered / totalMessages) * 100).toFixed(2)) : 0,
+      },
+      campaigns: responseCampaigns,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/customers', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const dateConditions = [eq(customers.branchId, branchId)];
+    if (startDate) {
+      dateConditions.push(gte(customers.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      dateConditions.push(lt(customers.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const newCustomers = await db
+      .select({
+        id: customers.id,
+        firstName: customers.firstName,
+        lastName: customers.lastName,
+        email: customers.email,
+        phone: customers.phone,
+        isBlacklisted: customers.isBlacklisted,
+        loyaltyPoints: customers.loyaltyPoints,
+        createdAt: customers.createdAt,
+      })
+      .from(customers)
+      .where(and(...dateConditions))
+      .orderBy(desc(customers.createdAt))
+      .limit(250);
+
+    const [summaryRow] = await db
+      .select({
+        total: sql`COUNT(*)`,
+        blacklisted: sql`SUM(CASE WHEN ${customers.isBlacklisted} = 1 THEN 1 ELSE 0 END)`,
+        loyalty: sql`COALESCE(SUM(${customers.loyaltyPoints}), 0)`,
+      })
+      .from(customers)
+      .where(eq(customers.branchId, branchId));
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        totalCustomers: Number(summaryRow?.total ?? 0),
+        newCustomers: newCustomers.length,
+        blacklistedCustomers: Number(summaryRow?.blacklisted ?? 0),
+        totalLoyaltyPoints: Number(summaryRow?.loyalty ?? 0),
+      },
+      customers: newCustomers.map((row) => ({
+        id: Number(row.id),
+        firstName: row.firstName,
+        lastName: row.lastName,
+        email: row.email ?? null,
+        phone: row.phone ?? null,
+        isBlacklisted: Boolean(row.isBlacklisted),
+        loyaltyPoints: Number(row.loyaltyPoints ?? 0),
+        createdAt: toIsoString(row.createdAt),
+      })),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/expenses', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const conditions = [eq(cashMovements.kind, 'expense'), eq(shifts.branchId, branchId)];
+    if (startDate) {
+      conditions.push(gte(cashMovements.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      conditions.push(lt(cashMovements.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const rows = await db
+      .select({
+        id: cashMovements.id,
+        amountCents: cashMovements.amountCents,
+        reason: cashMovements.reason,
+        createdAt: cashMovements.createdAt,
+        shiftId: cashMovements.shiftId,
+      })
+      .from(cashMovements)
+      .innerJoin(shifts, eq(cashMovements.shiftId, shifts.id))
+      .where(and(...conditions))
+      .orderBy(desc(cashMovements.createdAt))
+      .limit(200);
+
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.amountCents ?? 0), 0);
+    const count = rows.length;
+    const averageAmount = count > 0 ? Math.round(totalAmount / count) : 0;
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        totalExpensesCents: totalAmount,
+        entries: count,
+        averageExpenseCents: averageAmount,
+      },
+      entries: rows.map((row) => ({
+        id: Number(row.id),
+        amountCents: Number(row.amountCents ?? 0),
+        reason: row.reason ?? null,
+        createdAt: toIsoString(row.createdAt),
+        shiftId: Number(row.shiftId),
+      })),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/incomes', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const conditions = [eq(cashMovements.kind, 'income'), eq(shifts.branchId, branchId)];
+    if (startDate) {
+      conditions.push(gte(cashMovements.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      conditions.push(lt(cashMovements.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const rows = await db
+      .select({
+        id: cashMovements.id,
+        amountCents: cashMovements.amountCents,
+        reason: cashMovements.reason,
+        createdAt: cashMovements.createdAt,
+        shiftId: cashMovements.shiftId,
+      })
+      .from(cashMovements)
+      .innerJoin(shifts, eq(cashMovements.shiftId, shifts.id))
+      .where(and(...conditions))
+      .orderBy(desc(cashMovements.createdAt))
+      .limit(200);
+
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.amountCents ?? 0), 0);
+    const count = rows.length;
+    const averageAmount = count > 0 ? Math.round(totalAmount / count) : 0;
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        totalIncomeCents: totalAmount,
+        entries: count,
+        averageIncomeCents: averageAmount,
+      },
+      entries: rows.map((row) => ({
+        id: Number(row.id),
+        amountCents: Number(row.amountCents ?? 0),
+        reason: row.reason ?? null,
+        createdAt: toIsoString(row.createdAt),
+        shiftId: Number(row.shiftId),
+      })),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/pawns/created', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const conditions = [eq(loans.branchId, branchId)];
+    if (startDate) {
+      conditions.push(gte(loans.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      conditions.push(lt(loans.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const whereClause = and(...conditions);
+
+    const [summaryRow] = await db
+      .select({
+        totalTickets: sql`COUNT(*)`,
+        totalPrincipalCents: sql`COALESCE(SUM(${loans.principalCents}), 0)`,
+        averagePrincipalCents: sql`COALESCE(AVG(${loans.principalCents}), 0)`,
+      })
+      .from(loans)
+      .where(whereClause);
+
+    const loanRows = await db
+      .select({
+        id: loans.id,
+        ticketNumber: loans.ticketNumber,
+        principalCents: loans.principalCents,
+        status: loans.status,
+        createdAt: loans.createdAt,
+        dueDate: loans.dueDate,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+      })
+      .from(loans)
+      .innerJoin(customers, eq(loans.customerId, customers.id))
+      .where(whereClause)
+      .orderBy(desc(loans.createdAt))
+      .limit(300);
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        totalTickets: Number(summaryRow?.totalTickets ?? 0),
+        totalPrincipalCents: Number(summaryRow?.totalPrincipalCents ?? 0),
+        averagePrincipalCents: Math.round(Number(summaryRow?.averagePrincipalCents ?? 0)),
+      },
+      loans: loanRows.map((row) => {
+        const customerName = [row.customerFirstName, row.customerLastName].filter(Boolean).join(' ').trim() || 'Cliente';
+        return {
+          id: Number(row.id),
+          ticketNumber: row.ticketNumber ?? null,
+          customerName,
+          principalCents: Number(row.principalCents ?? 0),
+          status: row.status,
+          createdAt: toIsoString(row.createdAt),
+          dueDate: toIsoString(row.dueDate),
+        };
+      }),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/pawns/redeemed', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const conditions = [eq(loans.branchId, branchId), eq(loanPayments.kind, 'redeem')];
+    if (startDate) {
+      conditions.push(gte(loanPayments.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      conditions.push(lt(loanPayments.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const whereClause = and(...conditions);
+
+    const [summaryRow] = await db
+      .select({
+        totalTickets: sql`COUNT(DISTINCT ${loanPayments.loanId})`,
+        totalRedeemedCents: sql`COALESCE(SUM(${loanPayments.amountCents}), 0)`,
+        averageRedeemedCents: sql`COALESCE(AVG(${loanPayments.amountCents}), 0)`,
+      })
+      .from(loanPayments)
+      .innerJoin(loans, eq(loanPayments.loanId, loans.id))
+      .where(whereClause);
+
+    const paymentRows = await db
+      .select({
+        id: loanPayments.id,
+        ticketNumber: loans.ticketNumber,
+        redeemedAt: loanPayments.createdAt,
+        method: loanPayments.method,
+        amountCents: loanPayments.amountCents,
+        principalCents: loans.principalCents,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+      })
+      .from(loanPayments)
+      .innerJoin(loans, eq(loanPayments.loanId, loans.id))
+      .innerJoin(customers, eq(loans.customerId, customers.id))
+      .where(whereClause)
+      .orderBy(desc(loanPayments.createdAt))
+      .limit(300);
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        totalTickets: Number(summaryRow?.totalTickets ?? 0),
+        totalRedeemedCents: Number(summaryRow?.totalRedeemedCents ?? 0),
+        averageRedeemedCents: Math.round(Number(summaryRow?.averageRedeemedCents ?? 0)),
+      },
+      redeems: paymentRows.map((row) => {
+        const customerName = [row.customerFirstName, row.customerLastName].filter(Boolean).join(' ').trim() || 'Cliente';
+        return {
+          id: Number(row.id),
+          ticketNumber: row.ticketNumber ?? null,
+          customerName,
+          method: row.method,
+          redeemedAt: toIsoString(row.redeemedAt),
+          amountCents: Number(row.amountCents ?? 0),
+          principalCents: Number(row.principalCents ?? 0),
+        };
+      }),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/pawns/forfeited', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const conditions = [eq(loans.branchId, branchId)];
+    if (startDate) {
+      conditions.push(gte(loanForfeitures.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      conditions.push(lt(loanForfeitures.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const whereClause = and(...conditions);
+
+    const [summaryRow] = await db
+      .select({
+        totalForfeited: sql`COUNT(*)`,
+        totalPrincipalCents: sql`COALESCE(SUM(${loans.principalCents}), 0)`,
+        averagePrincipalCents: sql`COALESCE(AVG(${loans.principalCents}), 0)`,
+      })
+      .from(loanForfeitures)
+      .innerJoin(loans, eq(loanForfeitures.loanId, loans.id))
+      .where(whereClause);
+
+    const forfeitureRows = await db
+      .select({
+        id: loanForfeitures.id,
+        ticketNumber: loans.ticketNumber,
+        principalCents: loans.principalCents,
+        forfeitedAt: loanForfeitures.createdAt,
+        productCode: productCodes.code,
+        productName: productCodes.name,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+      })
+      .from(loanForfeitures)
+      .innerJoin(loans, eq(loanForfeitures.loanId, loans.id))
+      .innerJoin(customers, eq(loans.customerId, customers.id))
+      .leftJoin(productCodes, eq(loanForfeitures.codeId, productCodes.id))
+      .where(whereClause)
+      .orderBy(desc(loanForfeitures.createdAt))
+      .limit(300);
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        totalForfeited: Number(summaryRow?.totalForfeited ?? 0),
+        totalPrincipalCents: Number(summaryRow?.totalPrincipalCents ?? 0),
+        averagePrincipalCents: Math.round(Number(summaryRow?.averagePrincipalCents ?? 0)),
+      },
+      forfeitures: forfeitureRows.map((row) => {
+        const customerName = [row.customerFirstName, row.customerLastName].filter(Boolean).join(' ').trim() || 'Cliente';
+        return {
+          id: Number(row.id),
+          ticketNumber: row.ticketNumber ?? null,
+          customerName,
+          principalCents: Number(row.principalCents ?? 0),
+          productCode: row.productCode ?? null,
+          productName: row.productName ?? null,
+          forfeitedAt: toIsoString(row.forfeitedAt),
+        };
+      }),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/pawns/on-sale', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const conditions = [eq(loans.branchId, branchId), eq(productCodeVersions.branchId, branchId), gt(productCodeVersions.qtyOnHand, 0)];
+    if (startDate) {
+      conditions.push(gte(loanForfeitures.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      conditions.push(lt(loanForfeitures.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const whereClause = and(...conditions);
+
+    const [summaryRow] = await db
+      .select({
+        itemsOnSale: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand}), 0)`,
+        totalCostCents: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand} * COALESCE(${productCodeVersions.costCents}, 0)), 0)`,
+        totalRetailCents: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand} * COALESCE(${productCodeVersions.priceCents}, 0)), 0)`,
+      })
+      .from(loanForfeitures)
+      .innerJoin(loans, eq(loanForfeitures.loanId, loans.id))
+      .innerJoin(productCodes, eq(loanForfeitures.codeId, productCodes.id))
+      .innerJoin(
+        productCodeVersions,
+        and(eq(productCodeVersions.productCodeId, productCodes.id), eq(productCodeVersions.branchId, branchId))
+      )
+      .where(whereClause);
+
+    const itemRows = await db
+      .select({
+        id: loanForfeitures.id,
+        ticketNumber: loans.ticketNumber,
+        productCode: productCodes.code,
+        productName: productCodes.name,
+        qtyOnHand: productCodeVersions.qtyOnHand,
+        costCents: productCodeVersions.costCents,
+        priceCents: productCodeVersions.priceCents,
+        forfeitedAt: loanForfeitures.createdAt,
+      })
+      .from(loanForfeitures)
+      .innerJoin(loans, eq(loanForfeitures.loanId, loans.id))
+      .innerJoin(productCodes, eq(loanForfeitures.codeId, productCodes.id))
+      .innerJoin(
+        productCodeVersions,
+        and(eq(productCodeVersions.productCodeId, productCodes.id), eq(productCodeVersions.branchId, branchId))
+      )
+      .where(whereClause)
+      .orderBy(desc(loanForfeitures.createdAt))
+      .limit(250);
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        itemsOnSale: Number(summaryRow?.itemsOnSale ?? 0),
+        totalCostCents: Number(summaryRow?.totalCostCents ?? 0),
+        totalRetailCents: Number(summaryRow?.totalRetailCents ?? 0),
+      },
+      items: itemRows.map((row) => ({
+        id: Number(row.id),
+        ticketNumber: row.ticketNumber ?? null,
+        productCode: row.productCode ?? null,
+        productName: row.productName ?? null,
+        qtyOnHand: Number(row.qtyOnHand ?? 0),
+        costCents: row.costCents == null ? null : Number(row.costCents),
+        priceCents: row.priceCents == null ? null : Number(row.priceCents),
+        forfeitedAt: toIsoString(row.forfeitedAt),
+      })),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/loan-book', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const startDateStr = startDate ? startDate.toISOString().slice(0, 10) : null;
+    const endDateStr = endDate ? endDate.toISOString().slice(0, 10) : null;
+    const conditions = [eq(loans.branchId, branchId)];
+    if (startDateStr) {
+      conditions.push(gte(loans.dueDate, startDateStr));
+    }
+    if (endDateStr) {
+      conditions.push(lte(loans.dueDate, endDateStr));
+    }
+
+    const whereClause = and(...conditions);
+    const referenceDate = endDate ?? new Date();
+
+    const referenceDateIso = referenceDate.toISOString().slice(0, 10);
+
+    const [summaryRow] = await db
+      .select({
+        activePrincipalCents: sql`COALESCE(SUM(CASE WHEN ${loans.status} IN ('active','renewed') THEN ${loans.principalCents} ELSE 0 END), 0)`,
+        averagePrincipalCents: sql`COALESCE(AVG(CASE WHEN ${loans.status} IN ('active','renewed') THEN ${loans.principalCents} END), 0)`,
+        atRiskLoans: sql`SUM(CASE WHEN ${loans.status} IN ('active','renewed') AND ${loans.dueDate} < ${referenceDateIso} THEN 1 ELSE 0 END)`
+      })
+      .from(loans)
+      .where(whereClause);
+
+    const loanRows = await db
+      .select({
+        id: loans.id,
+        ticketNumber: loans.ticketNumber,
+        principalCents: loans.principalCents,
+        status: loans.status,
+        dueDate: loans.dueDate,
+        createdAt: loans.createdAt,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+      })
+      .from(loans)
+      .innerJoin(customers, eq(loans.customerId, customers.id))
+      .where(whereClause)
+      .orderBy(asc(loans.dueDate), desc(loans.createdAt))
+      .limit(300);
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDateStr,
+        endDate: endDateStr,
+      },
+      summary: {
+        activePrincipalCents: Number(summaryRow?.activePrincipalCents ?? 0),
+        averagePrincipalCents: Math.round(Number(summaryRow?.averagePrincipalCents ?? 0)),
+        atRiskLoans: Number(summaryRow?.atRiskLoans ?? 0),
+      },
+      loans: loanRows.map((row) => {
+        const customerName = [row.customerFirstName, row.customerLastName].filter(Boolean).join(' ').trim() || 'Cliente';
+        const createdAt = row.createdAt instanceof Date ? row.createdAt : row.createdAt ? new Date(row.createdAt) : null;
+        const dueDate = row.dueDate instanceof Date ? row.dueDate : row.dueDate ? new Date(row.dueDate) : null;
+        const daysOnBook = createdAt ? Math.max(differenceInDays(referenceDate, createdAt) ?? 0, 0) : null;
+        const daysPastDue = dueDate && referenceDate > dueDate ? Math.max(differenceInDays(referenceDate, dueDate) ?? 0, 0) : null;
+
+        return {
+          id: Number(row.id),
+          ticketNumber: row.ticketNumber ?? null,
+          customerName,
+          principalCents: Number(row.principalCents ?? 0),
+          status: row.status,
+          dueDate: toIsoString(dueDate),
+          createdAt: toIsoString(createdAt),
+          daysOnBook,
+          daysPastDue,
+        };
+      }),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/loans/expiring', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const startDateStr = startDate ? startDate.toISOString().slice(0, 10) : null;
+    const endDateStr = endDate ? endDate.toISOString().slice(0, 10) : null;
+    const conditions = [eq(loans.branchId, branchId), inArray(loans.status, ['active', 'renewed'])];
+    if (startDateStr) {
+      conditions.push(gte(loans.dueDate, startDateStr));
+    }
+    if (endDateStr) {
+      conditions.push(lte(loans.dueDate, endDateStr));
+    }
+
+    const whereClause = and(...conditions);
+    const loanRows = await db
+      .select({
+        id: loans.id,
+        ticketNumber: loans.ticketNumber,
+        principalCents: loans.principalCents,
+        status: loans.status,
+        dueDate: loans.dueDate,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+        customerPhone: customers.phone,
+        customerEmail: customers.email,
+      })
+      .from(loans)
+      .innerJoin(customers, eq(loans.customerId, customers.id))
+      .where(whereClause)
+      .orderBy(asc(loans.dueDate), asc(loans.id))
+      .limit(400);
+
+    const referenceDate = new Date();
+    let principalAtRiskCents = 0;
+    let overdueLoans = 0;
+
+    const loansPayload = loanRows.map((row) => {
+      const customerName = [row.customerFirstName, row.customerLastName].filter(Boolean).join(' ').trim() || 'Cliente';
+      const dueDate = row.dueDate instanceof Date ? row.dueDate : row.dueDate ? new Date(row.dueDate) : null;
+      const principal = Number(row.principalCents ?? 0);
+      principalAtRiskCents += principal;
+
+      let daysUntilDue = null;
+      let daysPastDue = null;
+
+      if (dueDate) {
+        if (referenceDate > dueDate) {
+          const diff = differenceInDays(referenceDate, dueDate);
+          daysPastDue = diff != null ? Math.max(diff, 0) : null;
+          overdueLoans += 1;
+        } else {
+          const diff = differenceInDays(dueDate, referenceDate);
+          daysUntilDue = diff != null ? Math.max(diff, 0) : null;
+        }
+      }
+
+      return {
+        id: Number(row.id),
+        ticketNumber: row.ticketNumber ?? null,
+        customerName,
+        status: row.status ?? null,
+        dueDate: toIsoString(dueDate),
+        principalCents: principal,
+        daysUntilDue,
+        daysPastDue,
+        contactPhone: row.customerPhone ?? null,
+        contactEmail: row.customerEmail ?? null,
+      };
+    });
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDateStr,
+        endDate: endDateStr,
+      },
+      summary: {
+        expiringLoans: loansPayload.length,
+        principalAtRiskCents,
+        overdueLoans,
+      },
+      loans: loansPayload,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/products-aged', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const baseConditions = [eq(productCodeVersions.branchId, branchId), gt(productCodeVersions.qtyOnHand, 0)];
+    if (startDate) {
+      baseConditions.push(gte(productCodeVersions.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      baseConditions.push(lt(productCodeVersions.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const whereClause = and(...baseConditions);
+    const referenceDate = endDate ?? new Date();
+    const ninetyDaysAgo = new Date(referenceDate.getTime());
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+    const agedConditions = [...baseConditions, lte(productCodeVersions.createdAt, ninetyDaysAgo)];
+
+    const [summaryRow] = await db
+      .select({
+        totalSkus: sql`COUNT(*)`,
+        carryingCostCents: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand} * COALESCE(${productCodeVersions.costCents}, 0)), 0)`,
+      })
+      .from(productCodeVersions)
+      .innerJoin(productCodes, eq(productCodeVersions.productCodeId, productCodes.id))
+      .where(whereClause);
+
+    const [agedRow] = await db
+      .select({ agedNinetyPlus: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand}), 0)` })
+      .from(productCodeVersions)
+      .where(and(...agedConditions));
+
+    const versionRows = await db
+      .select({
+        id: productCodeVersions.id,
+        productCode: productCodes.code,
+        productName: productCodes.name,
+        qtyOnHand: productCodeVersions.qtyOnHand,
+        costCents: productCodeVersions.costCents,
+        createdAt: productCodeVersions.createdAt,
+        updatedAt: productCodeVersions.updatedAt,
+      })
+      .from(productCodeVersions)
+      .innerJoin(productCodes, eq(productCodeVersions.productCodeId, productCodes.id))
+      .where(whereClause)
+      .orderBy(desc(productCodeVersions.createdAt))
+      .limit(300);
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        agedNinetyPlus: Number(agedRow?.agedNinetyPlus ?? 0),
+        totalSkus: Number(summaryRow?.totalSkus ?? 0),
+        carryingCostCents: Number(summaryRow?.carryingCostCents ?? 0),
+      },
+      items: versionRows.map((row) => {
+        const createdAt = row.createdAt instanceof Date ? row.createdAt : row.createdAt ? new Date(row.createdAt) : null;
+        const daysOnHand = createdAt ? Math.max(differenceInDays(referenceDate, createdAt) ?? 0, 0) : null;
+
+        return {
+          id: Number(row.id),
+          productCode: row.productCode ?? null,
+          productName: row.productName ?? null,
+          qtyOnHand: Number(row.qtyOnHand ?? 0),
+          costCents: row.costCents == null ? null : Number(row.costCents),
+          createdAt: toIsoString(row.createdAt),
+          updatedAt: toIsoString(row.updatedAt),
+          daysOnHand,
+        };
+      }),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/reports/voids-refunds', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+
+    if (branchIdRaw == null || String(branchIdRaw).trim() === '') {
+      throw new HttpError(400, 'branchId is required');
+    }
+
+    const branchId = parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new HttpError(400, 'startDate cannot be after endDate');
+    }
+
+    const conditions = [eq(orders.branchId, branchId)];
+    if (startDate) {
+      conditions.push(gte(salesReturns.createdAt, startOfDay(startDate)));
+    }
+    if (endDate) {
+      conditions.push(lt(salesReturns.createdAt, startOfTomorrow(endDate)));
+    }
+
+    const whereClause = and(...conditions);
+
+    const refundRows = await db
+      .select({
+        id: salesReturns.id,
+        reason: salesReturns.reason,
+        condition: salesReturns.condition,
+        method: salesReturns.refundMethod,
+        createdAt: salesReturns.createdAt,
+        invoiceNo: invoices.invoiceNo,
+        staffId: users.id,
+        staffName: users.fullName,
+        roleName: roles.name,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+        refundCents: sql`COALESCE(SUM(${salesReturnItems.refundCents}), 0)`,
+      })
+      .from(salesReturns)
+      .innerJoin(invoices, eq(salesReturns.invoiceId, invoices.id))
+      .innerJoin(orders, eq(invoices.orderId, orders.id))
+      .leftJoin(users, eq(orders.createdBy, users.id))
+      .leftJoin(roles, eq(users.roleId, roles.id))
+      .leftJoin(customers, eq(orders.customerId, customers.id))
+      .leftJoin(salesReturnItems, eq(salesReturnItems.salesReturnId, salesReturns.id))
+      .where(whereClause)
+      .groupBy(
+        salesReturns.id,
+        salesReturns.reason,
+        salesReturns.condition,
+        salesReturns.refundMethod,
+        salesReturns.createdAt,
+        invoices.invoiceNo,
+        users.id,
+        users.fullName,
+        roles.name,
+        customers.firstName,
+        customers.lastName,
+      )
+      .orderBy(desc(salesReturns.createdAt))
+      .limit(200);
+
+    const totalAmount = refundRows.reduce((sum, row) => sum + Number(row.refundCents ?? 0), 0);
+    const staffSet = new Set();
+    for (const row of refundRows) {
+      if (row.staffId != null) {
+        staffSet.add(Number(row.staffId));
+      }
+    }
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      filters: {
+        branchId,
+        startDate: startDate ? startDate.toISOString().slice(0, 10) : null,
+        endDate: endDate ? endDate.toISOString().slice(0, 10) : null,
+      },
+      summary: {
+        totalRefunds: refundRows.length,
+        totalRefundCents: totalAmount,
+        staffInvolved: staffSet.size,
+      },
+      refunds: refundRows.map((row) => {
+        const customerName = [row.customerFirstName, row.customerLastName].filter(Boolean).join(' ').trim() || 'Cliente';
+        return {
+          id: Number(row.id),
+          invoiceNo: row.invoiceNo ?? null,
+          staffName: row.staffName ?? 'Sin asignar',
+          staffRole: row.roleName ?? null,
+          customerName,
+          method: row.method,
+          condition: row.condition,
+          reason: row.reason ?? null,
+          refundCents: Number(row.refundCents ?? 0),
+          createdAt: toIsoString(row.createdAt),
+        };
+      }),
     });
   } catch (error) {
     if (error instanceof HttpError) {

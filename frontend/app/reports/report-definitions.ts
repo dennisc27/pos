@@ -42,9 +42,24 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     description: "Review non-sales income streams and compare performance against targets."
   },
   {
-    key: "pawns-lifecycle",
-    title: "Pawns Created / Redeemed / Forfeited",
-    description: "Track pawn ticket lifecycle to understand redemption rates and forfeitures."
+    key: "pawns-created",
+    title: "Pawns Created",
+    description: "Review newly originated pawn loans, principal volume, and customer mix."
+  },
+  {
+    key: "pawns-redeemed",
+    title: "Pawns Redeemed",
+    description: "Analyze redemption activity, tender methods, and recovered principal."
+  },
+  {
+    key: "pawns-forfeited",
+    title: "Pawns Forfeited",
+    description: "Monitor forfeited tickets, associated principal, and conversion to stock."
+  },
+  {
+    key: "pawns-on-sale",
+    title: "Pawns on Sale",
+    description: "Track forfeited inventory currently listed for sale and its valuation."
   },
   {
     key: "loan-book",

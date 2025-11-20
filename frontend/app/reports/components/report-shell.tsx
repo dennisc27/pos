@@ -3,6 +3,13 @@ import Link from "next/link";
 
 import { ArrowLeft, Download } from "lucide-react";
 
+const pawnQuickLinks = [
+  { href: "/reports/pawns-created", label: "Pawns Created" },
+  { href: "/reports/pawns-redeemed", label: "Pawns Redeemed" },
+  { href: "/reports/pawns-forfeited", label: "Pawns Forfeited" },
+  { href: "/reports/pawns-on-sale", label: "Pawns on Sale" }
+];
+
 function formatUpdatedAt(value?: string | null) {
   if (!value) {
     return null;
@@ -65,6 +72,18 @@ export function ReportPageShell({ title, description, updatedAt, exportHref, chi
           </div>
         </div>
       </header>
+
+      <div className="flex flex-wrap gap-2">
+        {pawnQuickLinks.map((link) => (
+          <Link
+            key={link.href}
+            href={link.href}
+            className="inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50/60 px-3 py-1 text-xs font-medium text-indigo-700 transition hover:border-indigo-200 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200"
+          >
+            {link.label}
+          </Link>
+        ))}
+      </div>
 
       {children}
     </main>

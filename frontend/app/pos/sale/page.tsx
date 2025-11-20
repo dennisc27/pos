@@ -974,15 +974,6 @@ export default function PosPage() {
               cashTenderAmount={saleSummary.cashDue}
               onOpenPaymentDialog={handleOpenPaymentDialog}
             />
-            <button
-              type="button"
-              onClick={handleOpenPaymentDialog}
-              disabled={cartLines.length === 0 || branchLoading || !activeBranch}
-              className="flex w-full items-center justify-center gap-2 rounded-3xl border border-sky-500/70 bg-sky-500/15 px-5 py-3 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
-            >
-              <CreditCard className="h-4 w-4" />
-              Collect payment
-            </button>
           </div>
         </div>
       </div>

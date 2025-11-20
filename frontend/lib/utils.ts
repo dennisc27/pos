@@ -69,3 +69,31 @@ export function formatCurrencyFromCents(cents: number, currency: Currency = "DOP
   // Replace "DOP" with "$" to save space
   return formatted.replace(/DOP\s*/g, "$");
 }
+
+export function formatDateForDisplay(value?: string | null): string {
+  if (!value) {
+    return "—";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const year = parsed.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+export function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function isValidDateRange(startDate: string, endDate: string): boolean {
+  if (!startDate || !endDate) {
+    return false;
+  }
+
+  return startDate <= endDate;
+}

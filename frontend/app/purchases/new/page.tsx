@@ -2,7 +2,7 @@
 
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
 
-import { ClipboardList, Loader2, PackagePlus, Printer, Search, Trash2 } from "lucide-react";
+import { ClipboardList, Loader2, PackagePlus, Printer, Search, Trash2, X } from "lucide-react";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 import { formatCurrency } from "@/components/pos/utils";
@@ -11,6 +11,21 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3
 const MAX_LABELS = 200;
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+const formatDisplayDate = (value: string | null | undefined) => {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString("es-DO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+};
 
 function parseAmountToCents(value: string) {
   const normalized = value.replace(/\s+/g, "").replace(",", ".");
@@ -95,6 +110,49 @@ type PurchaseResponse = {
   };
 };
 
+type SavedPurchaseResponse = {
+  purchase: {
+    id: number;
+    branchId: number;
+    supplierName: string | null;
+    supplierInvoice: string | null;
+    referenceNo: string | null;
+    receivedAt: string | null;
+    createdBy: number | null;
+    totalCostCents: number;
+    totalQuantity: number;
+    notes: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+  };
+  lines: Array<{
+    id: number;
+    productCodeVersionId: number;
+    code: string | null;
+    name: string | null;
+    sku: string | null;
+    quantity: number;
+    unitCostCents: number;
+    lineTotalCents: number;
+    labelQuantity: number;
+    note: string | null;
+    branchId: number;
+    branchName: string | null;
+    qtyOnHand: number;
+    returnedQuantity: number;
+    availableQuantity: number;
+  }>;
+};
+
+type SupplierDetails = {
+  name: string;
+  taxId: string;
+  contact: string;
+  phone: string;
+  email: string;
+  notes: string;
+};
+
 export default function PurchaseReceivePage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [availableLayouts, setAvailableLayouts] = useState<LayoutOption[]>([]);
@@ -116,6 +174,64 @@ export default function PurchaseReceivePage() {
   const [status, setStatus] = useState<StatusMessage>(null);
   const [submitting, setSubmitting] = useState(false);
   const [preview, setPreview] = useState<PurchaseResponse | null>(null);
+  const [savedRecord, setSavedRecord] = useState<SavedPurchaseResponse | null>(null);
+  const [verifyingSave, setVerifyingSave] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierDetails | null>(null);
+  const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [supplierForm, setSupplierForm] = useState<SupplierDetails>({
+    name: "",
+    taxId: "",
+    contact: "",
+    phone: "",
+    email: "",
+    notes: "",
+  });
+  const [supplierFormError, setSupplierFormError] = useState<string | null>(null);
+
+  const openSupplierDialog = () => {
+    setSupplierForm({
+      name: supplierName || selectedSupplier?.name || "",
+      taxId: selectedSupplier?.taxId ?? "",
+      contact: selectedSupplier?.contact ?? "",
+      phone: selectedSupplier?.phone ?? "",
+      email: selectedSupplier?.email ?? "",
+      notes: selectedSupplier?.notes ?? "",
+    });
+    setSupplierFormError(null);
+    setIsSupplierDialogOpen(true);
+  };
+
+  const closeSupplierDialog = () => {
+    setIsSupplierDialogOpen(false);
+    setSupplierFormError(null);
+  };
+
+  const handleSupplierFormChange = (field: keyof SupplierDetails, value: string) => {
+    setSupplierForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSupplierFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = supplierForm.name.trim();
+    if (!trimmedName) {
+      setSupplierFormError("Supplier name is required.");
+      return;
+    }
+
+    const nextSupplier: SupplierDetails = {
+      name: trimmedName,
+      taxId: supplierForm.taxId.trim(),
+      contact: supplierForm.contact.trim(),
+      phone: supplierForm.phone.trim(),
+      email: supplierForm.email.trim(),
+      notes: supplierForm.notes.trim(),
+    };
+
+    setSelectedSupplier(nextSupplier);
+    setSupplierName(trimmedName);
+    setSupplierFormError(null);
+    setIsSupplierDialogOpen(false);
+  };
 
   useEffect(() => {
     setBranchId((prev) => {
@@ -149,6 +265,22 @@ export default function PurchaseReceivePage() {
     loadMetadata();
   }, []);
 
+  useEffect(() => {
+    if (!isSupplierDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSupplierDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isSupplierDialogOpen]);
+
   const totals = useMemo(() => {
     let totalQuantity = 0;
     let totalCostCents = 0;
@@ -166,9 +298,25 @@ export default function PurchaseReceivePage() {
     return { totalQuantity, totalCostCents };
   }, [lines]);
 
+  const savedTotals = useMemo(() => {
+    if (!savedRecord) {
+      return { totalQuantity: 0, totalCostCents: 0 };
+    }
+
+    return savedRecord.lines.reduce(
+      (acc, line) => {
+        acc.totalQuantity += Number(line.quantity ?? 0);
+        acc.totalCostCents += Number(line.lineTotalCents ?? 0);
+        return acc;
+      },
+      { totalQuantity: 0, totalCostCents: 0 }
+    );
+  }, [savedRecord]);
+
   const runSearch = async () => {
     setStatus(null);
     setPreview(null);
+    setSavedRecord(null);
 
     const query = searchTerm.trim();
     if (query.length < 2) {
@@ -214,6 +362,7 @@ export default function PurchaseReceivePage() {
   const addLineFromCode = (code: CodeResult) => {
     setStatus(null);
     setPreview(null);
+    setSavedRecord(null);
 
     const resolvedBranchId = activeBranch ? activeBranch.id : branchId ? Number(branchId) : null;
 
@@ -283,6 +432,7 @@ export default function PurchaseReceivePage() {
     event.preventDefault();
     setStatus(null);
     setPreview(null);
+    setSavedRecord(null);
 
     if (!activeBranch) {
       setStatus({
@@ -390,6 +540,16 @@ export default function PurchaseReceivePage() {
 
       setStatus({ tone: "success", message: "Compra registrada correctamente." });
       setPreview(body);
+      setVerifyingSave(true);
+      const verified = await fetchSavedPurchase(body.purchase.id);
+      if (!verified) {
+        setStatus({
+          tone: "error",
+          message: "Compra guardada, pero no se pudo confirmar en la base de datos.",
+        });
+      } else {
+        setStatus({ tone: "success", message: "Compra registrada y verificada en la base de datos." });
+      }
       setLines([]);
       setSearchResults([]);
     } catch (error) {
@@ -397,11 +557,32 @@ export default function PurchaseReceivePage() {
       setStatus({ tone: "error", message });
     } finally {
       setSubmitting(false);
+      setVerifyingSave(false);
+    }
+  };
+
+  const fetchSavedPurchase = async (purchaseId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/purchases/${purchaseId}`);
+      const body = (await response.json().catch(() => ({}))) as SavedPurchaseResponse & {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body?.error ?? "No se pudo verificar la recepción en la base de datos");
+      }
+
+      setSavedRecord(body);
+      return true;
+    } catch (error) {
+      console.error("Error verifying saved purchase", error);
+      return false;
     }
   };
 
   return (
-    <div className="space-y-8">
+    <>
+      <div className="space-y-8">
       <header className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold text-slate-900">Recepción de compras</h1>
         <p className="text-sm text-slate-600">
@@ -468,8 +649,17 @@ export default function PurchaseReceivePage() {
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-sm text-slate-700">
-            Proveedor
+          <div className="flex flex-col gap-2 text-sm text-slate-700">
+            <div className="flex items-center justify-between">
+              <span>Proveedor</span>
+              <button
+                type="button"
+                onClick={openSupplierDialog}
+                className="text-xs font-semibold text-sky-600 transition hover:text-sky-500"
+              >
+                Añadir proveedor
+              </button>
+            </div>
             <input
               type="text"
               className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900"
@@ -477,7 +667,18 @@ export default function PurchaseReceivePage() {
               onChange={(event) => setSupplierName(event.target.value)}
               placeholder="Nombre del proveedor"
             />
-          </label>
+            {selectedSupplier ? (
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
+                <p className="font-semibold text-slate-700 dark:text-slate-100">
+                  {selectedSupplier.contact || "Contacto principal"}
+                </p>
+                <p>
+                  {[selectedSupplier.phone, selectedSupplier.email].filter((value) => value).join(" • ") || "Sin datos de contacto"}
+                </p>
+                {selectedSupplier.taxId ? <p>RNC: {selectedSupplier.taxId}</p> : null}
+              </div>
+            ) : null}
+          </div>
 
           <label className="flex flex-col gap-1 text-sm text-slate-700">
             Factura / Documento
@@ -735,6 +936,205 @@ export default function PurchaseReceivePage() {
           </div>
         </section>
       )}
+
+      {verifyingSave ? (
+        <div className="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+          Validando que la recepción quedó guardada en la base de datos…
+        </div>
+      ) : null}
+
+      {savedRecord && (
+        <section className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-900 shadow-sm">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Registro guardado en base de datos</h2>
+              <p className="text-sm text-slate-600">
+                Datos consultados desde la tabla <code>purchases</code> y sus líneas en MySQL.
+              </p>
+            </div>
+            <div className="text-right text-xs text-slate-500">
+              <p>Creado: {formatDisplayDate(savedRecord.purchase.createdAt)}</p>
+              <p>Actualizado: {formatDisplayDate(savedRecord.purchase.updatedAt)}</p>
+            </div>
+          </div>
+
+          <dl className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <dt className="text-xs font-medium text-slate-600">Proveedor</dt>
+              <dd className="text-sm font-semibold text-slate-900">
+                {savedRecord.purchase.supplierName ?? "-"}
+              </dd>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <dt className="text-xs font-medium text-slate-600">Referencia</dt>
+              <dd className="text-sm font-semibold text-slate-900">
+                {savedRecord.purchase.referenceNo ?? "-"}
+              </dd>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <dt className="text-xs font-medium text-slate-600">Fecha de recepción</dt>
+              <dd className="text-sm font-semibold text-slate-900">
+                {formatDisplayDate(savedRecord.purchase.receivedAt)}
+              </dd>
+            </div>
+          </dl>
+
+          <div className="mt-4 overflow-hidden rounded-md border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th className="px-4 py-2">Código</th>
+                  <th className="px-4 py-2">Descripción</th>
+                  <th className="px-4 py-2">Cantidad</th>
+                  <th className="px-4 py-2">Costo unitario</th>
+                  <th className="px-4 py-2">Total línea</th>
+                  <th className="px-4 py-2">Disponibles</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 bg-white">
+                {savedRecord.lines.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                      No se encontraron líneas guardadas para esta recepción.
+                    </td>
+                  </tr>
+                ) : (
+                  savedRecord.lines.map((line) => (
+                    <tr key={line.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-2 font-medium text-slate-900">{line.code ?? line.productCodeVersionId}</td>
+                      <td className="px-4 py-2 text-slate-700">{line.name ?? "-"}</td>
+                      <td className="px-4 py-2">{line.quantity}</td>
+                      <td className="px-4 py-2">{centsToCurrency(line.unitCostCents)}</td>
+                      <td className="px-4 py-2">{centsToCurrency(line.lineTotalCents)}</td>
+                      <td className="px-4 py-2 text-slate-700">{line.availableQuantity}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <div className="flex items-center justify-between">
+              <span>Total artículos guardados</span>
+              <strong>{savedTotals.totalQuantity}</strong>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Total costo guardado</span>
+              <strong>{centsToCurrency(savedTotals.totalCostCents)}</strong>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
+    {isSupplierDialogOpen ? (
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+        onClick={closeSupplierDialog}
+      >
+        <form
+          className="w-full max-w-2xl space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+          onClick={(event) => event.stopPropagation()}
+          onSubmit={handleSupplierFormSubmit}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Registrar proveedor</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Captura el RNC, contacto y notas para reutilizarlo en recepciones futuras.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeSupplierDialog}
+              className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300"
+              aria-label="Cerrar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Nombre comercial
+              <input
+                value={supplierForm.name}
+                onChange={(event) => handleSupplierFormChange("name", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="Electro Caribe SRL"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              RNC / Tax ID
+              <input
+                value={supplierForm.taxId}
+                onChange={(event) => handleSupplierFormChange("taxId", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="1-01-12345-6"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Contacto principal
+              <input
+                value={supplierForm.contact}
+                onChange={(event) => handleSupplierFormChange("contact", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="María Gómez"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Teléfono
+              <input
+                value={supplierForm.phone}
+                onChange={(event) => handleSupplierFormChange("phone", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="809-555-0123"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-300 sm:col-span-2">
+              Correo electrónico
+              <input
+                type="email"
+                value={supplierForm.email}
+                onChange={(event) => handleSupplierFormChange("email", event.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="compras@proveedor.com"
+              />
+            </label>
+          </div>
+          <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
+            Notas
+            <textarea
+              value={supplierForm.notes}
+              onChange={(event) => handleSupplierFormChange("notes", event.target.value)}
+              className="mt-1 h-24 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              placeholder="Condiciones de pago, transportista preferido, etc."
+            />
+          </label>
+          {supplierFormError ? (
+            <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/60 dark:bg-rose-500/10 dark:text-rose-200">
+              {supplierFormError}
+            </p>
+          ) : null}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={closeSupplierDialog}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition hover:bg-indigo-500"
+            >
+              Guardar proveedor
+            </button>
+          </div>
+        </form>
+      </div>
+    ) : null}
+    </>
   );
 }
