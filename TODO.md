@@ -242,4 +242,12 @@ o Block id
 - [x] on point of sale-> buy: change the seller profile to match the customer change and add component that the new sale has. See picture on pics\customer.png.
 - [x] on point of sale-> buy: change the offer panel to have just the offer to seller and it must be just an input textfield that the user will fill.
 - [x] on purchasing - receive add a supplier
+- [x] Rework - On all reports, create quick access buttons for Pawns Created, Pawns Redeemed, Pawns Forfeited and Pawns on Sale.
+- [x] Rework - Implement the "Pawns Created" report with metrics, table, and date dialog using schema.sql data.
+- [x] Rework - Implement the "Pawns Redeemed" report with metrics, table, and date dialog using schema.sql data.
+- [x] Rework - Implement the "Pawns Forfeited" report with metrics, table, and date dialog using schema.sql data.
+- [x] Rework - Implement the "Pawns on Sale" report with metrics, table, and date dialog using schema.sql data.
+- [x] Rework - Implement the "Loan Book" report with metrics, table, and date dialog using schema.sql data.
+- [x] Rework - Implement the "Products Aged" report with metrics, table, and date dialog using schema.sql data.
+- [x] Rework - Implement the "Voids / Refund by staff who sold it" report with metrics, table, and date dialog using schema.sql data.
 

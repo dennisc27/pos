@@ -12,6 +12,21 @@ const MAX_LABELS = 200;
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+const formatDisplayDate = (value: string | null | undefined) => {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString("es-DO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+};
+
 function parseAmountToCents(value: string) {
   const normalized = value.replace(/\s+/g, "").replace(",", ".");
   const parsed = Number(normalized);
@@ -95,6 +110,40 @@ type PurchaseResponse = {
   };
 };
 
+type SavedPurchaseResponse = {
+  purchase: {
+    id: number;
+    branchId: number;
+    supplierName: string | null;
+    supplierInvoice: string | null;
+    referenceNo: string | null;
+    receivedAt: string | null;
+    createdBy: number | null;
+    totalCostCents: number;
+    totalQuantity: number;
+    notes: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+  };
+  lines: Array<{
+    id: number;
+    productCodeVersionId: number;
+    code: string | null;
+    name: string | null;
+    sku: string | null;
+    quantity: number;
+    unitCostCents: number;
+    lineTotalCents: number;
+    labelQuantity: number;
+    note: string | null;
+    branchId: number;
+    branchName: string | null;
+    qtyOnHand: number;
+    returnedQuantity: number;
+    availableQuantity: number;
+  }>;
+};
+
 type SupplierDetails = {
   name: string;
   taxId: string;
@@ -125,6 +174,8 @@ export default function PurchaseReceivePage() {
   const [status, setStatus] = useState<StatusMessage>(null);
   const [submitting, setSubmitting] = useState(false);
   const [preview, setPreview] = useState<PurchaseResponse | null>(null);
+  const [savedRecord, setSavedRecord] = useState<SavedPurchaseResponse | null>(null);
+  const [verifyingSave, setVerifyingSave] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierDetails | null>(null);
   const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
   const [supplierForm, setSupplierForm] = useState<SupplierDetails>({
@@ -247,9 +298,25 @@ export default function PurchaseReceivePage() {
     return { totalQuantity, totalCostCents };
   }, [lines]);
 
+  const savedTotals = useMemo(() => {
+    if (!savedRecord) {
+      return { totalQuantity: 0, totalCostCents: 0 };
+    }
+
+    return savedRecord.lines.reduce(
+      (acc, line) => {
+        acc.totalQuantity += Number(line.quantity ?? 0);
+        acc.totalCostCents += Number(line.lineTotalCents ?? 0);
+        return acc;
+      },
+      { totalQuantity: 0, totalCostCents: 0 }
+    );
+  }, [savedRecord]);
+
   const runSearch = async () => {
     setStatus(null);
     setPreview(null);
+    setSavedRecord(null);
 
     const query = searchTerm.trim();
     if (query.length < 2) {
@@ -295,6 +362,7 @@ export default function PurchaseReceivePage() {
   const addLineFromCode = (code: CodeResult) => {
     setStatus(null);
     setPreview(null);
+    setSavedRecord(null);
 
     const resolvedBranchId = activeBranch ? activeBranch.id : branchId ? Number(branchId) : null;
 
@@ -364,6 +432,7 @@ export default function PurchaseReceivePage() {
     event.preventDefault();
     setStatus(null);
     setPreview(null);
+    setSavedRecord(null);
 
     if (!activeBranch) {
       setStatus({
@@ -471,6 +540,16 @@ export default function PurchaseReceivePage() {
 
       setStatus({ tone: "success", message: "Compra registrada correctamente." });
       setPreview(body);
+      setVerifyingSave(true);
+      const verified = await fetchSavedPurchase(body.purchase.id);
+      if (!verified) {
+        setStatus({
+          tone: "error",
+          message: "Compra guardada, pero no se pudo confirmar en la base de datos.",
+        });
+      } else {
+        setStatus({ tone: "success", message: "Compra registrada y verificada en la base de datos." });
+      }
       setLines([]);
       setSearchResults([]);
     } catch (error) {
@@ -478,6 +557,26 @@ export default function PurchaseReceivePage() {
       setStatus({ tone: "error", message });
     } finally {
       setSubmitting(false);
+      setVerifyingSave(false);
+    }
+  };
+
+  const fetchSavedPurchase = async (purchaseId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/purchases/${purchaseId}`);
+      const body = (await response.json().catch(() => ({}))) as SavedPurchaseResponse & {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(body?.error ?? "No se pudo verificar la recepción en la base de datos");
+      }
+
+      setSavedRecord(body);
+      return true;
+    } catch (error) {
+      console.error("Error verifying saved purchase", error);
+      return false;
     }
   };
 
@@ -834,6 +933,96 @@ export default function PurchaseReceivePage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </section>
+      )}
+
+      {verifyingSave ? (
+        <div className="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+          Validando que la recepción quedó guardada en la base de datos…
+        </div>
+      ) : null}
+
+      {savedRecord && (
+        <section className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-900 shadow-sm">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Registro guardado en base de datos</h2>
+              <p className="text-sm text-slate-600">
+                Datos consultados desde la tabla <code>purchases</code> y sus líneas en MySQL.
+              </p>
+            </div>
+            <div className="text-right text-xs text-slate-500">
+              <p>Creado: {formatDisplayDate(savedRecord.purchase.createdAt)}</p>
+              <p>Actualizado: {formatDisplayDate(savedRecord.purchase.updatedAt)}</p>
+            </div>
+          </div>
+
+          <dl className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <dt className="text-xs font-medium text-slate-600">Proveedor</dt>
+              <dd className="text-sm font-semibold text-slate-900">
+                {savedRecord.purchase.supplierName ?? "-"}
+              </dd>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <dt className="text-xs font-medium text-slate-600">Referencia</dt>
+              <dd className="text-sm font-semibold text-slate-900">
+                {savedRecord.purchase.referenceNo ?? "-"}
+              </dd>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <dt className="text-xs font-medium text-slate-600">Fecha de recepción</dt>
+              <dd className="text-sm font-semibold text-slate-900">
+                {formatDisplayDate(savedRecord.purchase.receivedAt)}
+              </dd>
+            </div>
+          </dl>
+
+          <div className="mt-4 overflow-hidden rounded-md border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th className="px-4 py-2">Código</th>
+                  <th className="px-4 py-2">Descripción</th>
+                  <th className="px-4 py-2">Cantidad</th>
+                  <th className="px-4 py-2">Costo unitario</th>
+                  <th className="px-4 py-2">Total línea</th>
+                  <th className="px-4 py-2">Disponibles</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 bg-white">
+                {savedRecord.lines.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                      No se encontraron líneas guardadas para esta recepción.
+                    </td>
+                  </tr>
+                ) : (
+                  savedRecord.lines.map((line) => (
+                    <tr key={line.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-2 font-medium text-slate-900">{line.code ?? line.productCodeVersionId}</td>
+                      <td className="px-4 py-2 text-slate-700">{line.name ?? "-"}</td>
+                      <td className="px-4 py-2">{line.quantity}</td>
+                      <td className="px-4 py-2">{centsToCurrency(line.unitCostCents)}</td>
+                      <td className="px-4 py-2">{centsToCurrency(line.lineTotalCents)}</td>
+                      <td className="px-4 py-2 text-slate-700">{line.availableQuantity}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <div className="flex items-center justify-between">
+              <span>Total artículos guardados</span>
+              <strong>{savedTotals.totalQuantity}</strong>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Total costo guardado</span>
+              <strong>{centsToCurrency(savedTotals.totalCostCents)}</strong>
+            </div>
           </div>
         </section>
       )}
