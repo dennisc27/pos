@@ -7,6 +7,7 @@ import { UserCircle2, X } from "lucide-react";
 
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 import { formatCurrency } from "@/components/pos/utils";
+import { formatDateForDisplay } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -65,6 +66,21 @@ const paymentMethods = [
 const WALK_IN_CUSTOMER = "Walk-in customer";
 const WALK_IN_DESCRIPTOR = "Default walk-in profile";
 
+function generateJobNumberPrefix() {
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(
+    now.getDate()
+  ).padStart(2, "0")}`;
+  const bytes = new Uint8Array(2);
+  crypto.getRandomValues(bytes);
+  const random = Array.from(bytes)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+
+  return `RP-${stamp}-${random}`;
+}
+
 type CustomerSearchResult = {
   id: number;
   name: string;
@@ -83,7 +99,7 @@ export default function RepairsIntakePage() {
   const [customerSearchResults, setCustomerSearchResults] = useState<CustomerSearchResult[]>([]);
   const [isSearchingCustomers, setIsSearchingCustomers] = useState(false);
   const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
-  const [jobNumber, setJobNumber] = useState("");
+  const [jobNumber, setJobNumber] = useState(() => generateJobNumberPrefix());
   const [itemDescription, setItemDescription] = useState("");
   const [issueDescription, setIssueDescription] = useState("");
   const [diagnosis, setDiagnosis] = useState("");
@@ -95,10 +111,12 @@ export default function RepairsIntakePage() {
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState<string[]>([""]);
   const [status, setStatus] = useState<StatusMessage>(null);
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createdRepair, setCreatedRepair] = useState<CreatedRepair | null>(null);
 
   const branchUnavailable = branchLoading || !activeBranch || Boolean(branchError);
+  const isCustomerDialogOpen = customerDialogMode !== null;
 
   const sanitizedPhotos = useMemo(
     () => photos.map((value) => value.trim()).filter((value) => value.length > 0),
@@ -127,6 +145,7 @@ export default function RepairsIntakePage() {
     setCustomerSearchResults([]);
     setCustomerSearchError(null);
     setIsSearchingCustomers(false);
+    setCreatingCustomer(false);
   }, []);
 
   useEffect(() => {
@@ -168,6 +187,9 @@ export default function RepairsIntakePage() {
     const timer = window.setTimeout(async () => {
       try {
         const params = new URLSearchParams({ q: query, limit: "10" });
+        if (activeBranch?.id) {
+          params.set("branchId", String(activeBranch.id));
+        }
         const response = await fetch(`${API_BASE_URL}/api/customers?${params.toString()}`, {
           signal: controller.signal,
         });
@@ -223,7 +245,7 @@ export default function RepairsIntakePage() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [customerDialogMode, customerInput]);
+  }, [activeBranch?.id, customerDialogMode, customerInput]);
 
   const openCustomerDialog = useCallback(
     (mode: "change" | "add") => {
@@ -237,19 +259,76 @@ export default function RepairsIntakePage() {
   );
 
   const handleSubmitCustomer = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+    async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const trimmed = customerInput.trim();
       if (!trimmed) {
         return;
       }
 
-      setCustomerName(trimmed);
-      setCustomerDescriptor("Manual entry");
-      setSelectedCustomerId(null);
-      closeCustomerDialog();
+      if (!activeBranch?.id) {
+        setCustomerSearchError("Select an active branch before adding a customer.");
+        return;
+      }
+
+      setCreatingCustomer(true);
+      setCustomerSearchError(null);
+
+      try {
+        const [firstName, ...rest] = trimmed.split(/\s+/);
+        const lastName = rest.join(" ") || firstName;
+
+        const response = await fetch(`${API_BASE_URL}/api/customers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            branchId: activeBranch.id,
+            firstName,
+            lastName,
+          }),
+        });
+
+        const payload = (await response.json().catch(() => ({}))) as {
+          customer?: {
+            id: number;
+            firstName: string;
+            lastName: string;
+            email?: string | null;
+            phone?: string | null;
+          };
+          id?: number;
+          firstName?: string;
+          lastName?: string;
+          email?: string | null;
+          phone?: string | null;
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload?.error || "Unable to create customer");
+        }
+
+        const created = payload.customer ?? payload;
+        const descriptorParts = [created.email, created.phone].filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        );
+
+        const fullName = `${created.firstName ?? ""} ${created.lastName ?? ""}`.trim();
+
+        setCustomerName(fullName || trimmed);
+        setCustomerDescriptor(descriptorParts.length > 0 ? descriptorParts.join(" • ") : "CRM customer");
+        setSelectedCustomerId(Number(created.id));
+        closeCustomerDialog();
+      } catch (error) {
+        console.error("Unable to create customer", error);
+        setCustomerSearchError(
+          error instanceof Error ? error.message : "Unable to save the customer right now."
+        );
+      } finally {
+        setCreatingCustomer(false);
+      }
     },
-    [closeCustomerDialog, customerInput]
+    [activeBranch?.id, closeCustomerDialog, customerInput]
   );
 
   const handleSelectCustomer = useCallback(
@@ -267,13 +346,6 @@ export default function RepairsIntakePage() {
     },
     [closeCustomerDialog]
   );
-
-  const handleUseWalkInCustomer = useCallback(() => {
-    setSelectedCustomerId(null);
-    setCustomerName(WALK_IN_CUSTOMER);
-    setCustomerDescriptor(WALK_IN_DESCRIPTOR);
-    closeCustomerDialog();
-  }, [closeCustomerDialog]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -353,6 +425,7 @@ export default function RepairsIntakePage() {
           ? `Repair ${body.repair.jobNumber} was created successfully.`
           : "Repair created successfully.",
       });
+      setJobNumber(generateJobNumberPrefix());
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to create repair";
       setStatus({ tone: "error", message });
@@ -429,8 +502,9 @@ export default function RepairsIntakePage() {
                 type="text"
                 maxLength={40}
                 value={jobNumber}
-                onChange={(event) => setJobNumber(event.target.value)}
-                className="rounded border border-slate-300 px-3 py-2 text-base text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                disabled
+                readOnly
+                className="rounded border border-slate-300 bg-slate-50 px-3 py-2 text-base text-slate-900 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-500 dark:border-slate-600 dark:bg-slate-800/70 dark:text-slate-300"
                 placeholder="Auto-generated if left blank"
               />
             </label>
@@ -653,6 +727,150 @@ export default function RepairsIntakePage() {
           </div>
         </section>
       )}
+
+      {isCustomerDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={closeCustomerDialog}
+        >
+          <form
+            className="w-full max-w-xl space-y-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={handleSubmitCustomer}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                  {customerDialogMode === "change" ? "Change customer" : "Add customer"}
+                </h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Search CRM or add a new profile to link this repair.
+                </p>
+                {activeBranch ? (
+                  <p className="mt-1 text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                    Branch {activeBranch.name}
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={closeCustomerDialog}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close customer dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Customer name
+              </label>
+              <input
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none dark:border-slate-800/80 dark:bg-slate-950 dark:text-slate-200"
+                placeholder="Search by name, phone, or email"
+                value={customerInput}
+                onChange={(event) => setCustomerInput(event.target.value)}
+                autoFocus
+                onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setCustomerInput("");
+                  }
+                }}
+              />
+            </div>
+
+            <div className="space-y-3">
+              {customerInput.trim().length < 2 ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Type at least 2 characters to search existing customers in this branch.
+                </p>
+              ) : null}
+
+              {customerSearchError ? (
+                <div className="rounded-xl border border-rose-400/60 bg-rose-50 px-3 py-2 text-xs text-rose-600 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  {customerSearchError}
+                </div>
+              ) : null}
+
+              {isSearchingCustomers ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">Searching customers…</p>
+              ) : null}
+
+              {customerSearchResults.length > 0 ? (
+                <div className="max-h-56 space-y-2 overflow-y-auto">
+                  {customerSearchResults.map((customer) => {
+                    const descriptorParts = [customer.email, customer.phone].filter(
+                      (value): value is string => typeof value === "string" && value.trim().length > 0
+                    );
+                    const descriptor = descriptorParts.join(" • ");
+                    const activityLabel = customer.lastActivityAt
+                      ? `Last activity ${formatDateForDisplay(customer.lastActivityAt)}`
+                      : null;
+                    const isSelected = selectedCustomerId === customer.id;
+
+                    return (
+                      <button
+                        key={customer.id}
+                        type="button"
+                        onClick={() => handleSelectCustomer(customer)}
+                        className={`flex w-full items-start justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
+                          isSelected
+                            ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-200"
+                            : "border-slate-200/70 bg-white hover:border-slate-300 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="space-y-1">
+                          <p className="font-medium text-slate-900 dark:text-white">{customer.name}</p>
+                          {descriptor ? (
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{descriptor}</p>
+                          ) : null}
+                          {activityLabel ? (
+                            <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                              {activityLabel}
+                            </p>
+                          ) : null}
+                        </div>
+                        <span className="text-xs font-semibold text-sky-600 dark:text-sky-300">
+                          {isSelected ? "Selected" : "Select"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : customerInput.trim().length >= 2 && !isSearchingCustomers && !customerSearchError ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  No customers found. Use the button below to add a new profile.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeCustomerDialog}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={creatingCustomer}
+                className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+              >
+                {creatingCustomer
+                  ? "Saving..."
+                  : customerDialogMode === "change"
+                  ? "Save customer"
+                  : "Add customer"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -96,6 +96,9 @@ export const productCodeVersions = mysqlTable('product_code_versions', {
   costCents: bigint('cost_cents', { mode: 'number' }),
   qtyOnHand: int('qty_on_hand').default(0),
   qtyReserved: int('qty_reserved').default(0),
+  reorderPoint: int('reorder_point').default(0),
+  reorderQty: int('reorder_qty').default(0),
+  binLocation: varchar('bin_location', { length: 120 }),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
@@ -119,6 +122,11 @@ export const productCodeComponents = mysqlTable(
 export const inventoryCountSessions = mysqlTable('inv_count_sessions', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   branchId: bigint('branch_id', { mode: 'number' }).notNull(),
+  name: varchar('name', { length: 200 }).notNull(),
+  locationScope: varchar('location_scope', { length: 200 }),
+  startDate: date('start_date'),
+  dueDate: date('due_date'),
+  freezeMovements: boolean('freeze_movements').default(false),
   scope: mysqlEnum('scope', ['full', 'cycle']).notNull().default('cycle'),
   status: mysqlEnum('status', ['open', 'review', 'posted', 'cancelled']).notNull().default('open'),
   snapshotAt: timestamp('snapshot_at').defaultNow(),
@@ -136,8 +144,23 @@ export const inventoryCountLines = mysqlTable('inv_count_lines', {
   expectedQty: decimal('expected_qty', { precision: 18, scale: 4 }).notNull(),
   countedQty: decimal('counted_qty', { precision: 18, scale: 4 }).notNull(),
   status: mysqlEnum('status', ['counted', 'recount', 'resolved']).notNull().default('counted'),
+  comment: text('comment'),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+export const inventoryCountAssignments = mysqlTable(
+  'inv_count_assignments',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+    sessionId: bigint('session_id', { mode: 'number' }).notNull(),
+    userId: bigint('user_id', { mode: 'number' }).notNull(),
+    deviceLabel: varchar('device_label', { length: 120 }),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    uniqAssignment: uniqueIndex('uniq_session_user').on(table.sessionId, table.userId),
+  }),
+);
 
 export const inventoryTransfers = mysqlTable('inv_transfers', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),

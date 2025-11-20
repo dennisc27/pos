@@ -14,6 +14,7 @@ import {
   creditNotes,
   giftCardLedger,
   giftCards,
+  inventoryCountAssignments,
   inventoryCountLines,
   inventoryCountSessions,
   inventoryQuarantines,
@@ -1106,6 +1107,39 @@ function parseReceivedAt(value) {
   return fallback;
 }
 
+function parseDateOnly(value, fieldName = 'date', { allowNull = true, normalize = true } = {}) {
+  if (value == null || value === '') {
+    if (allowNull) return null;
+    throw new HttpError(400, `${fieldName} is required`);
+  }
+
+  let parsed;
+
+  if (value instanceof Date) {
+    parsed = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      if (allowNull) return null;
+      throw new HttpError(400, `${fieldName} is required`);
+    }
+
+    parsed = new Date(trimmed);
+  } else {
+    parsed = new Date(value);
+  }
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw new HttpError(400, `${fieldName} must be a valid date`);
+  }
+
+  if (!normalize) {
+    return parsed;
+  }
+
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+}
+
 function combineConditions(conditions) {
   const filtered = conditions.filter(Boolean);
   if (filtered.length === 0) {
@@ -1133,6 +1167,11 @@ async function getCountSessionWithLines(executor, sessionId) {
       id: inventoryCountSessions.id,
       branchId: inventoryCountSessions.branchId,
       branchName: branches.name,
+      name: inventoryCountSessions.name,
+      locationScope: inventoryCountSessions.locationScope,
+      startDate: inventoryCountSessions.startDate,
+      dueDate: inventoryCountSessions.dueDate,
+      freezeMovements: inventoryCountSessions.freezeMovements,
       scope: inventoryCountSessions.scope,
       status: inventoryCountSessions.status,
       snapshotAt: inventoryCountSessions.snapshotAt,
@@ -1160,6 +1199,7 @@ async function getCountSessionWithLines(executor, sessionId) {
       countedQty: inventoryCountLines.countedQty,
       status: inventoryCountLines.status,
       createdAt: inventoryCountLines.createdAt,
+      comment: inventoryCountLines.comment,
       productCodeId: productCodeVersions.productCodeId,
       branchId: productCodeVersions.branchId,
       code: productCodes.code,
@@ -1175,18 +1215,53 @@ async function getCountSessionWithLines(executor, sessionId) {
   const lines = lineRows.map(serializeCountLine);
   const totals = summarizeCountLines(lines);
 
+  const versionIds = lineRows.map((row) => row.productCodeVersionId);
+  const [movementRow] = versionIds.length
+    ? await executor
+        .select({
+          latestMovement: max(stockLedger.createdAt),
+        })
+        .from(stockLedger)
+        .where(and(inArray(stockLedger.productCodeVersionId, versionIds), gt(stockLedger.createdAt, sessionRow.snapshotAt)))
+    : [{ latestMovement: null }];
+
+  const assignments = await executor
+    .select({
+      id: inventoryCountAssignments.id,
+      userId: inventoryCountAssignments.userId,
+      deviceLabel: inventoryCountAssignments.deviceLabel,
+      fullName: users.fullName,
+    })
+    .from(inventoryCountAssignments)
+    .leftJoin(users, eq(users.id, inventoryCountAssignments.userId))
+    .where(eq(inventoryCountAssignments.sessionId, numericSessionId));
+
   return {
-    session: serializeCountSession(sessionRow),
+    session: serializeCountSession(sessionRow, {
+      movementAfterSnapshot: Boolean(movementRow?.latestMovement),
+      lastMovementAt: movementRow?.latestMovement ?? null,
+    }),
     lines,
     totals,
+    assignments: assignments.map((assignment) => ({
+      id: assignment.id,
+      userId: assignment.userId,
+      deviceLabel: assignment.deviceLabel ?? null,
+      fullName: assignment.fullName ?? null,
+    })),
   };
 }
 
-function serializeCountSession(row) {
+function serializeCountSession(row, movementMeta = {}) {
   return {
     id: row.id,
     branchId: row.branchId,
     branchName: row.branchName ?? null,
+    name: row.name,
+    locationScope: row.locationScope ?? null,
+    startDate: toIsoString(row.startDate),
+    dueDate: toIsoString(row.dueDate),
+    freezeMovements: Boolean(row.freezeMovements),
     scope: row.scope,
     status: row.status,
     snapshotAt: toIsoString(row.snapshotAt),
@@ -1195,6 +1270,8 @@ function serializeCountSession(row) {
     postedAt: toIsoString(row.postedAt),
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt),
+    movementAfterSnapshot: Boolean(movementMeta.movementAfterSnapshot),
+    lastMovementAt: toIsoString(movementMeta.lastMovementAt),
   };
 }
 
@@ -1217,6 +1294,7 @@ function serializeCountLine(row) {
     variance,
     status: row.status,
     createdAt: toIsoString(row.createdAt),
+    comment: row.comment ?? null,
   };
 }
 
@@ -1516,35 +1594,6 @@ function formatDateValue(value) {
 
   if (typeof value === 'string') {
     return value;
-  }
-
-  return null;
-}
-
-function parseDateOnly(value) {
-  if (value instanceof Date) {
-    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-
-    const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(trimmed);
-    if (match) {
-      const [, year, month, day] = match;
-      const numericYear = Number(year);
-      const numericMonth = Number(month);
-      const numericDay = Number(day);
-
-      if (Number.isInteger(numericYear) && Number.isInteger(numericMonth) && Number.isInteger(numericDay)) {
-        return new Date(Date.UTC(numericYear, numericMonth - 1, numericDay));
-      }
-    }
-
-    const parsed = new Date(trimmed);
-    if (!Number.isNaN(parsed.getTime())) {
-      return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
-    }
   }
 
   return null;
@@ -2845,14 +2894,28 @@ async function queueNotificationMessage(
   });
 }
 
+function formatDateTimeForMessage(value) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const year = parsed.getFullYear();
+  const hours = String(parsed.getHours()).padStart(2, '0');
+  const minutes = String(parsed.getMinutes()).padStart(2, '0');
+
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
 function buildInstapawnNotificationMessage(intake, expiresAt) {
   const expiry = expiresAt instanceof Date ? expiresAt : new Date(expiresAt ?? intake.barcodeExpiresAt);
-  const expiryString = Number.isNaN(expiry.getTime())
-    ? null
-    : `${expiry.toLocaleDateString('es-DO')} ${expiry.toLocaleTimeString('es-DO', {
-        hour: '2-digit',
-        minute: '2-digit',
-      })}`;
+  const expiryString = formatDateTimeForMessage(expiry);
 
   const greetingName = intake.customerFirstName || 'cliente';
 
@@ -4471,22 +4534,41 @@ app.post('/api/shifts/open', async (req, res, next) => {
 
 app.post('/api/inventory/count-sessions', async (req, res, next) => {
   try {
-    const { branchId, scope = 'cycle', createdBy } = req.body ?? {};
+    const {
+      branchId,
+      scope = 'cycle',
+      createdBy,
+      name,
+      locationScope = null,
+      startDate = null,
+      dueDate = null,
+      freezeMovements = false,
+      counters = [],
+    } = req.body ?? {};
 
-    const numericBranchId = Number(branchId);
-    if (!Number.isInteger(numericBranchId) || numericBranchId <= 0) {
-      return res.status(400).json({ error: 'branchId must be a positive integer' });
-    }
+    const numericBranchId = parsePositiveInteger(branchId, 'branchId');
+    const numericCreatedBy = parsePositiveInteger(createdBy, 'createdBy');
 
     const normalizedScope = typeof scope === 'string' ? scope.toLowerCase() : 'cycle';
     if (!['cycle', 'full'].includes(normalizedScope)) {
       return res.status(400).json({ error: 'scope must be "cycle" or "full"' });
     }
 
-    const numericCreatedBy = Number(createdBy);
-    if (!Number.isInteger(numericCreatedBy) || numericCreatedBy <= 0) {
-      return res.status(400).json({ error: 'createdBy must be a positive integer' });
-    }
+    const sessionName = typeof name === 'string' && name.trim().length > 0
+      ? name.trim().slice(0, 200)
+      : `Conteo ${new Date().toISOString().slice(0, 10)}`;
+
+    const parsedStart = parseDateOnly(startDate, 'startDate');
+    const parsedDue = parseDateOnly(dueDate, 'dueDate');
+
+    const normalizedCounters = Array.isArray(counters)
+      ? counters
+          .map((entry) => ({
+            userId: Number(entry?.userId ?? entry?.id),
+            deviceLabel: typeof entry?.deviceLabel === 'string' ? entry.deviceLabel.trim().slice(0, 120) : null,
+          }))
+          .filter((entry) => Number.isInteger(entry.userId) && entry.userId > 0)
+      : [];
 
     const [branchRow] = await db
       .select({ id: branches.id })
@@ -4499,27 +4581,40 @@ app.post('/api/inventory/count-sessions', async (req, res, next) => {
     }
 
     const detail = await db.transaction(async (tx) => {
-      await tx.insert(inventoryCountSessions).values({
+      const insertResult = await tx.insert(inventoryCountSessions).values({
         branchId: numericBranchId,
+        name: sessionName,
+        locationScope: locationScope ? String(locationScope).slice(0, 200) : null,
+        startDate: parsedStart,
+        dueDate: parsedDue,
+        freezeMovements: Boolean(freezeMovements),
         scope: normalizedScope,
         status: 'open',
         createdBy: numericCreatedBy,
       });
 
+      const sessionId = insertResult[0]?.insertId;
+
+      const finalSessionId = Number.isInteger(sessionId) && sessionId > 0 ? sessionId : null;
+
       const [sessionRow] = await tx
         .select({ id: inventoryCountSessions.id })
         .from(inventoryCountSessions)
-        .where(
-          and(
-            eq(inventoryCountSessions.branchId, numericBranchId),
-            eq(inventoryCountSessions.createdBy, numericCreatedBy)
-          )
-        )
-        .orderBy(desc(inventoryCountSessions.id))
+        .where(eq(inventoryCountSessions.id, finalSessionId ?? sql`LAST_INSERT_ID()`))
         .limit(1);
 
       if (!sessionRow) {
         throw new Error('FAILED_TO_CREATE_INVENTORY_COUNT_SESSION');
+      }
+
+      if (normalizedCounters.length > 0) {
+        await tx.insert(inventoryCountAssignments).values(
+          normalizedCounters.map((entry) => ({
+            sessionId: Number(sessionRow.id),
+            userId: entry.userId,
+            deviceLabel: entry.deviceLabel ?? null,
+          }))
+        );
       }
 
       return getCountSessionWithLines(tx, sessionRow.id);
@@ -4539,6 +4634,333 @@ app.post('/api/inventory/count-sessions', async (req, res, next) => {
   }
 });
 
+app.get('/api/inventory/count-sessions', async (req, res, next) => {
+  try {
+    const { status = null, branchId = null } = req.query ?? {};
+
+    const filters = [];
+
+    if (typeof status === 'string' && status.length > 0) {
+      filters.push(eq(inventoryCountSessions.status, status.toLowerCase()));
+    }
+
+    const numericBranch = Number(branchId);
+    if (Number.isInteger(numericBranch) && numericBranch > 0) {
+      filters.push(eq(inventoryCountSessions.branchId, numericBranch));
+    }
+
+    const rows = await db
+      .select({
+        id: inventoryCountSessions.id,
+        name: inventoryCountSessions.name,
+        scope: inventoryCountSessions.scope,
+        status: inventoryCountSessions.status,
+        branchId: inventoryCountSessions.branchId,
+        branchName: branches.name,
+        snapshotAt: inventoryCountSessions.snapshotAt,
+        startDate: inventoryCountSessions.startDate,
+        dueDate: inventoryCountSessions.dueDate,
+        freezeMovements: inventoryCountSessions.freezeMovements,
+        createdAt: inventoryCountSessions.createdAt,
+        updatedAt: inventoryCountSessions.updatedAt,
+        lineCount: sql`COUNT(${inventoryCountLines.id})`,
+        variance: sql`COALESCE(SUM(${inventoryCountLines.countedQty} - ${inventoryCountLines.expectedQty}), 0)`,
+      })
+      .from(inventoryCountSessions)
+      .leftJoin(branches, eq(branches.id, inventoryCountSessions.branchId))
+      .leftJoin(inventoryCountLines, eq(inventoryCountLines.sessionId, inventoryCountSessions.id))
+      .where(combineConditions(filters))
+      .groupBy(
+        inventoryCountSessions.id,
+        inventoryCountSessions.name,
+        inventoryCountSessions.scope,
+        inventoryCountSessions.status,
+        inventoryCountSessions.branchId,
+        branches.id,
+        inventoryCountSessions.snapshotAt,
+        inventoryCountSessions.startDate,
+        inventoryCountSessions.dueDate,
+        inventoryCountSessions.freezeMovements,
+        inventoryCountSessions.createdAt,
+        inventoryCountSessions.updatedAt
+      )
+      .orderBy(desc(inventoryCountSessions.createdAt))
+      .limit(200);
+
+    res.json({
+      sessions: rows.map((row) => ({
+        id: Number(row.id),
+        name: row.name,
+        scope: row.scope,
+        status: row.status,
+        branchId: Number(row.branchId),
+        branchName: row.branchName ?? null,
+        snapshotAt: toIsoString(row.snapshotAt),
+        startDate: toIsoString(row.startDate),
+        dueDate: toIsoString(row.dueDate),
+        freezeMovements: Boolean(row.freezeMovements),
+        createdAt: toIsoString(row.createdAt),
+        updatedAt: toIsoString(row.updatedAt),
+        lineCount: Number(row.lineCount ?? 0),
+        variance: toNumber(row.variance),
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/inventory/count-sessions/:id', async (req, res, next) => {
+  try {
+    const sessionId = parsePositiveInteger(req.params.id, 'sessionId');
+    const detail = await getCountSessionWithLines(db, sessionId);
+    res.json(detail);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/inventory/count/:sessionId/items', async (req, res, next) => {
+  try {
+    const sessionId = parsePositiveInteger(req.params.sessionId, 'sessionId');
+    const search = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+
+    const { session } = await getCountSessionWithLines(db, sessionId);
+
+    const likeFilters = [];
+    if (search) {
+      const pattern = `%${escapeForLike(search)}%`;
+      likeFilters.push(like(productCodes.code, pattern));
+      likeFilters.push(like(productCodes.name, pattern));
+      likeFilters.push(like(productCodes.sku, pattern));
+    }
+
+    const rows = await db
+      .select({
+        productCodeVersionId: productCodeVersions.id,
+        productCodeId: productCodeVersions.productCodeId,
+        code: productCodes.code,
+        name: productCodes.name,
+        sku: productCodes.sku,
+        qtyOnHand: productCodeVersions.qtyOnHand,
+        qtyReserved: productCodeVersions.qtyReserved,
+        binLocation: productCodeVersions.binLocation,
+        reorderPoint: productCodeVersions.reorderPoint,
+        reorderQty: productCodeVersions.reorderQty,
+        branchId: productCodeVersions.branchId,
+      })
+      .from(productCodeVersions)
+      .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+      .where(
+        combineConditions([
+          eq(productCodeVersions.branchId, session.branchId),
+          likeFilters.length ? or(...likeFilters) : null,
+        ])
+      )
+      .orderBy(asc(productCodes.code))
+      .limit(25);
+
+    res.json({
+      session,
+      items: rows.map((row) => ({
+        productCodeVersionId: Number(row.productCodeVersionId),
+        productCodeId: Number(row.productCodeId),
+        code: row.code,
+        name: row.name,
+        sku: row.sku ?? null,
+        qtyOnHand: Number(row.qtyOnHand ?? 0),
+        qtyReserved: Number(row.qtyReserved ?? 0),
+        availableQty: Number(row.qtyOnHand ?? 0) - Number(row.qtyReserved ?? 0),
+        binLocation: row.binLocation ?? null,
+        reorderPoint: Number(row.reorderPoint ?? 0),
+        reorderQty: Number(row.reorderQty ?? 0),
+        branchId: Number(row.branchId),
+      })),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/inventory/count/:sessionId/recent', async (req, res, next) => {
+  try {
+    const sessionId = parsePositiveInteger(req.params.sessionId, 'sessionId');
+    const { session } = await getCountSessionWithLines(db, sessionId);
+
+    const rows = await db
+      .select({
+        productCodeVersionId: inventoryCountLines.productCodeVersionId,
+        productCodeId: productCodeVersions.productCodeId,
+        code: productCodes.code,
+        name: productCodes.name,
+        sku: productCodes.sku,
+        expectedQty: max(inventoryCountLines.expectedQty),
+        countedQty: sql`SUM(${inventoryCountLines.countedQty})`,
+        lastCapturedAt: max(inventoryCountLines.createdAt),
+      })
+      .from(inventoryCountLines)
+      .innerJoin(productCodeVersions, eq(productCodeVersions.id, inventoryCountLines.productCodeVersionId))
+      .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+      .where(eq(inventoryCountLines.sessionId, sessionId))
+      .groupBy(
+        inventoryCountLines.productCodeVersionId,
+        productCodeVersions.productCodeId,
+        productCodes.code,
+        productCodes.name,
+        productCodes.sku
+      )
+      .orderBy(desc(max(inventoryCountLines.createdAt)))
+      .limit(30);
+
+    res.json({
+      session,
+      recent: rows.map((row) => ({
+        productCodeVersionId: Number(row.productCodeVersionId),
+        productCodeId: Number(row.productCodeId),
+        code: row.code,
+        name: row.name,
+        sku: row.sku ?? null,
+        expectedQty: toNumber(row.expectedQty),
+        countedQty: toNumber(row.countedQty),
+        variance: toNumber(row.countedQty) - toNumber(row.expectedQty),
+        lastCapturedAt: toIsoString(row.lastCapturedAt),
+      })),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.patch('/api/inventory/count-sessions/:id', async (req, res, next) => {
+  try {
+    const sessionId = parsePositiveInteger(req.params.id, 'sessionId');
+    const {
+      name,
+      locationScope,
+      startDate,
+      dueDate,
+      freezeMovements,
+      status = null,
+      postedBy = null,
+      counters = null,
+    } = req.body ?? {};
+
+    const parsedStart = startDate !== undefined ? parseDateOnly(startDate, 'startDate') : undefined;
+    const parsedDue = dueDate !== undefined ? parseDateOnly(dueDate, 'dueDate') : undefined;
+
+    const normalizedCounters = Array.isArray(counters)
+      ? counters
+          .map((entry) => ({
+            userId: Number(entry?.userId ?? entry?.id),
+            deviceLabel: typeof entry?.deviceLabel === 'string' ? entry.deviceLabel.trim().slice(0, 120) : null,
+          }))
+          .filter((entry) => Number.isInteger(entry.userId) && entry.userId > 0)
+      : null;
+
+    const detail = await db.transaction(async (tx) => {
+      const [sessionRow] = await tx
+        .select({
+          id: inventoryCountSessions.id,
+          status: inventoryCountSessions.status,
+        })
+        .from(inventoryCountSessions)
+        .where(eq(inventoryCountSessions.id, sessionId))
+        .limit(1);
+
+      if (!sessionRow) {
+        throw new HttpError(404, 'Inventory count session not found');
+      }
+
+      const updates = {};
+
+      if (typeof name === 'string') {
+        updates.name = name.trim().slice(0, 200);
+      }
+
+      if (locationScope !== undefined) {
+        updates.locationScope = locationScope ? String(locationScope).slice(0, 200) : null;
+      }
+
+      if (parsedStart !== undefined) {
+        updates.startDate = parsedStart;
+      }
+
+      if (parsedDue !== undefined) {
+        updates.dueDate = parsedDue;
+      }
+
+      if (freezeMovements !== undefined) {
+        updates.freezeMovements = Boolean(freezeMovements);
+      }
+
+      if (status) {
+        const normalizedStatus = status.toLowerCase();
+        const allowedTransitions = {
+          open: ['review', 'cancelled'],
+          review: ['posted', 'cancelled'],
+          posted: [],
+          cancelled: [],
+        };
+
+        if (normalizedStatus !== sessionRow.status) {
+          const allowed = allowedTransitions[sessionRow.status] ?? [];
+          if (!allowed.includes(normalizedStatus)) {
+            throw new HttpError(409, 'Invalid status transition');
+          }
+
+          updates.status = normalizedStatus;
+
+          if (normalizedStatus === 'posted') {
+            const reviewerId = postedBy == null ? null : parsePositiveInteger(postedBy, 'postedBy');
+            updates.postedBy = reviewerId;
+            updates.postedAt = new Date();
+          }
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await tx.update(inventoryCountSessions).set(updates).where(eq(inventoryCountSessions.id, sessionId));
+      }
+
+      if (normalizedCounters) {
+        await tx.delete(inventoryCountAssignments).where(eq(inventoryCountAssignments.sessionId, sessionId));
+
+        if (normalizedCounters.length > 0) {
+          await tx.insert(inventoryCountAssignments).values(
+            normalizedCounters.map((entry) => ({
+              sessionId,
+              userId: entry.userId,
+              deviceLabel: entry.deviceLabel ?? null,
+            }))
+          );
+        }
+      }
+
+      return getCountSessionWithLines(tx, sessionId);
+    });
+
+    res.json(detail);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
 app.post('/api/inventory/count-lines', async (req, res, next) => {
   try {
     const {
@@ -4547,6 +4969,7 @@ app.post('/api/inventory/count-lines', async (req, res, next) => {
       countedQty = 1,
       mode = 'add',
       status = 'counted',
+      comment = null,
     } = req.body ?? {};
 
     const numericSessionId = Number(sessionId);
@@ -4570,6 +4993,8 @@ app.post('/api/inventory/count-lines', async (req, res, next) => {
     if (!Number.isFinite(numericCount) || numericCount < 0) {
       return res.status(400).json({ error: 'countedQty must be a non-negative number' });
     }
+
+    const normalizedComment = typeof comment === 'string' && comment.trim().length > 0 ? comment.trim().slice(0, 500) : null;
 
     const detail = await db.transaction(async (tx) => {
       const [sessionRow] = await tx
@@ -4628,7 +5053,7 @@ app.post('/api/inventory/count-lines', async (req, res, next) => {
 
         await tx
           .update(inventoryCountLines)
-          .set({ countedQty: nextCount, status: normalizedStatus })
+          .set({ countedQty: nextCount, status: normalizedStatus, comment: normalizedComment ?? undefined })
           .where(eq(inventoryCountLines.id, existingLine.id));
       } else {
         const expected = toNumber(versionRow.qtyOnHand);
@@ -4639,6 +5064,7 @@ app.post('/api/inventory/count-lines', async (req, res, next) => {
           expectedQty: expected,
           countedQty: numericCount,
           status: normalizedStatus,
+          comment: normalizedComment,
         });
       }
 
@@ -4721,6 +5147,163 @@ app.post('/api/inventory/count-post', async (req, res, next) => {
         .where(eq(inventoryCountSessions.id, numericSessionId));
 
       return getCountSessionWithLines(tx, numericSessionId);
+    });
+
+    res.json(detail);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.get('/api/inventory/ops/review/:sessionId', async (req, res, next) => {
+  try {
+    const sessionId = parsePositiveInteger(req.params.sessionId, 'sessionId');
+    const minAbsVariance = Number(req.query.minAbsVariance ?? 0);
+    const direction = typeof req.query.direction === 'string' ? req.query.direction.toLowerCase() : 'all';
+
+    const detail = await getCountSessionWithLines(db, sessionId);
+    const versionIds = detail.lines.map((line) => line.productCodeVersionId);
+
+    const costRows = versionIds.length
+      ? await db
+          .select({
+            productCodeVersionId: productCodeVersions.id,
+            costCents: productCodeVersions.costCents,
+          })
+          .from(productCodeVersions)
+          .where(inArray(productCodeVersions.id, versionIds))
+      : [];
+
+    const costMap = new Map(costRows.map((row) => [Number(row.productCodeVersionId), Number(row.costCents ?? 0)]));
+
+    const filteredLines = detail.lines.filter((line) => {
+      const meetsThreshold = Math.abs(line.variance) >= minAbsVariance;
+      if (!meetsThreshold) return false;
+
+      if (direction === 'positive') return line.variance > 0;
+      if (direction === 'negative') return line.variance < 0;
+      return true;
+    });
+
+    const lines = filteredLines.map((line) => {
+      const costCents = costMap.get(line.productCodeVersionId) ?? 0;
+      return {
+        ...line,
+        differenceValueCents: Math.round(line.variance * costCents),
+        costCents,
+      };
+    });
+
+    const totals = lines.reduce(
+      (acc, line) => {
+        acc.varianceCount += 1;
+        acc.totalVariance += line.variance;
+        acc.totalValueCents += line.differenceValueCents;
+        return acc;
+      },
+      { varianceCount: 0, totalVariance: 0, totalValueCents: 0 }
+    );
+
+    res.json({ session: detail.session, lines, totals });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/inventory/ops/review/:sessionId/recount', async (req, res, next) => {
+  try {
+    const sessionId = parsePositiveInteger(req.params.sessionId, 'sessionId');
+    const lineId = parsePositiveInteger(req.body?.lineId, 'lineId');
+    const comment = typeof req.body?.comment === 'string' ? req.body.comment.trim().slice(0, 500) : null;
+
+    const detail = await db.transaction(async (tx) => {
+      const [lineRow] = await tx
+        .select({ id: inventoryCountLines.id, sessionId: inventoryCountLines.sessionId })
+        .from(inventoryCountLines)
+        .where(and(eq(inventoryCountLines.id, lineId), eq(inventoryCountLines.sessionId, sessionId)))
+        .limit(1);
+
+      if (!lineRow) {
+        throw new HttpError(404, 'Count line not found for session');
+      }
+
+      await tx
+        .update(inventoryCountLines)
+        .set({ status: 'recount', comment: comment ?? undefined })
+        .where(eq(inventoryCountLines.id, lineId));
+
+      return getCountSessionWithLines(tx, sessionId);
+    });
+
+    res.json(detail);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.post('/api/inventory/ops/review/:sessionId/approve', async (req, res, next) => {
+  try {
+    const sessionId = parsePositiveInteger(req.params.sessionId, 'sessionId');
+    const reviewerId = req.body?.reviewerId ? parsePositiveInteger(req.body.reviewerId, 'reviewerId') : null;
+    const lineIds = Array.isArray(req.body?.lineIds) ? req.body.lineIds.map((id) => Number(id)).filter((n) => Number.isInteger(n)) : [];
+
+    const detail = await db.transaction(async (tx) => {
+      const { session, lines } = await getCountSessionWithLines(tx, sessionId);
+
+      if (session.status === 'cancelled') {
+        throw new HttpError(409, 'Inventory count session is cancelled');
+      }
+
+      const targetLines = lineIds.length > 0 ? lines.filter((line) => lineIds.includes(line.id)) : lines;
+
+      if (targetLines.length === 0) {
+        throw new HttpError(400, 'No lines to approve');
+      }
+
+      for (const line of targetLines) {
+        const expected = toNumber(line.expectedQty);
+        const counted = Math.max(0, Math.round(toNumber(line.countedQty)));
+        const delta = Math.round(counted - expected);
+
+        await tx
+          .update(productCodeVersions)
+          .set({ qtyOnHand: counted, updatedAt: new Date() })
+          .where(eq(productCodeVersions.id, line.productCodeVersionId));
+
+        await tx
+          .update(inventoryCountLines)
+          .set({ countedQty: counted, status: 'resolved' })
+          .where(eq(inventoryCountLines.id, line.id));
+
+        if (delta !== 0) {
+          await tx.insert(stockLedger).values({
+            productCodeVersionId: line.productCodeVersionId,
+            reason: 'count_post',
+            qtyChange: delta,
+            refId: sessionId,
+            refTable: 'inventory_count',
+          });
+        }
+      }
+
+      await tx
+        .update(inventoryCountSessions)
+        .set({ status: 'posted', postedBy: reviewerId, postedAt: new Date() })
+        .where(eq(inventoryCountSessions.id, sessionId));
+
+      return getCountSessionWithLines(tx, sessionId);
     });
 
     res.json(detail);
@@ -7229,6 +7812,231 @@ app.get('/api/reports/inventory', async (req, res, next) => {
   }
 });
 
+app.get('/api/reports/inventory/ops', async (req, res, next) => {
+  try {
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    const startDateRaw = req.query.startDate ?? req.query.from ?? null;
+    const endDateRaw = req.query.endDate ?? req.query.to ?? null;
+    const staleDaysRaw = Number(req.query.staleDays ?? 30);
+
+    const branchId = branchIdRaw == null || String(branchIdRaw).trim() === '' ? null : parsePositiveInteger(branchIdRaw, 'branchId');
+    const startDate = startDateRaw ? parseOptionalDate(startDateRaw, 'startDate') : null;
+    const endDate = endDateRaw ? parseOptionalDate(endDateRaw, 'endDate') : null;
+    const staleDays = Number.isFinite(staleDaysRaw) && staleDaysRaw > 0 ? Math.round(staleDaysRaw) : 30;
+
+    const movementStart = startDate ? startOfDay(startDate) : startOfDay(new Date(new Date().getTime() - 6 * 24 * 60 * 60 * 1000));
+    const movementEnd = endDate ? startOfTomorrow(endDate) : startOfTomorrow(new Date());
+    const staleThreshold = new Date();
+    staleThreshold.setDate(staleThreshold.getDate() - staleDays);
+
+    const valuationFilter = branchId ? [eq(productCodeVersions.branchId, branchId)] : [];
+
+    const [valuationRow] = await db
+      .select({
+        total: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand} * COALESCE(${productCodeVersions.costCents}, 0)), 0)`,
+      })
+      .from(productCodeVersions)
+      .where(combineConditions(valuationFilter));
+
+    const valuationByBranch = await db
+      .select({
+        branchId: productCodeVersions.branchId,
+        branchName: branches.name,
+        valueCents: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand} * COALESCE(${productCodeVersions.costCents}, 0)), 0)`,
+      })
+      .from(productCodeVersions)
+      .leftJoin(branches, eq(branches.id, productCodeVersions.branchId))
+      .where(combineConditions(valuationFilter))
+      .groupBy(productCodeVersions.branchId, branches.id);
+
+    const movementConditions = [gte(stockLedger.createdAt, movementStart), lt(stockLedger.createdAt, movementEnd)];
+    if (branchId) {
+      movementConditions.push(eq(productCodeVersions.branchId, branchId));
+    }
+
+    const movements = await db
+      .select({
+        id: stockLedger.id,
+        reason: stockLedger.reason,
+        qtyChange: stockLedger.qtyChange,
+        createdAt: stockLedger.createdAt,
+        code: productCodes.code,
+        name: productCodes.name,
+        branchId: productCodeVersions.branchId,
+        branchName: branches.name,
+      })
+      .from(stockLedger)
+      .innerJoin(productCodeVersions, eq(productCodeVersions.id, stockLedger.productCodeVersionId))
+      .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+      .leftJoin(branches, eq(branches.id, productCodeVersions.branchId))
+      .where(and(...movementConditions))
+      .orderBy(desc(stockLedger.createdAt))
+      .limit(120);
+
+    const countRows = await db
+      .select({
+        id: inventoryCountSessions.id,
+        name: inventoryCountSessions.name,
+        branchId: inventoryCountSessions.branchId,
+        branchName: branches.name,
+        status: inventoryCountSessions.status,
+        scope: inventoryCountSessions.scope,
+        createdAt: inventoryCountSessions.createdAt,
+        updatedAt: inventoryCountSessions.updatedAt,
+        variance: sql`COALESCE(SUM(${inventoryCountLines.countedQty} - ${inventoryCountLines.expectedQty}), 0)`,
+      })
+      .from(inventoryCountSessions)
+      .leftJoin(branches, eq(branches.id, inventoryCountSessions.branchId))
+      .leftJoin(inventoryCountLines, eq(inventoryCountLines.sessionId, inventoryCountSessions.id))
+      .where(combineConditions(branchId ? [eq(inventoryCountSessions.branchId, branchId)] : []))
+      .groupBy(
+        inventoryCountSessions.id,
+        branches.id,
+        inventoryCountSessions.name,
+        inventoryCountSessions.branchId,
+        inventoryCountSessions.status,
+        inventoryCountSessions.scope,
+        inventoryCountSessions.createdAt,
+        inventoryCountSessions.updatedAt
+      )
+      .orderBy(desc(inventoryCountSessions.createdAt))
+      .limit(50);
+
+    const agedRows = await db
+      .select({
+        id: productCodeVersions.id,
+        productCodeId: productCodeVersions.productCodeId,
+        code: productCodes.code,
+        name: productCodes.name,
+        qtyOnHand: productCodeVersions.qtyOnHand,
+        costCents: productCodeVersions.costCents,
+        branchId: productCodeVersions.branchId,
+        branchName: branches.name,
+        lastMovement: max(stockLedger.createdAt),
+      })
+      .from(productCodeVersions)
+      .leftJoin(stockLedger, eq(stockLedger.productCodeVersionId, productCodeVersions.id))
+      .leftJoin(branches, eq(branches.id, productCodeVersions.branchId))
+      .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+      .where(combineConditions([branchId ? eq(productCodeVersions.branchId, branchId) : null, gt(productCodeVersions.qtyOnHand, 0)]))
+      .groupBy(
+        productCodeVersions.id,
+        productCodeVersions.productCodeId,
+        productCodes.code,
+        productCodes.name,
+        productCodeVersions.qtyOnHand,
+        productCodeVersions.costCents,
+        productCodeVersions.branchId,
+        branches.id
+      )
+      .limit(150);
+
+    const agedItems = agedRows
+      .map((row) => ({
+        productCodeVersionId: Number(row.id),
+        productCodeId: Number(row.productCodeId),
+        code: row.code,
+        name: row.name,
+        qtyOnHand: Number(row.qtyOnHand ?? 0),
+        costCents: row.costCents == null ? null : Number(row.costCents),
+        branchId: row.branchId == null ? null : Number(row.branchId),
+        branchName: row.branchName ?? null,
+        lastMovementAt: toIsoString(row.lastMovement),
+      }))
+      .filter((item) => {
+        if (!item.lastMovementAt) return true;
+        const lastDate = new Date(item.lastMovementAt);
+        return lastDate < staleThreshold;
+      });
+
+    const lowStockRows = await db
+      .select({
+        productCodeVersionId: productCodeVersions.id,
+        productCodeId: productCodeVersions.productCodeId,
+        code: productCodes.code,
+        name: productCodes.name,
+        branchId: productCodeVersions.branchId,
+        branchName: branches.name,
+        qtyOnHand: productCodeVersions.qtyOnHand,
+        qtyReserved: productCodeVersions.qtyReserved,
+        reorderPoint: productCodeVersions.reorderPoint,
+        reorderQty: productCodeVersions.reorderQty,
+      })
+      .from(productCodeVersions)
+      .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+      .leftJoin(branches, eq(branches.id, productCodeVersions.branchId))
+      .where(
+        combineConditions([
+          branchId ? eq(productCodeVersions.branchId, branchId) : null,
+          gte(productCodeVersions.reorderPoint, 0),
+          lte(sql`(${productCodeVersions.qtyOnHand} - ${productCodeVersions.qtyReserved})`, productCodeVersions.reorderPoint),
+        ])
+      )
+      .orderBy(asc(productCodes.code))
+      .limit(80);
+
+    res.json({
+      filters: {
+        branchId,
+        startDate: movementStart.toISOString(),
+        endDate: movementEnd.toISOString(),
+        staleDays,
+      },
+      valuation: {
+        totalCents: Number(valuationRow?.total ?? 0),
+        byBranch: valuationByBranch.map((row) => ({
+          branchId: row.branchId == null ? null : Number(row.branchId),
+          branchName: row.branchName ?? null,
+          valueCents: Number(row.valueCents ?? 0),
+        })),
+      },
+      movements: movements.map((row) => ({
+        id: Number(row.id),
+        reason: row.reason,
+        qtyChange: Number(row.qtyChange ?? 0),
+        createdAt: toIsoString(row.createdAt),
+        code: row.code,
+        name: row.name ?? row.code,
+        branchId: row.branchId == null ? null : Number(row.branchId),
+        branchName: row.branchName ?? null,
+      })),
+      counts: countRows.map((row) => ({
+        id: Number(row.id),
+        name: row.name,
+        status: row.status,
+        scope: row.scope,
+        branchId: row.branchId == null ? null : Number(row.branchId),
+        branchName: row.branchName ?? null,
+        createdAt: toIsoString(row.createdAt),
+        updatedAt: toIsoString(row.updatedAt),
+        variance: toNumber(row.variance),
+      })),
+      aged: {
+        thresholdDate: staleThreshold.toISOString(),
+        items: agedItems,
+      },
+      lowStock: lowStockRows.map((row) => ({
+        productCodeVersionId: Number(row.productCodeVersionId),
+        productCodeId: Number(row.productCodeId),
+        code: row.code,
+        name: row.name,
+        branchId: row.branchId == null ? null : Number(row.branchId),
+        branchName: row.branchName ?? null,
+        qtyOnHand: Number(row.qtyOnHand ?? 0),
+        qtyReserved: Number(row.qtyReserved ?? 0),
+        reorderPoint: Number(row.reorderPoint ?? 0),
+        reorderQty: Number(row.reorderQty ?? 0),
+      })),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
 app.get('/api/reports/marketing', async (req, res, next) => {
   try {
     const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
@@ -9331,6 +10139,138 @@ app.get('/api/inventory/component-tree', async (req, res, next) => {
   try {
     const snapshot = await getInventoryComponentSnapshot();
     res.json(snapshot);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/inventory/ops/dashboard', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const tomorrowStart = startOfTomorrow(now);
+
+    const [
+      [totalValueRow],
+      [branchCoverageRow],
+      [activeCountRow],
+      lowStockRows,
+      movementRows,
+      countSessionRows,
+    ] = await Promise.all([
+      db
+        .select({
+          total: sql`COALESCE(SUM(${productCodeVersions.qtyOnHand} * COALESCE(${productCodeVersions.costCents}, 0)), 0)`,
+        })
+        .from(productCodeVersions),
+      db.select({ count: sql`COUNT(DISTINCT ${productCodeVersions.branchId})` }).from(productCodeVersions),
+      db
+        .select({ count: sql`COUNT(*)` })
+        .from(inventoryCountSessions)
+        .where(inArray(inventoryCountSessions.status, ['open', 'review'])),
+      db
+        .select({
+          productCodeVersionId: productCodeVersions.id,
+          productCodeId: productCodeVersions.productCodeId,
+          code: productCodes.code,
+          name: productCodes.name,
+          branchId: productCodeVersions.branchId,
+          branchName: branches.name,
+          qtyOnHand: productCodeVersions.qtyOnHand,
+          qtyReserved: productCodeVersions.qtyReserved,
+        })
+        .from(productCodeVersions)
+        .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+        .leftJoin(branches, eq(branches.id, productCodeVersions.branchId))
+        .where(lte(sql`(${productCodeVersions.qtyOnHand} - ${productCodeVersions.qtyReserved})`, 0))
+        .orderBy(asc(productCodes.code))
+        .limit(20),
+      db
+        .select({
+          id: stockLedger.id,
+          reason: stockLedger.reason,
+          qtyChange: stockLedger.qtyChange,
+          createdAt: stockLedger.createdAt,
+          code: productCodes.code,
+          name: productCodes.name,
+          branchId: productCodeVersions.branchId,
+          branchName: branches.name,
+        })
+        .from(stockLedger)
+        .innerJoin(productCodeVersions, eq(productCodeVersions.id, stockLedger.productCodeVersionId))
+        .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
+        .leftJoin(branches, eq(branches.id, productCodeVersions.branchId))
+        .where(and(gte(stockLedger.createdAt, todayStart), lt(stockLedger.createdAt, tomorrowStart)))
+        .orderBy(desc(stockLedger.createdAt))
+        .limit(25),
+      db
+        .select({
+          id: inventoryCountSessions.id,
+          branchId: inventoryCountSessions.branchId,
+          branchName: branches.name,
+          scope: inventoryCountSessions.scope,
+          status: inventoryCountSessions.status,
+          snapshotAt: inventoryCountSessions.snapshotAt,
+          createdAt: inventoryCountSessions.createdAt,
+          updatedAt: inventoryCountSessions.updatedAt,
+        })
+        .from(inventoryCountSessions)
+        .leftJoin(branches, eq(branches.id, inventoryCountSessions.branchId))
+        .orderBy(desc(inventoryCountSessions.createdAt))
+        .limit(20),
+    ]);
+
+    const lowStock = lowStockRows.map((row) => {
+      const qtyOnHand = Number(row.qtyOnHand ?? 0);
+      const qtyReserved = Number(row.qtyReserved ?? 0);
+      const availableQty = qtyOnHand - qtyReserved;
+
+      return {
+        productCodeVersionId: Number(row.productCodeVersionId),
+        productCodeId: Number(row.productCodeId),
+        code: row.code,
+        name: row.name ?? row.code,
+        branchId: row.branchId == null ? null : Number(row.branchId),
+        branchName: row.branchName ?? null,
+        qtyOnHand,
+        qtyReserved,
+        availableQty,
+      };
+    });
+
+    const movementsToday = movementRows.map((row) => ({
+      id: Number(row.id),
+      reason: row.reason,
+      qtyChange: Number(row.qtyChange ?? 0),
+      createdAt: row.createdAt,
+      code: row.code,
+      name: row.name ?? row.code,
+      branchId: row.branchId == null ? null : Number(row.branchId),
+      branchName: row.branchName ?? null,
+    }));
+
+    const countSessions = countSessionRows.map((row) => ({
+      id: Number(row.id),
+      branchId: row.branchId == null ? null : Number(row.branchId),
+      branchName: row.branchName ?? null,
+      scope: row.scope,
+      status: row.status,
+      snapshotAt: row.snapshotAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+
+    res.json({
+      metrics: {
+        totalStockValueCents: Number(totalValueRow?.total ?? 0),
+        activeCountSessions: Number(activeCountRow?.count ?? 0),
+        branchesWithStock: Number(branchCoverageRow?.count ?? 0),
+        lowStockSkus: lowStock.length,
+      },
+      lowStock,
+      movementsToday,
+      countSessions,
+    });
   } catch (error) {
     next(error);
   }

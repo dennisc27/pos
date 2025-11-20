@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
@@ -917,10 +918,11 @@ export default function InventoryBarcodePage() {
                             ) : (
                               <span className="text-xs text-slate-400">Sin precio</span>
                             )}
-                            <img
+                            <Image
                               src={buildQrUrl(cell.qrPayload, 160)}
                               alt={`QR ${cell.code}`}
-                              loading="lazy"
+                              width={160}
+                              height={160}
                               className="h-16 w-16 rounded bg-white p-1 shadow-inner"
                             />
                           </div>

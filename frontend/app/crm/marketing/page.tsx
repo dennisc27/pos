@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Calendar, Megaphone, MessageSquarePlus, Plus, Rocket, Send, Users } from "lucide-react";
 
+import { formatDateTimeForDisplay } from "@/lib/utils";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
 type MarketingTemplate = {
@@ -52,13 +54,7 @@ type SegmentsResponse = { segments: MarketingSegment[] };
 type CampaignsResponse = { campaigns: MarketingCampaign[] };
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return `${parsed.toLocaleDateString()} ${parsed.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit"
-  })}`;
+  return formatDateTimeForDisplay(value);
 }
 
 export default function CrmMarketingPage() {

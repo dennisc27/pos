@@ -250,11 +250,22 @@ o Block id
 - [x] Rework - Implement the "Loan Book" report with metrics, table, and date dialog using schema.sql data.
 - [x] Rework - Implement the "Products Aged" report with metrics, table, and date dialog using schema.sql data.
 - [x] Rework - Implement the "Voids / Refund by staff who sold it" report with metrics, table, and date dialog using schema.sql data.
-- [ ] On point o sale - new sale page: when the sale is paid and completed, the products doesn't update the new quantities available in stock unless the page is refreshed. Please update them after completing the sale, so the user can make another sale right away with the right qty of available item in stock.
-- [ ] repairs intake page: the change and add buttons for customer are not working. check the implementation on new sale for guidance. Also make the job number auto generated and make it disabled so the user can change it.\
-- [ ] make sure the repairs intake page is properly connected to the database and uses the right columns on schema.sql
-- [ ] make sure the entire app uses the format for date dd/MM/yyyy and not the mm/dd/yyyy.
-- [ ] on the inventory section on the left bar, add a dashboard ops button that will include a title, metrics (zones, active counts, sucursales), and an inventory count history table with its status.
+- [x] On point o sale - new sale page: when the sale is paid and completed, the products doesn't update the new quantities available in stock unless the page is refreshed. Please update them after completing the sale, so the user can make another sale right away with the right qty of available item in stock.
+- [x] repairs intake page: the change and add buttons for customer are not working. check the implementation on new sale for guidance. Also make the job number auto generated and make it disabled so the user can change it.\
+- [x] make sure the repairs intake page is properly connected to the database and uses the right columns on schema.sql
+- [x] make sure the entire app uses the format for date dd/MM/yyyy and not the mm/dd/yyyy.
+- [x] on the inventory section on the left bar, add a dashboard ops button that will include a title, metrics (zones, active counts, sucursales), and an inventory count history table with its status.
+- [x] Inventory - OPS Dashboard (/inventory/ops/dashboard) - BE - Aggregate total stock value from product_code_versions.qty_on_hand * cost_cents, flag low-stock based on available stock vs reserved/zero, surface today’s stock_ledger movements, and list inv_count_sessions in open/review status as pending counts/history.
+- [x] Inventory - OPS Dashboard (/frontend/app/inventory/ops/dashboard) - FE - Cards for stock value and low-stock alerts, feed of today’s stock_ledger entries, and a table of open/review count sessions sourced from the OPS APIs.
+- [x] Inventory - OPS Schema Alignment (/schema.sql, /extraschema.sql) - Validate OPS flows against existing tables (product_code_versions, stock_ledger, inv_count_sessions, inv_count_lines); document any required additions such as bin/location metadata or reorder thresholds without breaking current enums/statuses (scope full|cycle, status open|review|posted|cancelled).
+- [x] Inventory - Count Sessions (/backend/app/inventory/ops) - BE - CRUD endpoints matching inv_count_sessions (scope full/cycle, status transitions open→review→posted|cancelled), support location/branch scoping, assign counters, warn if stock_ledger activity occurs after snapshot_at, and validate writes against inv_count_lines.
+- [x] Inventory - Count Sessions (/frontend/app/inventory/ops/count-sessions) - FE - UI to create/edit sessions with name/type, branch/location scope, start/due dates, assigned counters, status badges for open/review/posted/cancelled, and freeze/movement warnings tied to API responses.
+- [x] Inventory - Counting Interface (/backend/app/inventory/ops/count) - BE - Endpoints for barcode/SKU/name lookup using product_codes/product_code_versions, accumulate multiple counts per item/location, auto-save inv_count_lines rows, and return recent scans with summed counted_qty per session.
+- [x] Inventory - Counting Interface (/frontend/app/inventory/ops/count) - FE - Responsive scan/search/browse UI showing item details and branch/bin context, counted quantity entry with auto-save feedback, and last scanned list with aggregated quantities per session.
+- [x] Inventory - Discrepancy Review (/backend/app/inventory/ops/review) - BE - Compare expected vs counted using inv_count_lines vs product_code_versions.qty_on_hand, filters for variance size/value and +/- direction, allow recount requests/comments, and on approval create stock_ledger entries with posted_by/posted_at updates on the session.
+- [x] Inventory - Discrepancy Review (/frontend/app/inventory/ops/review) - FE - Comparison grid with filters, recount request action, per-line comments, and approval UI that posts adjustments and reflects reviewer/date from the backend.
+- [x] Inventory - Reporting & Analytics (/reports/inventory/ops) - BE - Reports for inventory valuation (branch/category/supplier), stock movements by date/type/location/user, count history (inv_count_sessions/lines), aged inventory (no stock_ledger movement for X days), and low stock using existing quantity fields.
+- [x] Inventory - Reporting & Analytics (/frontend/app/reports/inventory/ops) - FE - Report pages with filters/date ranges and tables/cards for valuation, movement logs, count history, aged inventory, and low-stock summaries using the OPS report endpoints.
 
 
 

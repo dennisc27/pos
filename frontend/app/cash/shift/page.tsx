@@ -16,11 +16,11 @@ import {
 
 import { formatCurrency } from "@/components/cash/utils";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
+import { formatDateTimeForDisplay } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
 const numberFormatter = new Intl.NumberFormat("es-DO");
-const dateTimeFormatter = new Intl.DateTimeFormat("es-DO", { dateStyle: "medium", timeStyle: "short" });
 const OVER_SHORT_THRESHOLD_CENTS = 5_000; // RD$50 variance threshold
 
 type ApiError = Error & { status?: number };
@@ -184,12 +184,7 @@ const formatDate = (value: string | null | undefined) => {
     return "—";
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return dateTimeFormatter.format(date);
+  return formatDateTimeForDisplay(value);
 };
 
 export default function CashShiftPage() {

@@ -26,6 +26,7 @@ import { ReceiptPreview } from "@/components/pos/receipt-preview";
 import { formatCurrency } from "@/components/pos/utils";
 import type { CartLine, SaleSummary, TenderBreakdown, Product, ProductCategory } from "@/components/pos/types";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
+import { formatDateForDisplay } from "@/lib/utils";
 
 const TENDER_METHODS = ["cash", "card", "transfer", "store_credit", "gift"] as const;
 type TenderMethod = (typeof TENDER_METHODS)[number];
@@ -228,10 +229,8 @@ export default function PosPage() {
     return Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadInventory() {
+  const loadInventory = useCallback(
+    async (options?: { signal?: AbortSignal }) => {
       try {
         setIsLoadingProducts(true);
         setProductError(null);
@@ -241,7 +240,9 @@ export default function PosPage() {
           status: "active",
           availability: "in_stock",
         });
-        const response = await fetch(`${API_BASE_URL}/api/inventory?${params.toString()}`);
+        const response = await fetch(`${API_BASE_URL}/api/inventory?${params.toString()}`, {
+          signal: options?.signal,
+        });
 
         if (!response.ok) {
           throw new Error(`Failed to load inventory (${response.status})`);
@@ -252,7 +253,7 @@ export default function PosPage() {
           categoryOptions?: Array<{ id: number | null; name: string | null }>;
         } = await response.json();
 
-        if (cancelled) {
+        if (options?.signal?.aborted) {
           return;
         }
 
@@ -279,22 +280,26 @@ export default function PosPage() {
         setCategories(mappedCategories);
       } catch (error) {
         console.error("Failed to load inventory for POS", error);
-        if (!cancelled) {
+        if (!options?.signal?.aborted) {
           setProductError("Unable to load inventory from the server.");
         }
       } finally {
-        if (!cancelled) {
+        if (!options?.signal?.aborted) {
           setIsLoadingProducts(false);
         }
       }
-    }
+    },
+    []
+  );
 
-    loadInventory();
+  useEffect(() => {
+    const controller = new AbortController();
+    loadInventory({ signal: controller.signal });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, []);
+  }, [loadInventory]);
 
   const loadFullInventory = useCallback(async () => {
     try {
@@ -774,6 +779,12 @@ export default function PosPage() {
       setFinalizeMessage(printPayload.message ?? "Drawer opened and receipt queued.");
       setSuccessInvoiceId(invoice.number ?? null);
       setSuccessDialogOpen(true);
+
+      // Refresh inventory so available quantities reflect the completed sale
+      await loadInventory();
+      if (isInventoryModalOpen) {
+        await loadFullInventory();
+      }
     } catch (error) {
       console.error("Finalize sale failed", error);
       setFinalizeState("error");
@@ -783,6 +794,9 @@ export default function PosPage() {
     activeBranch,
     branchError,
     cartLines,
+    isInventoryModalOpen,
+    loadFullInventory,
+    loadInventory,
     resolveProductVersionId,
     saleSummary.cashDue,
     selectedCustomerId,
@@ -1150,13 +1164,9 @@ export default function PosPage() {
                       (value): value is string => typeof value === "string" && value.trim().length > 0
                     );
                     const descriptor = descriptorParts.join(" • ");
-                    const activityDate = customer.lastActivityAt
-                      ? new Date(customer.lastActivityAt)
+                    const activityLabel = customer.lastActivityAt
+                      ? `Last activity ${formatDateForDisplay(customer.lastActivityAt)}`
                       : null;
-                    const activityLabel =
-                      activityDate && !Number.isNaN(activityDate.valueOf())
-                        ? `Last activity ${activityDate.toLocaleDateString()}`
-                        : null;
                     const isSelected = selectedCustomerId === customer.id;
 
                     return (

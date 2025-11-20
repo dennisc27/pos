@@ -17,6 +17,7 @@ import {
   ShieldAlert,
   Users
 } from "lucide-react";
+import { formatDateForDisplay, formatDateTimeForDisplay } from "@/lib/utils";
 
 import { formatCurrencyFromCents } from "@/lib/utils";
 
@@ -130,20 +131,11 @@ function fullName(customer: CustomerSummary) {
 }
 
 function formatDate(value?: string | null) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString();
+  return formatDateForDisplay(value);
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return `${parsed.toLocaleDateString()} ${parsed.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit"
-  })}`;
+  return formatDateTimeForDisplay(value);
 }
 
 export default function CrmCustomersPage() {

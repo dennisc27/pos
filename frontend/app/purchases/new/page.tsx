@@ -6,26 +6,15 @@ import { ClipboardList, Loader2, PackagePlus, Plus, Printer, Search, Trash2, X }
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 import { formatCurrency } from "@/components/pos/utils";
+import { formatDateForDisplay } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 const MAX_LABELS = 200;
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-const formatDisplayDate = (value: string | null | undefined) => {
-  if (!value) return "-";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("es-DO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-};
+const formatDisplayDate = (value: string | null | undefined) =>
+  value ? formatDateForDisplay(value) : "-";
 
 function parseAmountToCents(value: string): number | null {
   if (!value || !value.trim()) {
