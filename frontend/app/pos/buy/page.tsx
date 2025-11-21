@@ -23,6 +23,7 @@ import {
 import { PosCard } from "@/components/pos/pos-card";
 import { formatCurrency } from "@/components/pos/utils";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
+import { AddCustomerDialog } from "@/components/customer/add-customer-dialog";
 
 const categories = [
   "Mobile phones",
@@ -84,25 +85,13 @@ const WALK_IN_SELLER: SellerProfile = {
   notes: "",
 };
 
-const initialItems: IntakeItem[] = [
-  {
-    id: createId(),
-    description: "iPhone 14 Pro 256GB",
-    category: "Mobile phones",
-    condition: "like_new",
-    serial: "G0N53Q2M3P",
-    accessories: "Box, USB-C cable, MagSafe case",
-    notes: "Minor scuff on frame. Battery health 89%.",
-    offerAmount: 25000,
-    photos: []
-  }
-];
+const initialItems: IntakeItem[] = [];
 
 const initialSeller: SellerProfile = {
-  name: "Juan Pérez",
-  document: "402-0102032-9",
-  phone: "809-555-7832",
-  notes: "Prefers cash payouts. Repeat seller from Gazcue."
+  name: "",
+  document: "",
+  phone: "",
+  notes: "",
 };
 
 function readFiles(files: FileList | null) {
@@ -126,9 +115,9 @@ function readFiles(files: FileList | null) {
 
 export default function PosBuyPage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
-  const [seller, setSeller] = useState<SellerProfile>(initialSeller);
+  const [seller, setSeller] = useState<SellerProfile>(WALK_IN_SELLER);
   const [linkedSellerId, setLinkedSellerId] = useState<number | null>(null);
-  const [items, setItems] = useState<IntakeItem[]>(initialItems);
+  const [items, setItems] = useState<IntakeItem[]>([]);
   const [payoutMethod, setPayoutMethod] = useState<"cash" | "transfer">("cash");
   const [isPrinting, setIsPrinting] = useState(false);
   const [status, setStatus] = useState<{ tone: "success" | "error"; message: string } | null>(null);
@@ -139,7 +128,7 @@ export default function PosBuyPage() {
   const [sellerSearchResults, setSellerSearchResults] = useState<SellerSearchResult[]>([]);
   const [sellerSearchError, setSellerSearchError] = useState<string | null>(null);
   const [isSearchingSellers, setIsSearchingSellers] = useState(false);
-  const [sellerForm, setSellerForm] = useState<SellerProfile>(initialSeller);
+  const [sellerForm, setSellerForm] = useState<SellerProfile>(WALK_IN_SELLER);
   const [sellerFormError, setSellerFormError] = useState<string | null>(null);
   const [isSuccessDialogOpen, setSuccessDialogOpen] = useState(false);
   const [purchaseData, setPurchaseData] = useState<{
@@ -318,19 +307,7 @@ export default function PosBuyPage() {
   const resetPage = () => {
     setSeller(WALK_IN_SELLER);
     setLinkedSellerId(null);
-    setItems([
-      {
-        id: createId(),
-        description: "",
-        category: categories[0] ?? "Other",
-        condition: "used",
-        serial: "",
-        accessories: "",
-        notes: "",
-        offerAmount: 0,
-        photos: [],
-      },
-    ]);
+    setItems([]);
     setPayoutMethod("cash");
     setManagerNotes("");
     setStatus(null);
@@ -973,6 +950,25 @@ export default function PosBuyPage() {
         </div>
       </div>
     ) : null}
+
+    {/* Add Customer Dialog - Add mode (full form) - Sellers are customers */}
+    <AddCustomerDialog
+      isOpen={isSellerDialogOpen && sellerDialogMode === "add"}
+      onClose={closeSellerDialog}
+      onSuccess={(customer) => {
+        const nextSeller: SellerProfile = {
+          name: `${customer.firstName} ${customer.lastName}`.trim(),
+          document: "",
+          phone: "",
+          notes: "",
+        };
+        setSeller(nextSeller);
+        setLinkedSellerId(customer.id);
+        closeSellerDialog();
+      }}
+      onError={(error) => setSellerSearchError(error)}
+    />
+
     {isSuccessDialogOpen && purchaseData ? (
       <div
         role="dialog"

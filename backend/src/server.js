@@ -4,6 +4,8 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { connectDB, closeConnection, db } from './db/connection.js';
 import {
   branches,
@@ -111,7 +113,10 @@ const PORT = process.env.PORT || 3001;
 const frontendBaseUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "same-site" },
+  crossOriginEmbedderPolicy: false
+}));
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
@@ -870,7 +875,6 @@ async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = nu
     .where(eq(orderItems.orderId, invoiceRow.orderId))
     .orderBy(asc(orderItems.id));
 
-  const subtotalCents = Number(invoiceRow.subtotalCents ?? 0);
   // IMPORTANT: priceCents already includes ITBIS (see PRICING_MODEL.md)
   // Calculate tax for display/reporting only, don't add it to total
   const DEFAULT_TAX_RATE = 0.18; // 18% ITBIS
@@ -906,6 +910,12 @@ async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = nu
       restockable: Boolean(row.isActive ?? true),
     };
   });
+
+  // Calculate totals from lines (prices already include ITBIS)
+  // IMPORTANT: Do NOT add tax to totalCents - prices already include tax
+  const totalCents = lines.reduce((sum, line) => sum + line.totalCents, 0);
+  const subtotalCents = lines.reduce((sum, line) => sum + line.subtotalCents, 0);
+  const taxCents = lines.reduce((sum, line) => sum + line.taxCents, 0);
 
   const paymentRows = await client
     .select({
@@ -944,7 +954,7 @@ async function loadInvoiceWithDetails(client, { invoiceId = null, invoiceNo = nu
       customerId: invoiceRow.customerId == null ? null : Number(invoiceRow.customerId),
       subtotalCents,
       taxCents,
-      totalCents: Number(invoiceRow.totalCents ?? subtotalCents + taxCents),
+      totalCents: Number(invoiceRow.totalCents ?? totalCents),
       createdAt: invoiceRow.createdAt instanceof Date
         ? invoiceRow.createdAt.toISOString()
         : toIsoString(invoiceRow.createdAt),
@@ -6336,11 +6346,275 @@ app.get('/api/interest-models', async (req, res, next) => {
         minPrincipalCents: interestModels.minPrincipalCents,
         maxPrincipalCents: interestModels.maxPrincipalCents,
         lateFeeBps: interestModels.lateFeeBps,
+        defaultTermCount: interestModels.defaultTermCount,
       })
       .from(interestModels)
       .orderBy(asc(interestModels.name));
 
     res.json({ interestModels: models });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/interest-models', async (req, res, next) => {
+  try {
+    const {
+      name,
+      description = null,
+      rateType = 'simple',
+      periodDays = 30,
+      interestRateBps,
+      graceDays = 0,
+      minPrincipalCents = 0,
+      maxPrincipalCents = null,
+      lateFeeBps = 0,
+      defaultTermCount = 1,
+    } = req.body ?? {};
+
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    if (name.length > 120) {
+      return res.status(400).json({ error: 'name must be 120 characters or less' });
+    }
+
+    if (interestRateBps == null || !Number.isInteger(Number(interestRateBps)) || Number(interestRateBps) < 0) {
+      return res.status(400).json({ error: 'interestRateBps must be a non-negative integer' });
+    }
+
+    if (!Number.isInteger(Number(periodDays)) || Number(periodDays) <= 0) {
+      return res.status(400).json({ error: 'periodDays must be a positive integer' });
+    }
+
+    if (!Number.isInteger(Number(defaultTermCount)) || Number(defaultTermCount) <= 0) {
+      return res.status(400).json({ error: 'defaultTermCount must be a positive integer' });
+    }
+
+    if (!['flat', 'simple', 'compound'].includes(rateType)) {
+      return res.status(400).json({ error: 'rateType must be one of: flat, simple, compound' });
+    }
+
+    const normalizedName = name.trim();
+    const normalizedDescription = description && typeof description === 'string' ? description.trim() || null : null;
+    const normalizedGraceDays = Math.max(0, Number.isInteger(Number(graceDays)) ? Number(graceDays) : 0);
+    const normalizedLateFeeBps = Math.max(0, Number.isInteger(Number(lateFeeBps)) ? Number(lateFeeBps) : 0);
+    const normalizedMinPrincipalCents = Math.max(0, Number.isInteger(Number(minPrincipalCents)) ? Number(minPrincipalCents) : 0);
+    const normalizedMaxPrincipalCents = maxPrincipalCents != null && Number.isInteger(Number(maxPrincipalCents)) && Number(maxPrincipalCents) > 0 ? Number(maxPrincipalCents) : null;
+    const normalizedDefaultTermCount = Math.max(1, Number.isInteger(Number(defaultTermCount)) ? Number(defaultTermCount) : 1);
+
+    if (normalizedMaxPrincipalCents != null && normalizedMaxPrincipalCents < normalizedMinPrincipalCents) {
+      return res.status(400).json({ error: 'maxPrincipalCents cannot be less than minPrincipalCents' });
+    }
+
+    await db
+      .insert(interestModels)
+      .values({
+        name: normalizedName,
+        description: normalizedDescription,
+        rateType,
+        periodDays: Number(periodDays),
+        interestRateBps: Number(interestRateBps),
+        graceDays: normalizedGraceDays,
+        minPrincipalCents: normalizedMinPrincipalCents,
+        maxPrincipalCents: normalizedMaxPrincipalCents,
+        lateFeeBps: normalizedLateFeeBps,
+        defaultTermCount: normalizedDefaultTermCount,
+      });
+
+    // Get the newly created model by name and most recent ID
+    const [model] = await db
+      .select({
+        id: interestModels.id,
+        name: interestModels.name,
+        description: interestModels.description,
+        rateType: interestModels.rateType,
+        periodDays: interestModels.periodDays,
+        interestRateBps: interestModels.interestRateBps,
+        graceDays: interestModels.graceDays,
+        minPrincipalCents: interestModels.minPrincipalCents,
+        maxPrincipalCents: interestModels.maxPrincipalCents,
+        lateFeeBps: interestModels.lateFeeBps,
+        defaultTermCount: interestModels.defaultTermCount,
+      })
+      .from(interestModels)
+      .where(eq(interestModels.name, normalizedName))
+      .orderBy(desc(interestModels.id))
+      .limit(1);
+
+    if (!model) {
+      throw new HttpError(500, 'Failed to retrieve created interest model');
+    }
+
+    res.status(201).json({ interestModel: model });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put('/api/interest-models/:id', async (req, res, next) => {
+  try {
+    const modelId = Number(req.params.id);
+
+    if (!Number.isInteger(modelId) || modelId <= 0) {
+      return res.status(400).json({ error: 'Invalid interest model ID' });
+    }
+
+    const {
+      name,
+      description,
+      rateType,
+      periodDays,
+      interestRateBps,
+      graceDays,
+      minPrincipalCents,
+      maxPrincipalCents,
+      lateFeeBps,
+      defaultTermCount,
+    } = req.body ?? {};
+
+    const [existing] = await db
+      .select({ id: interestModels.id })
+      .from(interestModels)
+      .where(eq(interestModels.id, modelId))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Interest model not found' });
+    }
+
+    const updateData = {};
+
+    if (name !== undefined) {
+      if (typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: 'name must be a non-empty string' });
+      }
+      if (name.length > 120) {
+        return res.status(400).json({ error: 'name must be 120 characters or less' });
+      }
+      updateData.name = name.trim();
+    }
+
+    if (description !== undefined) {
+      updateData.description = description && typeof description === 'string' ? description.trim() || null : null;
+    }
+
+    if (rateType !== undefined) {
+      if (!['flat', 'simple', 'compound'].includes(rateType)) {
+        return res.status(400).json({ error: 'rateType must be one of: flat, simple, compound' });
+      }
+      updateData.rateType = rateType;
+    }
+
+    if (periodDays !== undefined) {
+      if (!Number.isInteger(Number(periodDays)) || Number(periodDays) <= 0) {
+        return res.status(400).json({ error: 'periodDays must be a positive integer' });
+      }
+      updateData.periodDays = Number(periodDays);
+    }
+
+    if (interestRateBps !== undefined) {
+      if (!Number.isInteger(Number(interestRateBps)) || Number(interestRateBps) < 0) {
+        return res.status(400).json({ error: 'interestRateBps must be a non-negative integer' });
+      }
+      updateData.interestRateBps = Number(interestRateBps);
+    }
+
+    if (graceDays !== undefined) {
+      updateData.graceDays = Math.max(0, Number.isInteger(Number(graceDays)) ? Number(graceDays) : 0);
+    }
+
+    if (lateFeeBps !== undefined) {
+      updateData.lateFeeBps = Math.max(0, Number.isInteger(Number(lateFeeBps)) ? Number(lateFeeBps) : 0);
+    }
+
+    if (minPrincipalCents !== undefined) {
+      updateData.minPrincipalCents = Math.max(0, Number.isInteger(Number(minPrincipalCents)) ? Number(minPrincipalCents) : 0);
+    }
+
+    if (maxPrincipalCents !== undefined) {
+      updateData.maxPrincipalCents = maxPrincipalCents != null && Number.isInteger(Number(maxPrincipalCents)) && Number(maxPrincipalCents) > 0 ? Number(maxPrincipalCents) : null;
+    }
+
+    if (defaultTermCount !== undefined) {
+      if (!Number.isInteger(Number(defaultTermCount)) || Number(defaultTermCount) <= 0) {
+        return res.status(400).json({ error: 'defaultTermCount must be a positive integer' });
+      }
+      updateData.defaultTermCount = Number(defaultTermCount);
+    }
+
+    if (updateData.maxPrincipalCents != null && updateData.minPrincipalCents != null && updateData.maxPrincipalCents < updateData.minPrincipalCents) {
+      return res.status(400).json({ error: 'maxPrincipalCents cannot be less than minPrincipalCents' });
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    await db
+      .update(interestModels)
+      .set(updateData)
+      .where(eq(interestModels.id, modelId));
+
+    const [updated] = await db
+      .select({
+        id: interestModels.id,
+        name: interestModels.name,
+        description: interestModels.description,
+        rateType: interestModels.rateType,
+        periodDays: interestModels.periodDays,
+        interestRateBps: interestModels.interestRateBps,
+        graceDays: interestModels.graceDays,
+        minPrincipalCents: interestModels.minPrincipalCents,
+        maxPrincipalCents: interestModels.maxPrincipalCents,
+        lateFeeBps: interestModels.lateFeeBps,
+        defaultTermCount: interestModels.defaultTermCount,
+      })
+      .from(interestModels)
+      .where(eq(interestModels.id, modelId))
+      .limit(1);
+
+    res.json({ interestModel: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/interest-models/:id', async (req, res, next) => {
+  try {
+    const modelId = Number(req.params.id);
+
+    if (!Number.isInteger(modelId) || modelId <= 0) {
+      return res.status(400).json({ error: 'Invalid interest model ID' });
+    }
+
+    const [existing] = await db
+      .select({ id: interestModels.id })
+      .from(interestModels)
+      .where(eq(interestModels.id, modelId))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Interest model not found' });
+    }
+
+    // Check if model is being used by any loans
+    const [loanUsingModel] = await db
+      .select({ id: loans.id })
+      .from(loans)
+      .where(eq(loans.interestModelId, modelId))
+      .limit(1);
+
+    if (loanUsingModel) {
+      return res.status(409).json({ error: 'Cannot delete interest model that is in use by existing loans' });
+    }
+
+    await db
+      .delete(interestModels)
+      .where(eq(interestModels.id, modelId));
+
+    res.status(204).send();
   } catch (error) {
     next(error);
   }
@@ -6358,6 +6632,70 @@ app.post('/api/loans', async (req, res, next) => {
 
     if (error instanceof Error && error.message === 'FAILED_TO_CREATE_LOAN') {
       return res.status(500).json({ error: 'Unable to create loan' });
+    }
+
+    next(error);
+  }
+});
+
+// IMPORTANT: This route must come BEFORE /api/loans/:id to avoid matching "next-ticket" as an ID
+app.get('/api/loans/next-ticket', async (req, res, next) => {
+  try {
+    const prefix = typeof req.query.prefix === 'string' && req.query.prefix.trim().length > 0
+      ? req.query.prefix.trim()
+      : 'PAWN-';
+    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
+    let branchIdFilter = null;
+
+    if (branchIdRaw !== null && branchIdRaw !== undefined && String(branchIdRaw).trim().length > 0) {
+      try {
+        branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
+      } catch (error) {
+        if (error instanceof HttpError) {
+          branchIdFilter = null;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    const filters = [isNotNull(loans.ticketNumber)];
+
+    if (branchIdFilter) {
+      filters.push(eq(loans.branchId, branchIdFilter));
+    }
+
+    if (prefix) {
+      filters.push(like(loans.ticketNumber, `${prefix}%`));
+    }
+
+    let query = db
+      .select({ ticketNumber: loans.ticketNumber })
+      .from(loans);
+
+    if (filters.length > 0) {
+      query = query.where(and(...filters));
+    }
+
+    const [latest] = await query.orderBy(desc(loans.createdAt), desc(loans.id)).limit(1);
+
+    let nextNumeric = 1;
+    let padLength = 6;
+
+    if (latest?.ticketNumber) {
+      const match = String(latest.ticketNumber).match(/(\d+)(?!.*\d)/);
+      if (match) {
+        padLength = Math.max(match[1].length, padLength);
+        nextNumeric = Number(match[1]) + 1;
+      }
+    }
+
+    const nextTicket = `${prefix}${String(nextNumeric).padStart(padLength, '0')}`;
+
+    res.json({ ticketNumber: nextTicket });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
     }
 
     next(error);
@@ -13210,69 +13548,6 @@ app.post('/api/gift-cards/redeem', async (req, res, next) => {
   }
 });
 
-app.get('/api/loans/next-ticket', async (req, res, next) => {
-  try {
-    const prefix = typeof req.query.prefix === 'string' && req.query.prefix.trim().length > 0
-      ? req.query.prefix.trim()
-      : 'PAWN-';
-    const branchIdRaw = req.query.branchId ?? req.query.branch_id ?? null;
-    let branchIdFilter = null;
-
-    if (branchIdRaw !== null && branchIdRaw !== undefined && String(branchIdRaw).trim().length > 0) {
-      try {
-        branchIdFilter = parsePositiveInteger(branchIdRaw, 'branchId');
-      } catch (error) {
-        if (error instanceof HttpError) {
-          branchIdFilter = null;
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    const filters = [isNotNull(loans.ticketNumber)];
-
-    if (branchIdFilter) {
-      filters.push(eq(loans.branchId, branchIdFilter));
-    }
-
-    if (prefix) {
-      filters.push(like(loans.ticketNumber, `${prefix}%`));
-    }
-
-    let query = db
-      .select({ ticketNumber: loans.ticketNumber })
-      .from(loans);
-
-    if (filters.length > 0) {
-      query = query.where(and(...filters));
-    }
-
-    const [latest] = await query.orderBy(desc(loans.createdAt), desc(loans.id)).limit(1);
-
-    let nextNumeric = 1;
-    let padLength = 6;
-
-    if (latest?.ticketNumber) {
-      const match = String(latest.ticketNumber).match(/(\d+)(?!.*\d)/);
-      if (match) {
-        padLength = Math.max(match[1].length, padLength);
-        nextNumeric = Number(match[1]) + 1;
-      }
-    }
-
-    const nextTicket = `${prefix}${String(nextNumeric).padStart(padLength, '0')}`;
-
-    res.json({ ticketNumber: nextTicket });
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return res.status(error.status).json({ error: error.message });
-    }
-
-    next(error);
-  }
-});
-
 app.post('/api/pos/buys', async (req, res, next) => {
   try {
     const branchId = parsePositiveInteger(req.body?.branchId ?? req.body?.branch_id ?? 0, 'branchId');
@@ -13524,6 +13799,7 @@ app.post('/api/orders/validate', (req, res) => {
   }
 
   try {
+    // IMPORTANT: unitPriceCents already includes ITBIS (see PRICING_MODEL.md)
     const normalizedItems = items.map((item, index) => {
       const qty = Number(item?.qty);
       const unitPriceCents = Number(item?.unitPriceCents);
@@ -13536,15 +13812,20 @@ app.post('/api/orders/validate', (req, res) => {
         throw new Error(`items[${index}].unitPriceCents must be greater than 0`);
       }
 
+      // Price already includes tax, so total = price * qty (no tax addition)
       const totalCents = Math.round(qty * unitPriceCents);
 
       return { qty, unitPriceCents, totalCents };
     });
 
-    const subtotalCents = normalizedItems.reduce((sum, item) => sum + item.totalCents, 0);
+    // Calculate totals: prices already include ITBIS, so totalCents = sum of line totals
+    const totalCents = normalizedItems.reduce((sum, item) => sum + item.totalCents, 0);
+    
+    // Extract tax for reporting/display purposes only (don't add to total)
     const taxPercent = Number(taxRate) || 0;
-    const taxCents = Math.round(subtotalCents * taxPercent);
-    const totalCents = subtotalCents + taxCents;
+    // Since totalCents includes tax: net = total / (1 + rate), tax = total - net
+    const subtotalCents = Math.round(totalCents / (1 + taxPercent));
+    const taxCents = totalCents - subtotalCents;
 
     res.json({ subtotalCents, taxCents, totalCents });
   } catch (error) {
@@ -15538,6 +15819,7 @@ const customerSelection = {
   branchId: customers.branchId,
   firstName: customers.firstName,
   lastName: customers.lastName,
+  cedulaNo: customers.cedulaNo,
   email: customers.email,
   phone: customers.phone,
   address: customers.address,
@@ -15571,6 +15853,7 @@ function serializeCustomer(row) {
     branchId: Number(row.branchId),
     firstName: row.firstName,
     lastName: row.lastName,
+    cedulaNo: row.cedulaNo,
     email: row.email,
     phone: row.phone,
     address: row.address,
@@ -15593,15 +15876,28 @@ function buildCustomerWhereClause({ search, branchId, blacklisted }) {
   }
 
   if (search) {
-    const likeValue = `%${search}%`;
-    clauses.push(
-      or(
-        like(customers.firstName, likeValue),
-        like(customers.lastName, likeValue),
-        like(customers.email, likeValue),
-        like(customers.phone, likeValue),
-      ),
-    );
+    // Escape special LIKE characters (% and _)
+    const escapedSearch = escapeForLike(search);
+    // Convert to lowercase for case-insensitive search
+    const lowerSearch = escapedSearch.toLowerCase();
+    const likeValue = `%${lowerSearch}%`;
+    
+    // Use LOWER() on column side and lowercase pattern for case-insensitive matching
+    // This ensures "Mar" will match "Maria" regardless of case
+    const searchConditions = [
+      sql`LOWER(${customers.firstName}) LIKE ${sql.raw(`'${likeValue.replace(/'/g, "''")}'`)}`,
+      sql`LOWER(${customers.lastName}) LIKE ${sql.raw(`'${likeValue.replace(/'/g, "''")}'`)}`,
+      sql`LOWER(${customers.email}) LIKE ${sql.raw(`'${likeValue.replace(/'/g, "''")}'`)}`,
+      like(customers.phone, `%${escapedSearch}%`), // Phone numbers usually don't need case conversion
+    ];
+
+    // Also search by customer ID if the search term is numeric
+    const numericSearch = Number(search);
+    if (Number.isInteger(numericSearch) && numericSearch > 0) {
+      searchConditions.push(eq(customers.id, numericSearch));
+    }
+
+    clauses.push(or(...searchConditions));
   }
 
   if (clauses.length === 0) {
@@ -15622,6 +15918,7 @@ async function loadCustomerDetail(customerId) {
       branchId: customers.branchId,
       firstName: customers.firstName,
       lastName: customers.lastName,
+      cedulaNo: customers.cedulaNo,
       email: customers.email,
       phone: customers.phone,
       address: customers.address,
@@ -17911,6 +18208,7 @@ app.get('/api/customers', async (req, res, next) => {
         branchId: customers.branchId,
         firstName: customers.firstName,
         lastName: customers.lastName,
+        cedulaNo: customers.cedulaNo,
         email: customers.email,
         phone: customers.phone,
         address: customers.address,
@@ -18019,6 +18317,7 @@ app.post('/api/customers', async (req, res, next) => {
       branchId,
       firstName,
       lastName,
+      cedulaNo = null,
       email = null,
       phone = null,
       address = null,
@@ -18033,6 +18332,7 @@ app.post('/api/customers', async (req, res, next) => {
 
     const normalizedFirst = normalizeOptionalString(firstName, { maxLength: 80 });
     const normalizedLast = normalizeOptionalString(lastName, { maxLength: 80 });
+    const normalizedCedulaNo = normalizeOptionalString(cedulaNo, { maxLength: 20 });
     const normalizedEmail = normalizeOptionalString(email, { maxLength: 190 });
     const normalizedPhone = normalizeOptionalString(phone, { maxLength: 40 });
     const normalizedAddress = normalizeNullableText(address, 2000);
@@ -18051,6 +18351,7 @@ app.post('/api/customers', async (req, res, next) => {
         branchId: numericBranchId,
         firstName: normalizedFirst,
         lastName: normalizedLast,
+        cedulaNo: normalizedCedulaNo,
         email: normalizedEmail,
         phone: normalizedPhone,
         address: normalizedAddress,
@@ -18063,6 +18364,7 @@ app.post('/api/customers', async (req, res, next) => {
           branchId: customers.branchId,
           firstName: customers.firstName,
           lastName: customers.lastName,
+          cedulaNo: customers.cedulaNo,
           email: customers.email,
           phone: customers.phone,
           address: customers.address,
@@ -18087,10 +18389,11 @@ app.post('/api/customers', async (req, res, next) => {
       action: 'customer.create',
       resourceType: 'customer',
       resourceId: Number(createdCustomer.id),
-      payload: {
+        payload: {
         branchId: numericBranchId,
         firstName: normalizedFirst,
         lastName: normalizedLast,
+        cedulaNo: normalizedCedulaNo,
         email: normalizedEmail,
         phone: normalizedPhone,
       },
@@ -18136,6 +18439,10 @@ app.patch('/api/customers/:id', async (req, res, next) => {
       if (!updates.lastName) {
         return res.status(400).json({ error: 'lastName cannot be empty' });
       }
+    }
+
+    if ('cedulaNo' in req.body) {
+      updates.cedulaNo = normalizeOptionalString(req.body.cedulaNo, { maxLength: 20 }) || null;
     }
 
     if ('email' in req.body) {
@@ -18210,7 +18517,7 @@ app.post('/api/customers/:id/notes', async (req, res, next) => {
     const inserted = await db.transaction(async (tx) => {
       await tx.insert(customerNotes).values({
         customerId,
-        authorId: actorId ?? 0,
+        authorId: actorId ?? null,
         note,
       });
 
@@ -18374,6 +18681,108 @@ app.post('/api/customers/:id/message', async (req, res, next) => {
 });
 
 app.post('/api/customers/id-images/sign', signIdImageUploadRequest);
+
+// Handle OPTIONS preflight for ID images endpoint
+app.options('/api/customers/:cedulaNo/id-image/:side', (req, res) => {
+  const origin = req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:3000';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(200);
+});
+
+// Serve ID images from configured path
+app.get('/api/customers/:cedulaNo/id-image/:side', async (req, res, next) => {
+  try {
+    const cedulaNo = req.params.cedulaNo;
+    const side = req.params.side; // 'front' or 'back'
+    
+    if (!cedulaNo || (side !== 'front' && side !== 'back')) {
+      return res.status(400).json({ error: 'Invalid parameters' });
+    }
+
+    // Get ID images path from settings
+    const [settingRow] = await db
+      .select()
+      .from(settings)
+      .where(and(eq(settings.k, 'compliance.settings'), eq(settings.scope, 'global')))
+      .limit(1);
+
+    if (!settingRow || !settingRow.v || typeof settingRow.v !== 'object') {
+      return res.status(404).json({ error: 'ID images path not configured' });
+    }
+
+    const complianceSettings = settingRow.v;
+    const idImagesPath = complianceSettings?.idImagesPath;
+
+    if (!idImagesPath) {
+      return res.status(404).json({ error: 'ID images path not configured' });
+    }
+
+    // Clean cedula number (remove dashes and decode URL encoding)
+    const cedulaNoDecoded = decodeURIComponent(cedulaNo);
+    const cedulaNoClean = cedulaNoDecoded.replace(/-/g, '');
+    const imageNumber = side === 'front' ? '0001' : '0002';
+    
+    // Try different file extensions and formats
+    const possibleFileNames = [
+      `${cedulaNoClean}_${imageNumber}.jpeg`,
+      `${cedulaNoClean}_${imageNumber}.jpg`,
+      `${cedulaNoClean}_${imageNumber}`,
+      `${cedulaNoClean}_${imageNumber}.JPG`,
+      `${cedulaNoClean}_${imageNumber}.JPEG`,
+    ];
+    
+    let imagePath = null;
+    for (const fileName of possibleFileNames) {
+      const testPath = path.join(idImagesPath, fileName);
+      if (fs.existsSync(testPath)) {
+        imagePath = testPath;
+        break;
+      }
+    }
+    
+    // If still not found, log for debugging
+    if (!imagePath) {
+      console.error('ID image not found. Tried paths:', possibleFileNames.map(f => path.join(idImagesPath, f)));
+      console.error('Cedula number:', cedulaNo, 'Cleaned:', cedulaNoClean);
+      console.error('ID images path:', idImagesPath);
+      return res.status(404).json({ error: 'Image not found', tried: possibleFileNames });
+    }
+
+    // Read file and send with proper CORS headers
+    // Note: This endpoint should ideally require authentication
+    // For now, we rely on CORS to restrict access to the frontend origin only
+    try {
+      const imageBuffer = fs.readFileSync(imagePath);
+      
+      // Set all headers before sending
+      // Only allow requests from the configured frontend origin
+      const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const origin = req.headers.origin;
+      
+      // Only set CORS headers if origin matches (security)
+      if (origin === allowedOrigin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+      
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Content-Length', imageBuffer.length);
+      res.setHeader('Cache-Control', 'private, max-age=3600'); // Changed to private for sensitive data
+      res.setHeader('Cross-Origin-Resource-Policy', 'same-site'); // More restrictive
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      
+      res.send(imageBuffer);
+    } catch (readError) {
+      console.error('Error reading image file:', readError);
+      return res.status(500).json({ error: 'Failed to read image file' });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
 
 const marketingTemplateSelection = {
   id: marketingTemplates.id,

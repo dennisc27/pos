@@ -308,6 +308,7 @@ export const customers = mysqlTable('customers', {
   branchId: bigint('branch_id', { mode: 'number' }).notNull(),
   firstName: varchar('first_name', { length: 80 }).notNull(),
   lastName: varchar('last_name', { length: 80 }).notNull(),
+  cedulaNo: varchar('cedula_no', { length: 20 }),
   email: varchar('email', { length: 190 }),
   phone: varchar('phone', { length: 40 }),
   address: text('address'),
@@ -343,7 +344,7 @@ export const idImageUploadTokens = mysqlTable(
 export const customerNotes = mysqlTable('customer_notes', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   customerId: bigint('customer_id', { mode: 'number' }).notNull(),
-  authorId: bigint('author_id', { mode: 'number' }).notNull(),
+  authorId: bigint('author_id', { mode: 'number' }),
   note: text('note').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -395,6 +396,7 @@ export const interestModels = mysqlTable('interest_models', {
   minPrincipalCents: bigint('min_principal_cents', { mode: 'number' }).default(0),
   maxPrincipalCents: bigint('max_principal_cents', { mode: 'number' }),
   lateFeeBps: int('late_fee_bps').default(0),
+  defaultTermCount: int('default_term_count').default(1).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });

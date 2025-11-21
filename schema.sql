@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS customers (
   branch_id BIGINT NOT NULL,
   first_name VARCHAR(80) NOT NULL,
   last_name VARCHAR(80) NOT NULL,
+  cedula_no VARCHAR(20),
   email VARCHAR(190),
   phone VARCHAR(40),
   address TEXT,
@@ -101,7 +102,7 @@ CREATE TABLE IF NOT EXISTS loyalty_ledger (
 CREATE TABLE IF NOT EXISTS customer_notes (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   customer_id BIGINT NOT NULL,
-  author_id BIGINT NOT NULL,
+  author_id BIGINT NULL,
   note TEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (customer_id) REFERENCES customers(id),
@@ -522,6 +523,7 @@ CREATE TABLE IF NOT EXISTS interest_models (
   min_principal_cents BIGINT DEFAULT 0,
   max_principal_cents BIGINT NULL,
   late_fee_bps INT DEFAULT 0,
+  default_term_count INT NOT NULL DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

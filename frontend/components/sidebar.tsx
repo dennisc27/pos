@@ -140,6 +140,35 @@ const sections: NavSection[] = [
 export function Sidebar() {
   const pathname = usePathname();
 
+  // Helper function to determine if a nav item is active
+  // It checks for exact match first, then checks if pathname starts with href
+  // but only if there's no more specific match in the same section
+  const getIsActive = (item: NavItem, sectionItems: NavItem[]): boolean => {
+    // Exact match always wins
+    if (pathname === item.href) {
+      return true;
+    }
+
+    // For non-root paths, check if pathname starts with the href
+    if (item.href !== "/" && pathname?.startsWith(item.href)) {
+      // Check if there's a more specific match in the same section
+      // A more specific match would be a longer href that also matches
+      const hasMoreSpecificMatch = sectionItems.some(
+        (otherItem) =>
+          otherItem.href !== item.href &&
+          pathname?.startsWith(otherItem.href) &&
+          otherItem.href.length > item.href.length &&
+          // Ensure it's a proper path segment (starts with the shorter href + /)
+          otherItem.href.startsWith(item.href + "/"),
+      );
+
+      // Only active if there's no more specific match
+      return !hasMoreSpecificMatch;
+    }
+
+    return false;
+  };
+
   return (
     <aside className="hidden w-64 shrink-0 border-r border-border bg-card px-4 py-6 dark:border-slate-800 dark:bg-slate-950/80 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col">
       <div className="flex items-center gap-2 px-2 text-sm font-semibold tracking-wide text-foreground">
@@ -155,8 +184,7 @@ export function Sidebar() {
             <div className="mt-1 space-y-1">
               {section.items.map((item) => {
                 const Icon = item.icon;
-                const isActive =
-                  pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href));
+                const isActive = getIsActive(item, section.items);
 
                 return (
                   <Link

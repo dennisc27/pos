@@ -19,6 +19,7 @@ import {
   Mail,
   Palette,
   Percent,
+  Plus,
   Printer,
   RefreshCcw,
   Save,
@@ -30,13 +31,456 @@ import {
   SlidersHorizontal,
   Sparkles,
   Store,
+  Trash2,
   Users2,
   Wallet,
+  X,
 } from "lucide-react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
 type StatusMessage = { tone: "success" | "error"; message: string } | null;
+
+type InterestModel = {
+  id: number;
+  name: string;
+  description: string | null;
+  rateType: "flat" | "simple" | "compound";
+  periodDays: number;
+  interestRateBps: number;
+  graceDays: number;
+  minPrincipalCents: number | null;
+  maxPrincipalCents: number | null;
+  lateFeeBps: number;
+  defaultTermCount: number;
+};
+
+function InterestModelsSection() {
+  const [models, setModels] = useState<InterestModel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingModel, setEditingModel] = useState<InterestModel | null>(null);
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
+    rateType: "simple" as "flat" | "simple" | "compound",
+    periodDays: "30",
+    interestRateBps: "",
+    graceDays: "0",
+    minPrincipalCents: "",
+    maxPrincipalCents: "",
+    lateFeeBps: "0",
+    defaultTermCount: "1",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+
+  const loadModels = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/interest-models`);
+      if (!response.ok) {
+        throw new Error(`Failed to load models: ${response.status}`);
+      }
+      const data = await response.json();
+      setModels(data.interestModels ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load interest models");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadModels();
+  }, [loadModels]);
+
+  const openCreateDialog = () => {
+    setEditingModel(null);
+    setFormData({
+      name: "",
+      description: "",
+      rateType: "simple",
+      periodDays: "30",
+      interestRateBps: "",
+      graceDays: "0",
+      minPrincipalCents: "",
+      maxPrincipalCents: "",
+      lateFeeBps: "0",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const openEditDialog = (model: InterestModel) => {
+    setEditingModel(model);
+    setFormData({
+      name: model.name,
+      description: model.description ?? "",
+      rateType: model.rateType,
+      periodDays: String(model.periodDays),
+      interestRateBps: String(model.interestRateBps / 100), // Convert from basis points to percentage
+      graceDays: String(model.graceDays),
+      minPrincipalCents: model.minPrincipalCents ? String(model.minPrincipalCents / 100) : "",
+      maxPrincipalCents: model.maxPrincipalCents ? String(model.maxPrincipalCents / 100) : "",
+      lateFeeBps: String(model.lateFeeBps / 100), // Convert from basis points to percentage
+      defaultTermCount: String(model.defaultTermCount),
+    });
+    setIsDialogOpen(true);
+  };
+
+  const closeDialog = () => {
+    setIsDialogOpen(false);
+    setEditingModel(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const payload = {
+        name: formData.name.trim(),
+        description: formData.description.trim() || null,
+        rateType: formData.rateType,
+        periodDays: Number(formData.periodDays),
+        interestRateBps: Math.round(Number(formData.interestRateBps) * 100), // Convert percentage to basis points
+        graceDays: Number(formData.graceDays),
+        minPrincipalCents: formData.minPrincipalCents ? Math.round(Number(formData.minPrincipalCents) * 100) : 0,
+        maxPrincipalCents: formData.maxPrincipalCents ? Math.round(Number(formData.maxPrincipalCents) * 100) : null,
+        lateFeeBps: Math.round(Number(formData.lateFeeBps) * 100), // Convert percentage to basis points
+        defaultTermCount: Number(formData.defaultTermCount),
+      };
+
+      const url = editingModel
+        ? `${API_BASE_URL}/api/interest-models/${editingModel.id}`
+        : `${API_BASE_URL}/api/interest-models`;
+      const method = editingModel ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to ${editingModel ? "update" : "create"} model`);
+      }
+
+      await loadModels();
+      closeDialog();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to ${editingModel ? "update" : "create"} model`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/interest-models/${id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to delete model");
+      }
+
+      await loadModels();
+      setDeleteConfirm(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete model");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Modelos de Interés</h3>
+          <p className="text-xs text-muted-foreground">Gestiona los modelos de interés para préstamos</p>
+        </div>
+        <button
+          type="button"
+          onClick={openCreateDialog}
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary/90"
+        >
+          <Plus className="h-3.5 w-3.5" /> Nuevo modelo
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : models.length === 0 ? (
+        <div className="rounded-md border border-border bg-muted/50 px-4 py-8 text-center text-xs text-muted-foreground">
+          No hay modelos de interés. Crea uno nuevo para comenzar.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {models.map((model) => (
+            <div
+              key={model.id}
+              className="flex items-start justify-between rounded-md border border-border bg-background p-3"
+            >
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium">{model.name}</p>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                    {model.rateType}
+                  </span>
+                </div>
+                {model.description && (
+                  <p className="mt-1 text-xs text-muted-foreground">{model.description}</p>
+                )}
+                <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
+                  <span>Tasa: {(model.interestRateBps / 100).toFixed(2)}%</span>
+                  <span>Periodo: {model.periodDays} días</span>
+                  <span>Cuotas: {model.defaultTermCount}</span>
+                  {model.minPrincipalCents && (
+                    <span>Mín: RD${(model.minPrincipalCents / 100).toLocaleString()}</span>
+                  )}
+                  {model.maxPrincipalCents && (
+                    <span>Máx: RD${(model.maxPrincipalCents / 100).toLocaleString()}</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openEditDialog(model)}
+                  className="rounded-md border border-border px-2 py-1 text-xs transition hover:bg-muted"
+                >
+                  Editar
+                </button>
+                {deleteConfirm === model.id ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(model.id)}
+                      disabled={submitting}
+                      className="rounded-md bg-destructive px-2 py-1 text-xs text-destructive-foreground transition hover:bg-destructive/90 disabled:opacity-50"
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirm(null)}
+                      className="rounded-md border border-border px-2 py-1 text-xs transition hover:bg-muted"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirm(model.id)}
+                    className="rounded-md border border-destructive/50 px-2 py-1 text-xs text-destructive transition hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg border border-border bg-background p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">
+                {editingModel ? "Editar Modelo de Interés" : "Nuevo Modelo de Interés"}
+              </h3>
+              <button
+                type="button"
+                onClick={closeDialog}
+                className="rounded-md p-1 transition hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Nombre *</label>
+                <input
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="Ej. Interés Mensual"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Descripción</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  rows={2}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="Descripción opcional del modelo"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Tipo de Tasa *</label>
+                  <select
+                    value={formData.rateType}
+                    onChange={(e) =>
+                      setFormData({ ...formData, rateType: e.target.value as "flat" | "simple" | "compound" })
+                    }
+                    required
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="flat">Flat</option>
+                    <option value="simple">Simple</option>
+                    <option value="compound">Compound</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Días del Periodo *</label>
+                  <input
+                    type="number"
+                    value={formData.periodDays}
+                    onChange={(e) => setFormData({ ...formData, periodDays: e.target.value })}
+                    required
+                    min={1}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Tasa de Interés (%) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.interestRateBps}
+                    onChange={(e) => setFormData({ ...formData, interestRateBps: e.target.value })}
+                    required
+                    min={0}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="Ej. 5.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Días de Gracia</label>
+                  <input
+                    type="number"
+                    value={formData.graceDays}
+                    onChange={(e) => setFormData({ ...formData, graceDays: e.target.value })}
+                    min={0}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Cuotas por Defecto *</label>
+                  <input
+                    type="number"
+                    value={formData.defaultTermCount}
+                    onChange={(e) => setFormData({ ...formData, defaultTermCount: e.target.value })}
+                    required
+                    min={1}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="Ej. 3"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Monto Mínimo (RD$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.minPrincipalCents}
+                    onChange={(e) => setFormData({ ...formData, minPrincipalCents: e.target.value })}
+                    min={0}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Monto Máximo (RD$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.maxPrincipalCents}
+                    onChange={(e) => setFormData({ ...formData, maxPrincipalCents: e.target.value })}
+                    min={0}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="Sin límite"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Tasa de Cargo por Mora (%)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.lateFeeBps}
+                  onChange={(e) => setFormData({ ...formData, lateFeeBps: e.target.value })}
+                  min={0}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={closeDialog}
+                  className="rounded-md border border-border px-4 py-2 text-sm transition hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Guardando...
+                    </>
+                  ) : editingModel ? (
+                    "Actualizar"
+                  ) : (
+                    "Crear"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type BranchOption = {
   id: number;
@@ -185,6 +629,7 @@ type ComplianceSettings = {
   cameraViewEnabled: boolean;
   transactionStamping: boolean;
   blockId: boolean;
+  idImagesPath: string;
 };
 
 type ProviderForm = {
@@ -333,6 +778,7 @@ const defaultComplianceSettings: ComplianceSettings = {
   cameraViewEnabled: true,
   transactionStamping: true,
   blockId: false,
+  idImagesPath: "",
 };
 
 const prefixValues = ["POS-", "INV-", "PAWN-", "LAY-", "CRM-"];
@@ -563,6 +1009,12 @@ const NAV_SECTIONS = [
         label: "Block ID",
         description: "Control de bloqueos para clientes con identificación restringida.",
         icon: Shield,
+      },
+      {
+        id: "compliance-id-images-path",
+        label: "ID Images Path",
+        description: "Configurar ruta de carpeta para imágenes de cédula.",
+        icon: FileText,
       },
     ],
   },
@@ -939,6 +1391,7 @@ export default function SettingsSystemPage() {
             raw.transactionStamping ?? defaultComplianceSettings.transactionStamping
           ),
           blockId: Boolean(raw.blockId ?? defaultComplianceSettings.blockId),
+          idImagesPath: String(raw.idImagesPath ?? defaultComplianceSettings.idImagesPath),
         });
       } else if (entry.key === "pos.tenders" && Array.isArray(entry.value)) {
         setTenders(
@@ -2070,22 +2523,7 @@ export default function SettingsSystemPage() {
           </div>
         );
       case "pawn-interest":
-        return (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="interest-code">
-              Código de modelo de interés
-            </label>
-            <input
-              id="interest-code"
-              value={pawnSettings.interestModelCode}
-              onChange={(event) =>
-                setPawnSettings((state) => ({ ...state, interestModelCode: event.target.value }))
-              }
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-              placeholder="STD"
-            />
-          </div>
-        );
+        return <InterestModelsSection />;
       case "pawn-grace":
         return (
           <div className="space-y-1">
@@ -2347,6 +2785,28 @@ export default function SettingsSystemPage() {
             />
             Bloquear clientes con identificación marcada como restringida
           </label>
+        );
+      case "compliance-id-images-path":
+        return (
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-foreground">
+              Ruta de carpeta de imágenes de cédula
+            </label>
+            <input
+              type="text"
+              value={complianceSettings.idImagesPath}
+              onChange={(event) =>
+                setComplianceSettings((state) => ({
+                  ...state,
+                  idImagesPath: event.target.value,
+                }))
+              }
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Ruta donde se almacenan las imágenes de cédula. El formato de nombre debe ser: {"{cedula_no_sin_guiones}_0001.jpeg"} (frente) y {"{cedula_no_sin_guiones}_0002.jpeg"} (reverso).
+            </p>
+          </div>
         );
       default:
         return (

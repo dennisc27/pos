@@ -9,7 +9,6 @@ import {
   Headphones,
   Laptop,
   Landmark,
-  PauseCircle,
   Search,
   ShieldX,
   Shirt,
@@ -27,6 +26,7 @@ import { formatCurrency } from "@/components/pos/utils";
 import type { CartLine, SaleSummary, TenderBreakdown, Product, ProductCategory } from "@/components/pos/types";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 import { formatDateForDisplay } from "@/lib/utils";
+import { AddCustomerDialog } from "@/components/customer/add-customer-dialog";
 
 const TENDER_METHODS = ["cash", "card", "transfer", "store_credit", "gift"] as const;
 type TenderMethod = (typeof TENDER_METHODS)[number];
@@ -220,6 +220,7 @@ export default function PosPage() {
   const [inventoryModalCategory, setInventoryModalCategory] = useState<string>("all");
   const [isCreditNoteDialogOpen, setCreditNoteDialogOpen] = useState(false);
   const [creditNotes, setCreditNotes] = useState<Array<{ id: number; balanceCents: number; reason: string | null; createdAt: string | null }>>([]);
+  const [isVoidDialogOpen, setIsVoidDialogOpen] = useState(false);
   const [isLoadingCreditNotes, setIsLoadingCreditNotes] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
   const [pendingTenderAmount, setPendingTenderAmount] = useState<number>(0);
@@ -1072,12 +1073,11 @@ export default function PosPage() {
       </div>
       <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/90">
         <div className="flex justify-center">
-          <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4">
-            <button className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
-              <PauseCircle className="h-4 w-4" />
-              Hold
-            </button>
-            <button className="flex items-center justify-center gap-2 rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-500/70 hover:text-rose-500 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:border-rose-400/70 dark:hover:text-rose-200">
+          <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:grid-cols-3">
+            <button
+              onClick={() => setIsVoidDialogOpen(true)}
+              className="flex items-center justify-center gap-2 rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-500/70 hover:text-rose-500 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:border-rose-400/70 dark:hover:text-rose-200"
+            >
               <ShieldX className="h-4 w-4" />
               Void
             </button>
@@ -1095,7 +1095,8 @@ export default function PosPage() {
           </div>
         </div>
       </div>
-      {isCustomerDialogOpen ? (
+      {/* Customer Dialog - Change mode (search/select) */}
+      {isCustomerDialogOpen && customerDialogMode === "change" ? (
         <div
           role="dialog"
           aria-modal="true"
@@ -1109,9 +1110,7 @@ export default function PosPage() {
           >
             <div className="flex items-start justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-                  {customerDialogMode === "change" ? "Change customer" : "Add customer"}
-                </h2>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Change customer</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                   Search or enter the customer that should be linked to this sale.
                 </p>
@@ -1224,13 +1223,34 @@ export default function PosPage() {
                   type="submit"
                   className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
                 >
-                  {customerDialogMode === "change" ? "Update" : "Add customer"}
+                  Update
                 </button>
               </div>
             </div>
           </form>
         </div>
       ) : null}
+
+      {/* Add Customer Dialog - Add mode (full form) */}
+      <AddCustomerDialog
+        isOpen={isCustomerDialogOpen && customerDialogMode === "add"}
+        onClose={closeCustomerDialog}
+        onSuccess={(customer) => {
+          const descriptorParts = [customer.email, customer.phone].filter(
+            (value): value is string => typeof value === "string" && value.trim().length > 0
+          );
+          const fullName = `${customer.firstName} ${customer.lastName}`.trim();
+          setCustomerName(fullName);
+          setCustomerDescriptor(
+            descriptorParts.length > 0 ? descriptorParts.join(" • ") : "CRM customer"
+          );
+          setSelectedCustomerId(customer.id);
+          // Remove all credit note tenders when customer changes
+          setTenderBreakdown((previous) => previous.filter((tender) => tender.method !== "store_credit"));
+          closeCustomerDialog();
+        }}
+        onError={(error) => setCustomerSearchError(error)}
+      />
       {isInventoryModalOpen ? (
         <div
           role="dialog"
@@ -1602,6 +1622,57 @@ export default function PosPage() {
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Void Confirmation Dialog */}
+      {isVoidDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 bg-slate-950/60 backdrop-blur"
+          onClick={() => setIsVoidDialogOpen(false)}
+        >
+          <div
+            className="w-full max-w-md space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Void Sale</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Are you sure you would like to void this sale?
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVoidDialogOpen(false)}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close void dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsVoidDialogOpen(false)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearCart();
+                  setIsVoidDialogOpen(false);
+                }}
+                className="rounded-lg border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-500/70 hover:text-rose-500 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:border-rose-400/70 dark:hover:text-rose-200"
+              >
+                Yes, Void Sale
               </button>
             </div>
           </div>

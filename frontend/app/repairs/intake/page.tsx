@@ -8,6 +8,7 @@ import { UserCircle2, X } from "lucide-react";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 import { formatCurrency } from "@/components/pos/utils";
 import { formatDateForDisplay } from "@/lib/utils";
+import { AddCustomerDialog } from "@/components/customer/add-customer-dialog";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -728,25 +729,23 @@ export default function RepairsIntakePage() {
         </section>
       )}
 
-      {isCustomerDialogOpen ? (
+      {/* Customer Dialog - Change mode (search/select) */}
+      {isCustomerDialogOpen && customerDialogMode === "change" ? (
         <div
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
           onClick={closeCustomerDialog}
         >
-          <form
+          <div
             className="w-full max-w-xl space-y-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"
             onClick={(event) => event.stopPropagation()}
-            onSubmit={handleSubmitCustomer}
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-                  {customerDialogMode === "change" ? "Change customer" : "Add customer"}
-                </h2>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Change customer</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Search CRM or add a new profile to link this repair.
+                  Search CRM to link this repair.
                 </p>
                 {activeBranch ? (
                   <p className="mt-1 text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">
@@ -856,21 +855,27 @@ export default function RepairsIntakePage() {
               >
                 Cancel
               </button>
-              <button
-                type="submit"
-                disabled={creatingCustomer}
-                className="rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
-              >
-                {creatingCustomer
-                  ? "Saving..."
-                  : customerDialogMode === "change"
-                  ? "Save customer"
-                  : "Add customer"}
-              </button>
             </div>
-          </form>
+          </div>
         </div>
       ) : null}
+
+      {/* Add Customer Dialog - Add mode (full form) */}
+      <AddCustomerDialog
+        isOpen={isCustomerDialogOpen && customerDialogMode === "add"}
+        onClose={closeCustomerDialog}
+        onSuccess={(customer) => {
+          const descriptorParts = [customer.email, customer.phone].filter(
+            (value): value is string => typeof value === "string" && value.trim().length > 0
+          );
+          const fullName = `${customer.firstName} ${customer.lastName}`.trim();
+          setCustomerName(fullName || "Unnamed customer");
+          setCustomerDescriptor(descriptorParts.length > 0 ? descriptorParts.join(" • ") : "CRM customer");
+          setSelectedCustomerId(customer.id);
+          closeCustomerDialog();
+        }}
+        onError={(error) => setCustomerSearchError(error)}
+      />
     </main>
   );
 }

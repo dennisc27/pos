@@ -4,20 +4,19 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } fro
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 
 import {
-  BadgeCheck,
   Camera,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ClipboardCheck,
   FileText,
   Loader2,
   PackagePlus,
+  Plus,
   Search,
   ShieldCheck,
   User,
   X,
 } from "lucide-react";
+import { AddCustomerDialog } from "@/components/customer/add-customer-dialog";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -32,6 +31,7 @@ type InterestModel = {
   minPrincipalCents: number | null;
   maxPrincipalCents: number | null;
   lateFeeBps: number;
+  defaultTermCount: number;
 };
 
 type LoanScheduleRow = {
@@ -41,21 +41,12 @@ type LoanScheduleRow = {
 };
 
 type CollateralItem = {
+  qty: string;
   description: string;
   estimatedValue: string;
   photoPath: string;
 };
 
-type IdImageUpload = {
-  id: string;
-  fileName: string;
-  contentType: string;
-  assetPath: string;
-  uploadUrl: string;
-  expiresAt: string;
-  status: "signed" | "confirmed" | "error";
-  error?: string;
-};
 
 type ApiError = Error & { status?: number };
 
@@ -67,40 +58,6 @@ type CustomerSummary = {
   branchId: number | null;
 };
 
-const steps = [
-  {
-    key: "customer",
-    title: "Datos del cliente",
-    description: "Selecciona sucursal, cliente y número de ticket.",
-    icon: User,
-  },
-  {
-    key: "id_capture",
-    title: "Captura de cédula",
-    description: "Firma URLs para subir las imágenes del documento.",
-    icon: Camera,
-  },
-  {
-    key: "collateral",
-    title: "Colateral",
-    description: "Detalla los artículos entregados en garantía.",
-    icon: PackagePlus,
-  },
-  {
-    key: "terms",
-    title: "Términos",
-    description: "Selecciona el modelo de interés y arma el calendario.",
-    icon: ShieldCheck,
-  },
-  {
-    key: "ticket_print",
-    title: "Ticket",
-    description: "Confirma y genera el ticket imprimible.",
-    icon: FileText,
-  },
-] as const;
-
-type StepKey = (typeof steps)[number]["key"];
 
 const pesoFormatter = new Intl.NumberFormat("es-DO", {
   style: "currency",
@@ -185,7 +142,6 @@ function generateSchedule(
 }
 
 export default function LoansNewPage() {
-  const [stepIndex, setStepIndex] = useState(0);
   const [interestModels, setInterestModels] = useState<InterestModel[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -193,32 +149,46 @@ export default function LoansNewPage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
   const [branchId, setBranchId] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null);
+  const [isEditCustomerDialogOpen, setIsEditCustomerDialogOpen] = useState(false);
+  const [customerDetail, setCustomerDetail] = useState<{
+    firstName: string;
+    lastName: string;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+  } | null>(null);
+  const [customerDetailLoading, setCustomerDetailLoading] = useState(false);
+  const [customerDetailError, setCustomerDetailError] = useState<string | null>(null);
+  const [customerSaving, setCustomerSaving] = useState(false);
   const [customerQuery, setCustomerQuery] = useState("");
   const [customerResults, setCustomerResults] = useState<CustomerSummary[]>([]);
   const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
   const [isCustomerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [isAddCustomerDialogOpen, setIsAddCustomerDialogOpen] = useState(false);
   const [ticketNumber, setTicketNumber] = useState("");
   const [ticketLoading, setTicketLoading] = useState(false);
   const [ticketError, setTicketError] = useState<string | null>(null);
-  const [comments, setComments] = useState("");
 
-  const [idUploads, setIdUploads] = useState<IdImageUpload[]>([]);
-  const [capturedIdPaths, setCapturedIdPaths] = useState<string[]>([]);
-  const [idCaptureError, setIdCaptureError] = useState<string | null>(null);
-  const [idCaptureBusy, setIdCaptureBusy] = useState(false);
 
   const [collateralItems, setCollateralItems] = useState<CollateralItem[]>([
-    { description: "", estimatedValue: "", photoPath: "" },
+    { qty: "", description: "", estimatedValue: "", photoPath: "" },
   ]);
 
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [principalAmount, setPrincipalAmount] = useState("");
-  const [termCount, setTermCount] = useState(1);
 
   useEffect(() => {
-    if (activeBranch) {
-      setBranchId(String(activeBranch.id));
+    if (activeBranch && activeBranch.id) {
+      const numericId = Number(activeBranch.id);
+      if (Number.isInteger(numericId) && numericId > 0) {
+        setBranchId(String(numericId));
+      } else {
+        setBranchId("");
+        setTicketError("La sucursal activa no tiene un ID válido.");
+      }
+    } else {
+      setBranchId("");
     }
   }, [activeBranch]);
 
@@ -229,9 +199,9 @@ export default function LoansNewPage() {
     setCustomerSearchOpen(false);
     setCustomerSearchError(null);
     setCustomerSearchLoading(false);
+    setTicketError(null); // Clear ticket error when branch changes
   }, [branchId]);
 
-  const [startDate, setStartDate] = useState(todayIso());
   const [manualSchedule, setManualSchedule] = useState<LoanScheduleRow[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
@@ -252,15 +222,19 @@ export default function LoansNewPage() {
     setTicketError(null);
 
     try {
-      const params = new URLSearchParams();
       const numericBranch = Number(branchId);
-      if (Number.isInteger(numericBranch) && numericBranch > 0) {
-        params.set("branchId", String(numericBranch));
+      if (!Number.isInteger(numericBranch) || numericBranch <= 0) {
+        // Invalid branch ID, use fallback
+        setTicketNumber(fallbackTicketNumber());
+        setTicketLoading(false);
+        return;
       }
 
-      const queryString = params.toString();
+      const params = new URLSearchParams();
+      params.set("branchId", String(numericBranch));
+
       const data = await getJson<{ ticketNumber: string }>(
-        `/api/loans/next-ticket${queryString ? `?${queryString}` : ""}`
+        `/api/loans/next-ticket?${params.toString()}`
       );
 
       const generated = data.ticketNumber?.trim();
@@ -276,8 +250,10 @@ export default function LoansNewPage() {
   }, [branchId, fallbackTicketNumber]);
 
   useEffect(() => {
-    if (!branchId) {
+    const numericBranch = Number(branchId);
+    if (!branchId || !Number.isInteger(numericBranch) || numericBranch <= 0) {
       setTicketNumber((previous) => previous || fallbackTicketNumber());
+      setTicketError(null);
       return;
     }
 
@@ -320,9 +296,11 @@ export default function LoansNewPage() {
       return;
     }
 
-    if (customerQuery.trim().length < 2) {
+    const query = customerQuery.trim();
+
+    if (query.length < 2) {
       setCustomerResults([]);
-      setCustomerSearchError("Ingresa al menos 2 caracteres para buscar.");
+      setCustomerSearchError(null);
       setCustomerSearchLoading(false);
       return;
     }
@@ -331,56 +309,68 @@ export default function LoansNewPage() {
     setCustomerSearchLoading(true);
     setCustomerSearchError(null);
 
-    const timeout = setTimeout(() => {
-      const params = new URLSearchParams({ q: customerQuery.trim(), limit: "10" });
-      const branchNumeric = Number(branchId);
-      if (Number.isInteger(branchNumeric) && branchNumeric > 0) {
-        params.set("branchId", String(branchNumeric));
-      }
-
-      getJson<{ customers: Array<{ id: number; fullName?: string; firstName?: string; lastName?: string; phone?: string | null; email?: string | null; branchId?: number | null }> }>(
-        `/api/customers?${params.toString()}`,
-        { signal: controller.signal }
-      )
-        .then((payload) => {
-          const customers = (payload?.customers ?? []).map((customer) => {
-            const fullName =
-              customer.fullName ??
-              ([customer.firstName, customer.lastName].filter(Boolean).join(" ") ||
-                `Cliente #${customer.id}`);
-
-            return {
-              id: Number(customer.id),
-              fullName,
-              phone: customer.phone ?? null,
-              email: customer.email ?? null,
-              branchId: customer.branchId ?? null,
-            } as CustomerSummary;
-          });
-          setCustomerResults(customers);
-        })
-        .catch((error: unknown) => {
-          if (error instanceof DOMException && error.name === "AbortError") {
-            return;
-          }
-          if (error instanceof Error) {
-            setCustomerSearchError(error.message);
-          } else {
-            setCustomerSearchError("No se pudieron cargar los clientes");
-          }
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) {
-            setCustomerSearchLoading(false);
-          }
+    const timer = window.setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: query, limit: "10" });
+        const response = await fetch(`${API_BASE_URL}/api/customers?${params.toString()}`, {
+          signal: controller.signal,
         });
-    }, 350);
+
+        if (!response.ok) {
+          throw new Error(`Search failed with status ${response.status}`);
+        }
+
+        const payload: {
+          customers?: Array<{
+            id: number;
+            firstName: string | null;
+            lastName: string | null;
+            email: string | null;
+            phone: string | null;
+          }>;
+        } = await response.json();
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const customers = (payload.customers ?? []).map((customer) => {
+          const first = customer.firstName?.trim() ?? "";
+          const last = customer.lastName?.trim() ?? "";
+          const fullName = `${first} ${last}`.trim() || `Cliente #${customer.id}`;
+
+          return {
+            id: Number(customer.id),
+            fullName,
+            phone: customer.phone ?? null,
+            email: customer.email ?? null,
+            branchId: null,
+          } as CustomerSummary;
+        });
+
+        setCustomerResults(customers);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("Customer search failed", error);
+        if (error instanceof Error) {
+          setCustomerSearchError(error.message);
+        } else {
+          setCustomerSearchError("No se pudieron cargar los clientes");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setCustomerSearchLoading(false);
+        }
+      }
+    }, 250);
 
     return () => {
+      window.clearTimeout(timer);
       controller.abort();
-      clearTimeout(timeout);
     };
-  }, [branchId, customerQuery, isCustomerSearchOpen]);
+  }, [isCustomerSearchOpen, customerQuery]);
 
   useEffect(() => {
     const model = interestModels.find((item) => item.id === Number(selectedModelId));
@@ -391,118 +381,33 @@ export default function LoansNewPage() {
       return;
     }
 
-    setManualSchedule(generateSchedule(principalCents, model, termCount, startDate));
-  }, [interestModels, selectedModelId, principalAmount, termCount, startDate]);
-
-  const currentStep = steps[stepIndex];
+    // Use defaultTermCount from the model instead of user input
+    const termCount = model.defaultTermCount || 1;
+    setManualSchedule(generateSchedule(principalCents, model, termCount, todayIso()));
+  }, [interestModels, selectedModelId, principalAmount]);
 
   const currentModel = useMemo(
     () => interestModels.find((item) => item.id === Number(selectedModelId)) ?? null,
     [interestModels, selectedModelId]
   );
 
-  const canProceed = useMemo(() => {
-    switch (currentStep.key as StepKey) {
-      case "customer": {
-        const branchNumeric = Number(branchId);
-        return (
-          Number.isInteger(branchNumeric) &&
-          branchNumeric > 0 &&
-          selectedCustomer != null &&
-          ticketNumber.trim().length > 0
-        );
-      }
-      case "id_capture":
-        return capturedIdPaths.length > 0;
-      case "collateral":
-        return collateralItems.some((item) => item.description.trim().length > 0);
-      case "terms": {
-        const principalCents = parseCurrencyToCents(principalAmount);
-        return Boolean(currentModel && principalCents && principalCents > 0 && manualSchedule.length > 0);
-      }
-      case "ticket_print":
-        return true;
-      default:
-        return false;
-    }
-  }, [branchId, selectedCustomer, ticketNumber, capturedIdPaths, collateralItems, currentModel, currentStep.key, principalAmount, manualSchedule.length]);
-
-  const goNext = () => {
-    setStepIndex((index) => Math.min(index + 1, steps.length - 1));
-  };
-
-  const goBack = () => {
-    setStepIndex((index) => Math.max(index - 1, 0));
-  };
-
-  const handleSignedUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    if (!files.length) return;
-
-    setIdCaptureBusy(true);
-    setIdCaptureError(null);
-
-    const createdUploads: IdImageUpload[] = [];
-
-    for (const file of files) {
-      try {
-        const payload = await postJson<{
-          upload: { url: string; expiresAt: string; headers: Record<string, string> };
-          asset: { path: string };
-        }>("/api/uploads/id-images/sign", {
-          fileName: file.name,
-          contentType: file.type,
-          contentLength: file.size,
-        });
-
-        createdUploads.push({
-          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          fileName: file.name,
-          contentType: file.type,
-          assetPath: payload.asset.path,
-          uploadUrl: payload.upload.url,
-          expiresAt: payload.upload.expiresAt,
-          status: "signed",
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "No se pudo generar la URL firmada";
-        setIdCaptureError(message);
-        createdUploads.push({
-          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          fileName: file.name,
-          contentType: file.type,
-          assetPath: "",
-          uploadUrl: "",
-          expiresAt: new Date().toISOString(),
-          status: "error",
-          error: message,
-        });
-      }
-    }
-
-    setIdUploads((previous) => [...previous, ...createdUploads]);
-    setIdCaptureBusy(false);
-    event.target.value = "";
-  };
-
-  const markUploadConfirmed = (upload: IdImageUpload) => {
-    if (!upload.assetPath) return;
-
-    setIdUploads((previous) =>
-      previous.map((item) => (item.id === upload.id ? { ...item, status: "confirmed", error: undefined } : item))
+  const canSubmit = useMemo(() => {
+    const branchNumeric = Number(branchId);
+    const principalCents = parseCurrencyToCents(principalAmount);
+    
+    return (
+      Number.isInteger(branchNumeric) &&
+      branchNumeric > 0 &&
+      selectedCustomer != null &&
+      ticketNumber.trim().length > 0 &&
+      collateralItems.some((item) => item.description.trim().length > 0) &&
+      currentModel != null &&
+      principalCents != null &&
+      principalCents > 0 &&
+      manualSchedule.length > 0
     );
-    setCapturedIdPaths((previous) => {
-      if (previous.includes(upload.assetPath)) {
-        return previous;
-      }
-      return [...previous, upload.assetPath];
-    });
-  };
+  }, [branchId, selectedCustomer, ticketNumber, collateralItems, currentModel, principalAmount, manualSchedule.length]);
 
-  const removeUpload = (upload: IdImageUpload) => {
-    setIdUploads((previous) => previous.filter((item) => item.id !== upload.id));
-    setCapturedIdPaths((previous) => previous.filter((path) => path !== upload.assetPath));
-  };
 
   const handleSelectCustomer = (customer: CustomerSummary) => {
     setSelectedCustomer(customer);
@@ -517,12 +422,82 @@ export default function LoansNewPage() {
     setCustomerResults([]);
   };
 
+  const loadCustomerDetail = async (customerId: number) => {
+    setCustomerDetailLoading(true);
+    setCustomerDetailError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/customers/${customerId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load customer (${response.status})`);
+      }
+      const payload = await response.json();
+      setCustomerDetail({
+        firstName: payload.customer.firstName || "",
+        lastName: payload.customer.lastName || "",
+        email: payload.customer.email || null,
+        phone: payload.customer.phone || null,
+        address: payload.customer.address || null,
+      });
+      setIsEditCustomerDialogOpen(true);
+    } catch (error) {
+      setCustomerDetailError(error instanceof Error ? error.message : "Unable to load customer");
+    } finally {
+      setCustomerDetailLoading(false);
+    }
+  };
+
+  const handleEditCustomer = () => {
+    if (selectedCustomer) {
+      void loadCustomerDetail(selectedCustomer.id);
+    }
+  };
+
+  const handleSaveCustomer = async () => {
+    if (!selectedCustomer || !customerDetail) return;
+
+    setCustomerSaving(true);
+    setCustomerDetailError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/customers/${selectedCustomer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: customerDetail.firstName.trim(),
+          lastName: customerDetail.lastName.trim(),
+          email: customerDetail.email?.trim() || null,
+          phone: customerDetail.phone?.trim() || null,
+          address: customerDetail.address?.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to update customer");
+      }
+
+      const payload = await response.json();
+      // Update selected customer with new data
+      setSelectedCustomer({
+        id: selectedCustomer.id,
+        fullName: `${payload.customer.firstName} ${payload.customer.lastName}`.trim(),
+        phone: payload.customer.phone,
+        email: payload.customer.email,
+        branchId: selectedCustomer.branchId,
+      });
+      setIsEditCustomerDialogOpen(false);
+    } catch (error) {
+      setCustomerDetailError(error instanceof Error ? error.message : "Unable to update customer");
+    } finally {
+      setCustomerSaving(false);
+    }
+  };
+
   const updateCollateralItem = (index: number, patch: Partial<CollateralItem>) => {
     setCollateralItems((previous) => previous.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
   };
 
   const addCollateralRow = () => {
-    setCollateralItems((previous) => [...previous, { description: "", estimatedValue: "", photoPath: "" }]);
+    setCollateralItems((previous) => [...previous, { qty: "", description: "", estimatedValue: "", photoPath: "" }]);
   };
 
   const removeCollateralRow = (index: number) => {
@@ -556,15 +531,42 @@ export default function LoansNewPage() {
     setSubmissionError(null);
 
     try {
+      const numericBranchId = Number(branchId);
+      const numericCustomerId = selectedCustomer?.id ? Number(selectedCustomer.id) : null;
+      const numericInterestModelId = model.id ? Number(model.id) : null;
+
+      if (!Number.isInteger(numericBranchId) || numericBranchId <= 0) {
+        setSubmissionError("La sucursal no es válida. Debe ser un número entero positivo.");
+        setSubmitting(false);
+        return;
+      }
+
+      if (!numericCustomerId || !Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
+        setSubmissionError("El cliente seleccionado no es válido. Debe ser un número entero positivo.");
+        setSubmitting(false);
+        return;
+      }
+
+      if (!numericInterestModelId || !Number.isInteger(numericInterestModelId) || numericInterestModelId <= 0) {
+        setSubmissionError("El modelo de interés seleccionado no es válido. Debe ser un número entero positivo.");
+        setSubmitting(false);
+        return;
+      }
+
+      if (!principalCents || !Number.isFinite(principalCents) || principalCents <= 0) {
+        setSubmissionError("El monto del préstamo debe ser mayor a cero.");
+        setSubmitting(false);
+        return;
+      }
+
       const payload = await postJson<{
         loan: { id: number; ticketNumber: string };
       }>("/api/loans", {
-        branchId: Number(branchId),
-        customerId: selectedCustomer?.id ? Number(selectedCustomer.id) : undefined,
+        branchId: numericBranchId,
+        customerId: numericCustomerId,
         ticketNumber: ticketNumber.trim(),
-        interestModelId: model.id,
-        principalCents,
-        comments: comments.trim() || undefined,
+        interestModelId: numericInterestModelId,
+        principalCents: Math.round(principalCents),
         schedule: manualSchedule.map((row) => ({
           dueOn: row.dueOn,
           interestCents: row.interestCents,
@@ -577,11 +579,10 @@ export default function LoansNewPage() {
             estimatedValueCents: parseCurrencyToCents(item.estimatedValue) ?? 0,
             photoPath: item.photoPath.trim() || null,
           })),
-        idImagePaths: capturedIdPaths,
+        idImagePaths: [],
       });
 
       setSubmittedTicket({ loanId: payload.loan.id, ticketNumber: payload.loan.ticketNumber });
-      goNext();
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo crear el préstamo";
       setSubmissionError(message);
@@ -592,86 +593,46 @@ export default function LoansNewPage() {
 
   return (
     <>
-      <main className="mx-auto max-w-6xl px-6 py-12">
-      <header className="mb-10 flex flex-col gap-2">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-8 flex flex-col gap-2">
         <span className="text-xs uppercase tracking-wider text-slate-500">Préstamos</span>
         <h1 className="text-3xl font-semibold text-slate-900 dark:text-slate-100">Nuevo préstamo / empeño</h1>
         <p className="max-w-3xl text-sm text-slate-600 dark:text-slate-400">
-          Completa el flujo paso a paso para registrar un préstamo con captura de identificación, detalle de
+          Completa todos los campos para registrar un préstamo con captura de identificación, detalle de
           colateral y generación del ticket imprimible.
         </p>
       </header>
 
-      <ol className="mb-10 grid gap-4 sm:grid-cols-5">
-        {steps.map((step, index) => {
-          const Icon = step.icon ?? User;
-          const isActive = index === stepIndex;
-          const isCompleted = index < stepIndex;
-          return (
-            <li
-              key={step.key}
-              className={classNames(
-                "rounded-lg border bg-white/70 p-4 text-sm shadow-sm transition",
-                isActive
-                  ? "border-indigo-500 ring-2 ring-indigo-200"
-                  : isCompleted
-                  ? "border-emerald-500 ring-1 ring-emerald-100"
-                  : "border-slate-200 dark:border-slate-700"
-              )}
-            >
-              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-                <span
-                  className={classNames(
-                    "flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold",
-                    isCompleted
-                      ? "bg-emerald-500 text-white"
-                      : isActive
-                      ? "bg-indigo-600 text-white"
-                      : "bg-slate-200 text-slate-600"
-                  )}
-                >
-                  {isCompleted ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
-                </span>
-                <Icon className="h-4 w-4 text-indigo-500" />
-                {step.title}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{step.description}</p>
-            </li>
-          );
-        })}
-      </ol>
-
-      <section className="rounded-xl border border-slate-200 bg-white/80 p-8 shadow-lg dark:border-slate-700 dark:bg-slate-900/70">
-        {currentStep.key === "customer" && (
-          <form className="grid gap-6 sm:grid-cols-2">
-            <div className="sm:col-span-2 space-y-2">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Sucursal</label>
-              {branchLoading ? (
-                <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                  <Loader2 className="h-4 w-4 animate-spin text-indigo-500" /> Cargando sucursal…
-                </div>
-              ) : branchError ? (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{branchError}</div>
-              ) : activeBranch ? (
-                <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
-                  {activeBranch.name}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
-                  Configura una sucursal activa en ajustes antes de registrar préstamos.
-                </div>
-              )}
-            </div>
-
+      <form className="space-y-8" onSubmit={submitLoan}>
+        {/* Customer Section */}
+        <section className="rounded-xl border border-slate-200 bg-white/80 p-8 shadow-lg dark:border-slate-700 dark:bg-slate-900/70">
+          <div className="mb-6 flex items-center gap-3 border-b border-slate-200 pb-3 dark:border-slate-700">
+            <User className="h-5 w-5 text-indigo-500" />
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Datos del cliente</h2>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2">
             <div className="sm:col-span-2 space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Buscar cliente</label>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                 <input
                   value={customerQuery}
                   onChange={(event) => {
-                    setCustomerQuery(event.target.value);
-                    if (selectedCustomer && event.target.value.trim() !== selectedCustomer.fullName) {
+                    const newValue = event.target.value;
+                    setCustomerQuery(newValue);
+                    if (selectedCustomer && newValue.trim() !== selectedCustomer.fullName) {
                       setSelectedCustomer(null);
+                    }
+                    // Auto-open dialog when user types 2+ characters
+                    if (newValue.trim().length >= 2 && !isCustomerSearchOpen) {
+                      setCustomerSearchOpen(true);
+                      setCustomerSearchError(null);
+                    }
+                  }}
+                  onFocus={() => {
+                    // Open dialog when field is focused and has content
+                    if (customerQuery.trim().length >= 2 && !isCustomerSearchOpen) {
+                      setCustomerSearchOpen(true);
+                      setCustomerSearchError(null);
                     }
                   }}
                   type="search"
@@ -702,13 +663,23 @@ export default function LoansNewPage() {
                         {selectedCustomer.phone ?? selectedCustomer.email ?? "Sin datos de contacto"}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={clearSelectedCustomer}
-                      className="text-xs font-semibold text-indigo-700 underline-offset-2 hover:underline dark:text-indigo-200"
-                    >
-                      Cambiar
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleEditCustomer}
+                        disabled={customerDetailLoading}
+                        className="text-xs font-semibold text-indigo-700 underline-offset-2 hover:underline dark:text-indigo-200 disabled:opacity-50"
+                      >
+                        {customerDetailLoading ? "Cargando..." : "Editar"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearSelectedCustomer}
+                        className="text-xs font-semibold text-indigo-700 underline-offset-2 hover:underline dark:text-indigo-200"
+                      >
+                        Quitar
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -718,9 +689,9 @@ export default function LoansNewPage() {
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Ticket</label>
               <input
                 value={ticketNumber}
-                onChange={(event) => setTicketNumber(event.target.value)}
+                readOnly
                 type="text"
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
+                className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm shadow-sm cursor-not-allowed dark:border-slate-600 dark:bg-slate-800/60"
                 placeholder="Ej. PAWN-000001"
               />
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -752,116 +723,18 @@ export default function LoansNewPage() {
               ) : null}
             </div>
 
-            <div className="sm:col-span-2">
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Comentarios internos</label>
-              <textarea
-                value={comments}
-                onChange={(event) => setComments(event.target.value)}
-                rows={3}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800"
-                placeholder="Notas internas u observaciones del cliente"
-              />
-            </div>
-          </form>
-        )}
-
-        {currentStep.key === "id_capture" && (
-          <div className="space-y-6">
-            <div>
-              <p className="text-sm text-slate-600 dark:text-slate-300">
-                Firma URLs seguras para que el documento de identidad sea cargado directamente al almacenamiento
-                seguro. Confirma cada archivo una vez terminado el upload en segundo plano.
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center dark:border-slate-600 dark:bg-slate-800/60">
-              <label className="flex cursor-pointer flex-col items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                <Camera className="h-6 w-6 text-indigo-500" />
-                <span className="font-medium">Seleccionar archivo(s)</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={handleSignedUpload}
-                  disabled={idCaptureBusy}
-                />
-              </label>
-              <p className="mt-2 text-xs text-slate-500">
-                JPG, PNG, WEBP, HEIC. Máx. {(5).toFixed(0)}MB por imagen.
-              </p>
-            </div>
-
-            {idCaptureError && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {idCaptureError}
-              </div>
-            )}
-
-            <ul className="space-y-3">
-              {idUploads.map((upload) => (
-                <li
-                  key={upload.id}
-                  className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-800"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="font-medium text-slate-800 dark:text-slate-100">{upload.fileName}</p>
-                      <p className="text-xs text-slate-500">Expira {new Date(upload.expiresAt).toLocaleString()}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {upload.status === "confirmed" ? (
-                        <BadgeCheck className="h-5 w-5 text-emerald-500" />
-                      ) : upload.status === "error" ? (
-                        <span className="rounded-full bg-rose-100 px-2 py-1 text-xs font-medium text-rose-700">
-                          Error
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-                          Pendiente
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => removeUpload(upload)}
-                        className="rounded-md border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
-                      >
-                        Quitar
-                      </button>
-                    </div>
-                  </div>
-                  {upload.assetPath && (
-                    <div className="rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-600">
-                      <span className="font-semibold">Ruta:</span> {upload.assetPath}
-                    </div>
-                  )}
-                  {upload.status !== "confirmed" && upload.assetPath && (
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                      <button
-                        type="button"
-                        onClick={() => markUploadConfirmed(upload)}
-                        className="inline-flex items-center gap-2 rounded-md bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 transition hover:bg-indigo-100"
-                      >
-                        <CheckCircle2 className="h-4 w-4" /> Marcar como subido
-                      </button>
-                      <span>
-                        Confirma después de subir a la URL firmada con tus herramientas habituales. Quedará asociada al
-                        cliente.
-                      </span>
-                    </div>
-                  )}
-                  {upload.error && <p className="text-xs text-rose-600">{upload.error}</p>}
-                </li>
-              ))}
-            </ul>
           </div>
-        )}
+        </section>
 
-        {currentStep.key === "collateral" && (
+        {/* Collateral Section */}
+        <section className="rounded-xl border border-slate-200 bg-white/80 p-8 shadow-lg dark:border-slate-700 dark:bg-slate-900/70">
+          <div className="mb-6 flex items-center gap-3 border-b border-slate-200 pb-3 dark:border-slate-700">
+            <PackagePlus className="h-5 w-5 text-indigo-500" />
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Colateral</h2>
+          </div>
           <div className="space-y-4">
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Registra cada artículo entregado como garantía. Puedes adjuntar una ruta de foto ya cargada en el
-              repositorio.
+              Registra cada artículo entregado como garantía. Puedes adjuntar fotos del artículo.
             </p>
             <div className="space-y-4">
               {collateralItems.map((item, index) => (
@@ -869,14 +742,32 @@ export default function LoansNewPage() {
                   key={index}
                   className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:grid-cols-12"
                 >
-                  <div className="sm:col-span-5">
+                  <div className="sm:col-span-1">
+                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Qty</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={3}
+                      value={item.qty}
+                      onChange={(event) => {
+                        const value = event.target.value.replace(/\D/g, "").slice(0, 3);
+                        updateCollateralItem(index, { qty: value });
+                      }}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-center focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
+                      placeholder="1"
+                    />
+                  </div>
+                  <div className="sm:col-span-4">
                     <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Descripción</label>
                     <input
                       value={item.description}
+                      maxLength={30}
                       onChange={(event) => updateCollateralItem(index, { description: event.target.value })}
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
                       placeholder="Ej. Cadena de oro 14k"
                     />
+                    <p className="mt-1 text-xs text-slate-400">{item.description.length}/30</p>
                   </div>
                   <div className="sm:col-span-3">
                     <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Valor estimado</label>
@@ -888,13 +779,30 @@ export default function LoansNewPage() {
                     />
                   </div>
                   <div className="sm:col-span-3">
-                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Ruta de foto</label>
-                    <input
-                      value={item.photoPath}
-                      onChange={(event) => updateCollateralItem(index, { photoPath: event.target.value })}
-                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
-                      placeholder="Ej. collateral/imagen-123.jpg"
-                    />
+                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Foto</label>
+                    <label className="mt-1 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm transition hover:bg-slate-50 focus-within:border-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900 dark:hover:bg-slate-800">
+                      <Camera className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                      <Plus className="h-3 w-3 text-slate-600 dark:text-slate-300" />
+                      <span className="text-xs text-slate-600 dark:text-slate-300">
+                        {item.photoPath ? "Cambiar foto" : "Seleccionar"}
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            // For now, we'll store the file name. In a real implementation,
+                            // you might want to upload the file and store the path
+                            updateCollateralItem(index, { photoPath: file.name });
+                          }
+                        }}
+                      />
+                    </label>
+                    {item.photoPath && (
+                      <p className="mt-1 truncate text-xs text-slate-500">{item.photoPath}</p>
+                    )}
                   </div>
                   <div className="sm:col-span-1 flex items-end justify-end">
                     {collateralItems.length > 1 && (
@@ -918,9 +826,14 @@ export default function LoansNewPage() {
               <PackagePlus className="h-4 w-4" /> Añadir artículo
             </button>
           </div>
-        )}
+        </section>
 
-        {currentStep.key === "terms" && (
+        {/* Terms Section */}
+        <section className="rounded-xl border border-slate-200 bg-white/80 p-8 shadow-lg dark:border-slate-700 dark:bg-slate-900/70">
+          <div className="mb-6 flex items-center gap-3 border-b border-slate-200 pb-3 dark:border-slate-700">
+            <ShieldCheck className="h-5 w-5 text-indigo-500" />
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Términos</h2>
+          </div>
           <div className="space-y-6">
             {loadingModels ? (
               <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -971,7 +884,7 @@ export default function LoansNewPage() {
               </div>
             )}
 
-            <div className="grid gap-4 sm:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div className="sm:col-span-2">
                 <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Monto prestado</label>
                 <input
@@ -982,22 +895,13 @@ export default function LoansNewPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Cuotas</label>
-                <input
-                  value={termCount}
-                  type="number"
-                  min={1}
-                  onChange={(event) => setTermCount(Math.max(1, Number(event.target.value) || 1))}
-                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
-                />
-              </div>
-              <div>
                 <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Fecha inicial</label>
                 <input
-                  value={startDate}
+                  value={todayIso()}
                   type="date"
-                  onChange={(event) => setStartDate(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
+                  disabled
+                  readOnly
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm cursor-not-allowed dark:border-slate-600 dark:bg-slate-800/60"
                 />
               </div>
             </div>
@@ -1059,10 +963,11 @@ export default function LoansNewPage() {
               </table>
             </div>
           </div>
-        )}
+        </section>
 
-        {currentStep.key === "ticket_print" && submittedTicket && (
-          <form className="space-y-6" onSubmit={submitLoan}>
+        {/* Success Message */}
+        {submittedTicket && (
+          <section className="rounded-xl border border-emerald-300 bg-emerald-50 p-8 shadow-lg dark:border-emerald-500/40 dark:bg-emerald-500/10">
             <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
               <CheckCircle2 className="mr-2 inline h-4 w-4" /> Préstamo registrado exitosamente. Ticket #{submittedTicket.ticketNumber}
             </div>
@@ -1144,7 +1049,6 @@ export default function LoansNewPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setStepIndex(0);
                   setSelectedCustomer(null);
                   setCustomerQuery("");
                   setTicketNumber("");
@@ -1153,12 +1057,9 @@ export default function LoansNewPage() {
                   void loadTicketNumber();
                   setCustomerResults([]);
                   setCustomerSearchError(null);
-                  setCapturedIdPaths([]);
-                  setIdUploads([]);
-                  setCollateralItems([{ description: "", estimatedValue: "", photoPath: "" }]);
+                  setCollateralItems([{ qty: "", description: "", estimatedValue: "", photoPath: "" }]);
                   setSelectedModelId("");
                   setPrincipalAmount("");
-                  setTermCount(1);
                   setManualSchedule([]);
                   setSubmittedTicket(null);
                 }}
@@ -1167,57 +1068,38 @@ export default function LoansNewPage() {
                 Nuevo préstamo
               </button>
             </div>
-          </form>
+          </section>
         )}
 
-        {currentStep.key === "ticket_print" && !submittedTicket && (
-          <form className="space-y-6" onSubmit={submitLoan}>
-            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <p>
-                Revisa toda la información antes de emitir el ticket. Se registrarán los colaterales, calendario de
-                interés y rutas de ID en la base de datos.
-              </p>
-            </div>
-
-            {submissionError && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-600">
-                {submissionError}
+        {/* Submit Section */}
+        {!submittedTicket && (
+          <section className="rounded-xl border border-slate-200 bg-white/80 p-8 shadow-lg dark:border-slate-700 dark:bg-slate-900/70">
+            <div className="space-y-6">
+              <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <p>
+                  Revisa toda la información antes de emitir el ticket. Se registrarán los colaterales, calendario de
+                  interés y rutas de ID en la base de datos.
+                </p>
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={submitting}
-              className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Emitir ticket
-            </button>
-          </form>
+              {submissionError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-600">
+                  {submissionError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={submitting || !canSubmit}
+                className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-6 py-2 text-sm font-semibold text-white shadow transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Emitir ticket
+              </button>
+            </div>
+          </section>
         )}
-      </section>
-
-      <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
-        <button
-          type="button"
-          onClick={goBack}
-          disabled={stepIndex === 0}
-          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <ChevronLeft className="h-4 w-4" /> Atrás
-        </button>
-
-        {currentStep.key !== "ticket_print" && (
-          <button
-            type="button"
-            onClick={goNext}
-            disabled={!canProceed}
-            className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            Siguiente <ChevronRight className="h-4 w-4" />
-          </button>
-        )}
+      </form>
       </div>
-      </main>
       {isCustomerSearchOpen ? (
         <div
           role="dialog"
@@ -1251,8 +1133,9 @@ export default function LoansNewPage() {
               <input
                 value={customerQuery}
                 onChange={(event) => {
-                  setCustomerQuery(event.target.value);
-                  if (selectedCustomer && event.target.value.trim() !== selectedCustomer.fullName) {
+                  const newValue = event.target.value;
+                  setCustomerQuery(newValue);
+                  if (selectedCustomer && newValue.trim() !== selectedCustomer.fullName) {
                     setSelectedCustomer(null);
                   }
                 }}
@@ -1299,6 +1182,160 @@ export default function LoansNewPage() {
                   ))}
                 </ul>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Add Customer Dialog */}
+      <AddCustomerDialog
+        isOpen={isAddCustomerDialogOpen}
+        onClose={() => setIsAddCustomerDialogOpen(false)}
+        onSuccess={(customer) => {
+          const fullName = `${customer.firstName} ${customer.lastName}`.trim();
+          const customerSummary: CustomerSummary = {
+            id: customer.id,
+            fullName,
+            email: customer.email,
+            phone: customer.phone,
+            branchId: null,
+          };
+          setSelectedCustomer(customerSummary);
+          setCustomerQuery(fullName);
+          setCustomerResults([]);
+          setIsAddCustomerDialogOpen(false);
+        }}
+        onError={(error) => setCustomerSearchError(error)}
+      />
+
+      {/* Edit Customer Dialog */}
+      {isEditCustomerDialogOpen && customerDetail ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={() => setIsEditCustomerDialogOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Editar cliente</h2>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Modifica los datos del cliente según sea necesario.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditCustomerDialogOpen(false)}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Cerrar edición de cliente"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {customerDetailError ? (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+                {customerDetailError}
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-1">
+                <label className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-300">
+                  Nombre
+                  <input
+                    value={customerDetail.firstName}
+                    onChange={(event) =>
+                      setCustomerDetail({ ...customerDetail, firstName: event.target.value })
+                    }
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    placeholder="Nombre"
+                  />
+                </label>
+              </div>
+              <div className="sm:col-span-1">
+                <label className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-300">
+                  Apellido
+                  <input
+                    value={customerDetail.lastName}
+                    onChange={(event) =>
+                      setCustomerDetail({ ...customerDetail, lastName: event.target.value })
+                    }
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    placeholder="Apellido"
+                  />
+                </label>
+              </div>
+              <div className="sm:col-span-1">
+                <label className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-300">
+                  Teléfono
+                  <input
+                    type="tel"
+                    value={customerDetail.phone || ""}
+                    onChange={(event) =>
+                      setCustomerDetail({ ...customerDetail, phone: event.target.value || null })
+                    }
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    placeholder="Teléfono"
+                  />
+                </label>
+              </div>
+              <div className="sm:col-span-1">
+                <label className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-300">
+                  Correo electrónico
+                  <input
+                    type="email"
+                    value={customerDetail.email || ""}
+                    onChange={(event) =>
+                      setCustomerDetail({ ...customerDetail, email: event.target.value || null })
+                    }
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    placeholder="Correo electrónico"
+                  />
+                </label>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="flex flex-col gap-2 text-sm text-slate-600 dark:text-slate-300">
+                  Dirección
+                  <textarea
+                    value={customerDetail.address || ""}
+                    onChange={(event) =>
+                      setCustomerDetail({ ...customerDetail, address: event.target.value || null })
+                    }
+                    rows={3}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                    placeholder="Dirección"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsEditCustomerDialogOpen(false)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveCustomer()}
+                disabled={customerSaving || !customerDetail.firstName.trim() || !customerDetail.lastName.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {customerSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Guardando...
+                  </>
+                ) : (
+                  "Guardar"
+                )}
+              </button>
             </div>
           </div>
         </div>
