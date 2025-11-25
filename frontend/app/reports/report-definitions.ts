@@ -87,5 +87,11 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     title: "Shift Reports",
     description: "Audit tender totals, drops, and over/short discrepancies for each shift.",
     href: "/reports/shift-end"
+  },
+  {
+    key: "z-report",
+    title: "Z-Report History",
+    description: "Guarda cada cierre con el conteo del cajón y resalta variaciones que requieran auditoría.",
+    href: "/reports/z-report"
   }
 ];

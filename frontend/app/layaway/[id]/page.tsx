@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { X, AlertTriangle, Trash2 } from "lucide-react";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -114,12 +115,16 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
   const [status, setStatus] = useState<StatusMessage>(null);
   const [actionKey, setActionKey] = useState<string | null>(null);
   const [paymentDraft, setPaymentDraft] = useState({ amount: "", method: "cash", note: "" });
+  const [showPayoffDialog, setShowPayoffDialog] = useState(false);
+  const [pendingPayment, setPendingPayment] = useState<{ amountCents: number; method: string; note?: string } | null>(null);
+  const [paymentToDelete, setPaymentToDelete] = useState<number | null>(null);
+  const [interestModels, setInterestModels] = useState<Array<{ id: number; name: string; periodDays: number }>>([]);
+  const [loadingInterestModels, setLoadingInterestModels] = useState(false);
   const [pawnDraft, setPawnDraft] = useState({
     ticketNumber: "",
     interestModelId: "",
     dueDate: formatInputDate(new Date(Date.now() + 1000 * 60 * 60 * 24 * 30)),
     comments: "",
-    collateralDescription: "",
   });
 
   useEffect(() => {
@@ -177,7 +182,26 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
     }
 
     const amountCents = Math.round(amount * 100);
+    const balanceCents = detail.layaway.balanceCents;
 
+    // Check if payment exceeds balance
+    if (amountCents > balanceCents) {
+      setStatus({ tone: "error", message: `El monto no puede exceder el saldo pendiente de ${formatCurrency(balanceCents)}` });
+      return;
+    }
+
+    // Check if payment would pay off the layaway
+    if (amountCents >= balanceCents) {
+      setPendingPayment({
+        amountCents,
+        method: paymentDraft.method,
+        note: paymentDraft.note?.trim() || undefined,
+      });
+      setShowPayoffDialog(true);
+      return;
+    }
+
+    // Regular payment that doesn't pay off the layaway
     try {
       setActionKey("pay");
       const data = await postAction<LayawayDetail>(`/api/layaways/${layawayId}/pay`, {
@@ -193,6 +217,78 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
       setStatus({ tone: "error", message });
     } finally {
       setActionKey(null);
+    }
+  };
+
+  const handleConfirmPayoff = async () => {
+    if (!detail || !pendingPayment) return;
+
+    try {
+      setActionKey("pay");
+      setShowPayoffDialog(false);
+      
+      // First, register the payment
+      const paymentData = await postAction<LayawayDetail>(`/api/layaways/${layawayId}/pay`, {
+        amountCents: pendingPayment.amountCents,
+        method: pendingPayment.method,
+        note: pendingPayment.note,
+      });
+
+      // Then, complete the layaway
+      const completedData = await postAction<LayawayDetail>(`/api/layaways/${layawayId}/complete`);
+      setDetail(completedData);
+      setStatus({ tone: "success", message: "Pago registrado y layaway completado. Inventario aplicado." });
+      setPaymentDraft({ amount: "", method: paymentDraft.method, note: "" });
+      setPendingPayment(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo procesar el pago y cierre";
+      setStatus({ tone: "error", message });
+      setShowPayoffDialog(true);
+    } finally {
+      setActionKey(null);
+    }
+  };
+
+  const handleCancelPayoff = () => {
+    setShowPayoffDialog(false);
+    setPendingPayment(null);
+  };
+
+  const handleDeletePayment = async (paymentId: number) => {
+    if (!detail) return;
+
+    const payment = detail.payments.find((p) => p.id === paymentId);
+    if (!payment) return;
+
+    const confirmed = window.confirm(
+      `¿Está seguro de que desea eliminar este pago de ${payment.amountFormatted}? Esta acción no se puede deshacer.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setActionKey("delete-payment");
+      setPaymentToDelete(paymentId);
+      const response = await fetch(`${API_BASE_URL}/api/layaways/${layawayId}/payments/${paymentId}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+
+      const data = (await response.json().catch(() => ({}))) as LayawayDetail & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? "No se pudo eliminar el pago");
+      }
+
+      setDetail(data);
+      setStatus({ tone: "success", message: "Pago eliminado correctamente" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo eliminar el pago";
+      setStatus({ tone: "error", message });
+    } finally {
+      setActionKey(null);
+      setPaymentToDelete(null);
     }
   };
 
@@ -238,10 +334,89 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
     }
   };
 
+  const loadNextTicketNumber = useCallback(async () => {
+    if (!detail) return;
+
+    const branchId = detail.layaway.branchId;
+    if (!Number.isInteger(branchId) || branchId <= 0) {
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams();
+      params.set("branchId", String(branchId));
+
+      const response = await fetch(`${API_BASE_URL}/api/loans/next-ticket?${params.toString()}`, {
+        headers: { Accept: "application/json" },
+      });
+
+      const data = (await response.json().catch(() => ({}))) as { ticketNumber?: string } & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? "No se pudo obtener el número de ticket");
+      }
+
+      const generated = data.ticketNumber?.trim();
+      if (generated && generated.length > 0) {
+        setPawnDraft((draft) => ({ ...draft, ticketNumber: generated }));
+      }
+    } catch (error) {
+      // Silently fail - user can still enter ticket number manually
+      console.error("Failed to load next ticket number:", error);
+    }
+  }, [detail]);
+
+  useEffect(() => {
+    if (detail && detail.layaway.status === "active" && detail.layaway.isOverdue) {
+      void loadNextTicketNumber();
+    }
+  }, [detail, loadNextTicketNumber]);
+
+  // Load interest models
+  useEffect(() => {
+    const loadInterestModels = async () => {
+      setLoadingInterestModels(true);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/interest-models`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) {
+          throw new Error("No se pudieron cargar los modelos de interés");
+        }
+        const data = await response.json();
+        setInterestModels(data.interestModels ?? []);
+      } catch (error) {
+        console.error("Failed to load interest models:", error);
+      } finally {
+        setLoadingInterestModels(false);
+      }
+    };
+    void loadInterestModels();
+  }, []);
+
+  // Update due date when interest model changes
+  useEffect(() => {
+    if (pawnDraft.interestModelId) {
+      const modelId = Number(pawnDraft.interestModelId);
+      const model = interestModels.find((m) => m.id === modelId);
+      if (model && model.periodDays) {
+        const newDueDate = new Date();
+        newDueDate.setDate(newDueDate.getDate() + model.periodDays);
+        setPawnDraft((prev) => ({
+          ...prev,
+          dueDate: formatInputDate(newDueDate),
+        }));
+      }
+    }
+  }, [pawnDraft.interestModelId, interestModels]);
+
   const handlePawn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!detail) return;
+
+    // Fetch fresh ticket number right before submission to handle concurrent loan creation
+    await loadNextTicketNumber();
 
     const interestModelId = Number(pawnDraft.interestModelId);
 
@@ -258,11 +433,10 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
     try {
       setActionKey("pawn");
       const payload = {
-        ticketNumber: pawnDraft.ticketNumber,
+        ticketNumber: pawnDraft.ticketNumber.trim(),
         interestModelId,
         dueDate: pawnDraft.dueDate,
         comments: pawnDraft.comments?.trim() || undefined,
-        collateralDescription: pawnDraft.collateralDescription?.trim() || undefined,
       };
       const data = await postAction<LayawayDetail>(`/api/layaways/${layawayId}/pawn`, payload);
       setDetail(data);
@@ -403,12 +577,13 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
                         <th className="px-4 py-3">Método</th>
                         <th className="px-4 py-3">Monto</th>
                         <th className="px-4 py-3">Nota</th>
+                        <th className="px-4 py-3 text-right">Acciones</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {detail.payments.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-500">
+                          <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500">
                             No se han registrado pagos todavía.
                           </td>
                         </tr>
@@ -421,6 +596,21 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
                             <td className="px-4 py-3 text-slate-700">{payment.method.toUpperCase()}</td>
                             <td className="px-4 py-3 font-medium text-emerald-700">{payment.amountFormatted}</td>
                             <td className="px-4 py-3 text-slate-600">{payment.note ?? "—"}</td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePayment(payment.id)}
+                                disabled={
+                                  detail.layaway.status !== "active" ||
+                                  actionKey === "delete-payment" ||
+                                  paymentToDelete === payment.id
+                                }
+                                className="rounded-lg p-2 text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-400 dark:hover:bg-rose-900/30 dark:hover:text-rose-300"
+                                title="Eliminar pago"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
                           </tr>
                         ))
                       )}
@@ -444,9 +634,15 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
                     type="number"
                     min={0.01}
+                    max={detail.layaway.balanceCents / 100}
                     step={0.01}
                     disabled={detail.layaway.status !== "active"}
                   />
+                  {detail.layaway.balanceCents > 0 && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Saldo pendiente: {formatCurrency(detail.layaway.balanceCents)}
+                    </p>
+                  )}
                 </label>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Método
@@ -521,20 +717,34 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
                   <input
                     value={pawnDraft.ticketNumber}
                     onChange={(event) => setPawnDraft((draft) => ({ ...draft, ticketNumber: event.target.value }))}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400"
                     placeholder="PAW-0001"
-                    disabled={!detail.layaway.isOverdue || detail.layaway.status !== "active"}
+                    disabled={true}
+                    readOnly
                   />
                 </label>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Modelo de interés (ID)
-                  <input
-                    value={pawnDraft.interestModelId}
-                    onChange={(event) => setPawnDraft((draft) => ({ ...draft, interestModelId: event.target.value }))}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    placeholder="2"
-                    disabled={!detail.layaway.isOverdue || detail.layaway.status !== "active"}
-                  />
+                  Modelo de interés <span className="text-rose-500">*</span>
+                  {loadingInterestModels ? (
+                    <div className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500 dark:border-slate-600 dark:bg-slate-800">
+                      Cargando modelos...
+                    </div>
+                  ) : (
+                    <select
+                      value={pawnDraft.interestModelId}
+                      onChange={(event) => setPawnDraft((draft) => ({ ...draft, interestModelId: event.target.value }))}
+                      className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                      disabled={!detail.layaway.isOverdue || detail.layaway.status !== "active"}
+                      required
+                    >
+                      <option value="">Seleccionar modelo...</option>
+                      {interestModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name} ({model.periodDays} días)
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </label>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Vence el préstamo
@@ -542,19 +752,15 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
                     type="date"
                     value={pawnDraft.dueDate}
                     onChange={(event) => setPawnDraft((draft) => ({ ...draft, dueDate: event.target.value }))}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    disabled={!detail.layaway.isOverdue || detail.layaway.status !== "active"}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                    disabled={true}
+                    readOnly
                   />
-                </label>
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Descripción de colateral
-                  <input
-                    value={pawnDraft.collateralDescription}
-                    onChange={(event) => setPawnDraft((draft) => ({ ...draft, collateralDescription: event.target.value }))}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    placeholder="Equipo devuelto en tienda"
-                    disabled={!detail.layaway.isOverdue || detail.layaway.status !== "active"}
-                  />
+                  {pawnDraft.interestModelId && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Calculado automáticamente según el modelo de interés seleccionado
+                    </p>
+                  )}
                 </label>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Comentarios internos
@@ -577,6 +783,88 @@ export default function LayawayDetailPage({ params }: { params: { id: string } }
               </form>
             </aside>
           </section>
+
+          {/* Payoff Confirmation Dialog */}
+          {showPayoffDialog && pendingPayment && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+              onClick={handleCancelPayoff}
+            >
+              <div
+                className="w-full max-w-md space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-full bg-amber-100 p-2 dark:bg-amber-500/20">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-300" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Confirmar pago completo</h2>
+                      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                        Este pago completará el saldo pendiente del layaway.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCancelPayoff}
+                    className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                    aria-label="Cerrar"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                  <p className="font-medium">El layaway será pagado y cerrado automáticamente.</p>
+                  <p className="mt-1">El inventario será dado de baja y los artículos estarán disponibles para entrega.</p>
+                </div>
+
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-slate-400">Monto del pago:</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {formatCurrency(pendingPayment.amountCents)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 dark:text-slate-400">Saldo pendiente:</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {formatCurrency(detail.layaway.balanceCents)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-200 pt-2 dark:border-slate-700">
+                    <span className="font-medium text-slate-900 dark:text-white">Saldo después del pago:</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(Math.max(0, detail.layaway.balanceCents - pendingPayment.amountCents))}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCancelPayoff}
+                    disabled={actionKey === "pay"}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:border-slate-500"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmPayoff}
+                    disabled={actionKey === "pay"}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {actionKey === "pay" ? "Procesando…" : "Confirmar y cerrar"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">

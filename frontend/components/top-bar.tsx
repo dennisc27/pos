@@ -5,8 +5,8 @@ import { createPortal } from "react-dom";
 import { Bell, Calculator, Loader2, MoonStar, Search, Store, SunMedium, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
-
-type Theme = "light" | "dark";
+import { useCurrentUser } from "@/components/providers/current-user-provider";
+import { useTheme } from "@/components/providers/theme-provider";
 
 type CalculatorButton = {
   label: string;
@@ -14,8 +14,6 @@ type CalculatorButton = {
   variant: "muted" | "accent" | "default" | "primary";
   span?: number;
 };
-
-const THEME_STORAGE_KEY = "command-center-theme";
 
 function formatResult(value: number) {
   if (!Number.isFinite(value)) {
@@ -25,20 +23,10 @@ function formatResult(value: number) {
   return formatted.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
 }
 
-function applyTheme(theme: Theme) {
-  if (typeof document === "undefined") {
-    return;
-  }
-
-  const root = document.documentElement;
-  root.classList.toggle("dark", theme === "dark");
-  root.classList.toggle("light", theme === "light");
-  root.setAttribute("data-theme", theme);
-}
-
 export function TopBar() {
   const { branch, loading: branchLoading, error: branchError } = useActiveBranch();
-  const [theme, setTheme] = useState<Theme>("light");
+  const { user, loading: userLoading } = useCurrentUser();
+  const { theme, setTheme } = useTheme();
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   const [displayValue, setDisplayValue] = useState("0");
   const [accumulator, setAccumulator] = useState<number | null>(null);
@@ -234,32 +222,11 @@ export function TopBar() {
   }, [closeCalculator, handleBackspace, handleDecimal, handleDigit, handleEquals, handleOperator, isCalculatorOpen]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === "light" || stored === "dark") {
-      setTheme(stored);
-      applyTheme(stored);
-      return;
-    }
-    applyTheme("light");
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    applyTheme(theme);
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
-
-  useEffect(() => {
     setIsClient(true);
   }, []);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+    setTheme(theme === "dark" ? "light" : "dark");
   };
 
   const calculatorButtons = useMemo<CalculatorButton[]>(
@@ -350,7 +317,7 @@ export function TopBar() {
         </button>
         <div className="hidden items-center gap-2 rounded-full border border-slate-200/70 bg-white px-3 py-1 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 lg:flex">
           <span className="h-2 w-2 rounded-full bg-emerald-500 dark:bg-emerald-400" />
-          <span className="font-medium">Maria P.</span>
+          <span className="font-medium">{userLoading ? "Cargando..." : user?.fullName ?? "Usuario"}</span>
         </div>
       </div>
       {isClient && isCalculatorOpen

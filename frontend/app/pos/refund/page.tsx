@@ -29,6 +29,7 @@ type ApiInvoice = {
   createdAt: string | null;
   customerName: string;
   userId: number;
+  branchId: number;
 };
 
 type ApiInvoiceLine = {
@@ -396,7 +397,28 @@ export default function PosRefundPage() {
     setSubmitMessage("Posting refund...");
 
     try {
-      const payload = {
+      // Get active shift for the branch to associate refunds
+      let activeShiftId: number | null = null;
+      if (activeInvoice?.invoice?.branchId) {
+        try {
+          const shiftResponse = await fetch(`${API_BASE_URL}/api/shifts/active?branchId=${activeInvoice.invoice.branchId}`);
+          if (shiftResponse.ok) {
+            const shiftData = await shiftResponse.json();
+            activeShiftId = shiftData.shift?.id ?? null;
+          }
+        } catch {
+          // If shift lookup fails, continue without shiftId
+        }
+      }
+
+      const payload: {
+        invoiceNo: string;
+        method: string;
+        lines: Array<{ orderItemId: number; qty: number; restock: boolean }>;
+        reason: string | null;
+        notes: string | null;
+        shiftId?: number;
+      } = {
         invoiceNo: activeInvoice.invoice.invoiceNo,
         method: refundMethod,
         lines: selectedLines.map(({ line, selection }) => ({
@@ -407,6 +429,11 @@ export default function PosRefundPage() {
         reason: reasonCode,
         notes: noteInput.trim() || null,
       };
+
+      // Add shiftId if available
+      if (activeShiftId !== null) {
+        payload.shiftId = activeShiftId;
+      }
 
       const response = await fetch(`${API_BASE_URL}/api/refunds`, {
         method: "POST",

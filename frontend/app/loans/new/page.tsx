@@ -43,6 +43,8 @@ type LoanScheduleRow = {
 type CollateralItem = {
   qty: string;
   description: string;
+  kilate: string;
+  weight: string;
   estimatedValue: string;
   photoPath: string;
 };
@@ -166,13 +168,17 @@ export default function LoansNewPage() {
   const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
   const [isCustomerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [isAddCustomerDialogOpen, setIsAddCustomerDialogOpen] = useState(false);
+  const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [ticketNumber, setTicketNumber] = useState("");
   const [ticketLoading, setTicketLoading] = useState(false);
   const [ticketError, setTicketError] = useState<string | null>(null);
 
 
   const [collateralItems, setCollateralItems] = useState<CollateralItem[]>([
-    { qty: "", description: "", estimatedValue: "", photoPath: "" },
+    { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" },
+    { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" },
+    { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" },
+    { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" },
   ]);
 
   const [selectedModelId, setSelectedModelId] = useState<string>("");
@@ -497,11 +503,21 @@ export default function LoansNewPage() {
   };
 
   const addCollateralRow = () => {
-    setCollateralItems((previous) => [...previous, { qty: "", description: "", estimatedValue: "", photoPath: "" }]);
+    setCollateralItems((previous) => {
+      if (previous.length >= 4) return previous;
+      return [...previous, { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" }];
+    });
   };
 
   const removeCollateralRow = (index: number) => {
-    setCollateralItems((previous) => previous.filter((_, idx) => idx !== index));
+    setCollateralItems((previous) => {
+      const filtered = previous.filter((_, idx) => idx !== index);
+      // If we have less than 4 items after removal, add an empty one at the end
+      if (filtered.length < 4) {
+        return [...filtered, { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" }];
+      }
+      return filtered;
+    });
   };
 
   const handleScheduleChange = (index: number, patch: Partial<LoanScheduleRow>) => {
@@ -559,9 +575,36 @@ export default function LoansNewPage() {
         return;
       }
 
-      const payload = await postJson<{
-        loan: { id: number; ticketNumber: string };
-      }>("/api/loans", {
+      // Get active shift for the branch to associate loan payout
+      let activeShiftId: number | null = null;
+      if (activeBranch) {
+        try {
+          const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+          const shiftResponse = await fetch(`${API_BASE_URL}/api/shifts/active?branchId=${activeBranch.id}`);
+          if (shiftResponse.ok) {
+            const shiftData = await shiftResponse.json();
+            activeShiftId = shiftData.shift?.id ?? null;
+          }
+        } catch {
+          // If shift lookup fails, continue without shiftId
+        }
+      }
+
+      const payloadData: {
+        branchId: number;
+        customerId: number;
+        ticketNumber: string;
+        interestModelId: number;
+        principalCents: number;
+        schedule: Array<{ dueOn: string; interestCents: number; feeCents: number }>;
+        collateral: Array<{
+          description: string;
+          estimatedValueCents: number;
+          photoPath: string | null;
+        }>;
+        idImagePaths: never[];
+        shiftId?: number;
+      } = {
         branchId: numericBranchId,
         customerId: numericCustomerId,
         ticketNumber: ticketNumber.trim(),
@@ -580,7 +623,16 @@ export default function LoansNewPage() {
             photoPath: item.photoPath.trim() || null,
           })),
         idImagePaths: [],
-      });
+      };
+
+      // Add shiftId if available
+      if (activeShiftId !== null) {
+        payloadData.shiftId = activeShiftId;
+      }
+
+      const payload = await postJson<{
+        loan: { id: number; ticketNumber: string };
+      }>("/api/loans", payloadData);
 
       setSubmittedTicket({ loanId: payload.loan.id, ticketNumber: payload.loan.ticketNumber });
     } catch (error) {
@@ -648,6 +700,14 @@ export default function LoansNewPage() {
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-500/20"
                 >
                   <Search className="h-4 w-4" /> Buscar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAddCustomerDialogOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
+                >
+                  <Plus className="h-4 w-4" />
+                  Agregar
                 </button>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -758,7 +818,7 @@ export default function LoansNewPage() {
                       placeholder="1"
                     />
                   </div>
-                  <div className="sm:col-span-4">
+                  <div className="sm:col-span-3">
                     <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Descripción</label>
                     <input
                       value={item.description}
@@ -769,6 +829,24 @@ export default function LoansNewPage() {
                     />
                     <p className="mt-1 text-xs text-slate-400">{item.description.length}/30</p>
                   </div>
+                  <div className="sm:col-span-1">
+                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Kilate</label>
+                    <input
+                      value={item.kilate}
+                      onChange={(event) => updateCollateralItem(index, { kilate: event.target.value })}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-center focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
+                      placeholder="14k"
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Peso</label>
+                    <input
+                      value={item.weight}
+                      onChange={(event) => updateCollateralItem(index, { weight: event.target.value })}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-center focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
+                      placeholder="g"
+                    />
+                  </div>
                   <div className="sm:col-span-3">
                     <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Valor estimado</label>
                     <input
@@ -778,14 +856,10 @@ export default function LoansNewPage() {
                       placeholder="RD$"
                     />
                   </div>
-                  <div className="sm:col-span-3">
+                  <div className="sm:col-span-2">
                     <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Foto</label>
-                    <label className="mt-1 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm transition hover:bg-slate-50 focus-within:border-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900 dark:hover:bg-slate-800">
+                    <label className="mt-1 flex cursor-pointer items-center justify-center rounded-lg border border-slate-300 bg-white p-2 text-sm transition hover:bg-slate-50 focus-within:border-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900 dark:hover:bg-slate-800">
                       <Camera className="h-4 w-4 text-slate-600 dark:text-slate-300" />
-                      <Plus className="h-3 w-3 text-slate-600 dark:text-slate-300" />
-                      <span className="text-xs text-slate-600 dark:text-slate-300">
-                        {item.photoPath ? "Cambiar foto" : "Seleccionar"}
-                      </span>
                       <input
                         type="file"
                         accept="image/*"
@@ -805,15 +879,13 @@ export default function LoansNewPage() {
                     )}
                   </div>
                   <div className="sm:col-span-1 flex items-end justify-end">
-                    {collateralItems.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeCollateralRow(index)}
-                        className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-600 transition hover:bg-rose-100"
-                      >
-                        Quitar
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeCollateralRow(index)}
+                      className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-600 transition hover:bg-rose-100"
+                    >
+                      Quitar
+                    </button>
                   </div>
                 </div>
               ))}
@@ -821,7 +893,8 @@ export default function LoansNewPage() {
             <button
               type="button"
               onClick={addCollateralRow}
-              className="inline-flex items-center gap-2 rounded-lg border border-dashed border-indigo-400 px-4 py-2 text-sm font-medium text-indigo-600 transition hover:bg-indigo-50"
+              disabled={collateralItems.length >= 4}
+              className="inline-flex items-center gap-2 rounded-lg border border-dashed border-indigo-400 px-4 py-2 text-sm font-medium text-indigo-600 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
             >
               <PackagePlus className="h-4 w-4" /> Añadir artículo
             </button>
@@ -906,62 +979,14 @@ export default function LoansNewPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[480px] table-fixed border-collapse overflow-hidden rounded-lg border border-slate-200 text-sm shadow-sm dark:border-slate-700">
-                <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                  <tr>
-                    <th className="px-4 py-2 text-left">#</th>
-                    <th className="px-4 py-2 text-left">Vence</th>
-                    <th className="px-4 py-2 text-left">Interés</th>
-                    <th className="px-4 py-2 text-left">Cargo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {manualSchedule.map((row, index) => (
-                    <tr key={index} className="border-t border-slate-200 dark:border-slate-700">
-                      <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{index + 1}</td>
-                      <td className="px-4 py-2">
-                        <input
-                          value={row.dueOn}
-                          onChange={(event) => handleScheduleChange(index, { dueOn: event.target.value })}
-                          type="date"
-                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
-                        />
-                      </td>
-                      <td className="px-4 py-2">
-                        <input
-                          value={(row.interestCents / 100).toFixed(2)}
-                          onChange={(event) =>
-                            handleScheduleChange(index, {
-                              interestCents: Math.max(0, Math.round(Number(event.target.value) * 100 || 0)),
-                            })
-                          }
-                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
-                        />
-                      </td>
-                      <td className="px-4 py-2">
-                        <input
-                          value={(row.feeCents / 100).toFixed(2)}
-                          onChange={(event) =>
-                            handleScheduleChange(index, {
-                              feeCents: Math.max(0, Math.round(Number(event.target.value) * 100 || 0)),
-                            })
-                          }
-                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                  {manualSchedule.length === 0 && (
-                    <tr>
-                      <td className="px-4 py-6 text-center text-xs text-slate-500" colSpan={4}>
-                        Selecciona un modelo y completa el monto para ver el calendario sugerido.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsScheduleDialogOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-600 transition hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-500/20"
+            >
+              <FileText className="h-4 w-4" />
+              Ver términos
+            </button>
           </div>
         </section>
 
@@ -1057,7 +1082,12 @@ export default function LoansNewPage() {
                   void loadTicketNumber();
                   setCustomerResults([]);
                   setCustomerSearchError(null);
-                  setCollateralItems([{ qty: "", description: "", estimatedValue: "", photoPath: "" }]);
+                  setCollateralItems([
+                    { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" },
+                    { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" },
+                    { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" },
+                    { qty: "", description: "", kilate: "", weight: "", estimatedValue: "", photoPath: "" },
+                  ]);
                   setSelectedModelId("");
                   setPrincipalAmount("");
                   setManualSchedule([]);
@@ -1336,6 +1366,95 @@ export default function LoansNewPage() {
                   "Guardar"
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Schedule Terms Dialog */}
+      {isScheduleDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={() => setIsScheduleDialogOpen(false)}
+        >
+          <div
+            className="w-full max-w-4xl space-y-6 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Términos del préstamo</h2>
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Calendario de pagos y términos del préstamo.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsScheduleDialogOpen(false)}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Cerrar diálogo"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[480px] table-fixed border-collapse overflow-hidden rounded-lg border border-slate-200 text-sm shadow-sm dark:border-slate-700">
+                <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  <tr>
+                    <th className="px-4 py-2 text-left">#</th>
+                    <th className="px-4 py-2 text-left">Vence</th>
+                    <th className="px-4 py-2 text-left">Interés</th>
+                    <th className="px-4 py-2 text-left">Cargo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {manualSchedule.map((row, index) => (
+                    <tr key={index} className="border-t border-slate-200 dark:border-slate-700">
+                      <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{index + 1}</td>
+                      <td className="px-4 py-2">
+                        <input
+                          value={row.dueOn}
+                          onChange={(event) => handleScheduleChange(index, { dueOn: event.target.value })}
+                          type="date"
+                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          value={(row.interestCents / 100).toFixed(2)}
+                          onChange={(event) =>
+                            handleScheduleChange(index, {
+                              interestCents: Math.max(0, Math.round(Number(event.target.value) * 100 || 0)),
+                            })
+                          }
+                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          value={(row.feeCents / 100).toFixed(2)}
+                          onChange={(event) =>
+                            handleScheduleChange(index, {
+                              feeCents: Math.max(0, Math.round(Number(event.target.value) * 100 || 0)),
+                            })
+                          }
+                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-900"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                  {manualSchedule.length === 0 && (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-xs text-slate-500" colSpan={4}>
+                        Selecciona un modelo y completa el monto para ver el calendario sugerido.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

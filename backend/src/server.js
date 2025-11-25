@@ -100,6 +100,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import backupRouter from './routes/backup.js';
 
 // Load environment variables
 dotenv.config();
@@ -124,6 +125,9 @@ app.use(cors({
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Mount backup routes
+app.use('/api/backup', backupRouter);
 
 const hexRegex = /^[0-9a-f]+$/i;
 
@@ -1856,6 +1860,7 @@ async function prepareLoanCreationInput(executor, payload, { allowZeroInterest =
     schedule = [],
     collateral = [],
     idImagePaths = [],
+    shiftId = null,
   } = payload ?? {};
 
   if (branchId == null || customerId == null) {
@@ -1930,9 +1935,9 @@ async function prepareLoanCreationInput(executor, payload, { allowZeroInterest =
     throw new HttpError(400, `principalCents must be at least ${minPrincipal}`);
   }
 
-  if (maxPrincipal != null && roundedPrincipal > maxPrincipal) {
-    throw new HttpError(400, `principalCents must be at most ${maxPrincipal}`);
-  }
+  // Note: maxPrincipalCents validation is disabled to allow flexible loan amounts
+  // The maxPrincipalCents field in interest models is kept for informational purposes only
+  // If you need to enforce maximum loan amounts, implement it at the business logic level
 
   const [existingTicket] = await executor
     .select({ id: loans.id })
@@ -1947,6 +1952,20 @@ async function prepareLoanCreationInput(executor, payload, { allowZeroInterest =
   const normalizedComments = normalizeOptionalString(comments, { maxLength: 2000 });
   const rateDecimal = (Number(model.interestRateBps) / 10000).toFixed(4);
 
+  // Auto-assign shiftId if not provided
+  let resolvedShiftId = shiftId === null || shiftId === undefined || shiftId === '' ? null : Number(shiftId);
+  if (!resolvedShiftId) {
+    const [activeShift] = await executor
+      .select({ id: shifts.id })
+      .from(shifts)
+      .where(and(eq(shifts.branchId, numericBranchId), isNull(shifts.closedAt)))
+      .orderBy(desc(shifts.id))
+      .limit(1);
+    if (activeShift) {
+      resolvedShiftId = Number(activeShift.id);
+    }
+  }
+
   return {
     branchId: numericBranchId,
     customerId: numericCustomerId,
@@ -1959,6 +1978,7 @@ async function prepareLoanCreationInput(executor, payload, { allowZeroInterest =
     schedule: normalizedSchedule,
     collateral: normalizedCollateral,
     idImagePaths: normalizedIdImagePaths,
+    shiftId: resolvedShiftId,
   };
 }
 
@@ -2062,6 +2082,16 @@ async function createLoanWithPreparedPayload(executor, prepared) {
     }
   }
 
+  // Create cash movement for loan principal payout if shiftId is provided
+  if (prepared.shiftId != null) {
+    await executor.insert(cashMovements).values({
+      shiftId: prepared.shiftId,
+      kind: 'paid_out',
+      amountCents: Number(loanRow.principalCents),
+      reason: `Loan principal payout for ticket #${loanRow.ticketNumber}`,
+    });
+  }
+
   return {
     loan: loanRow,
     collateral: collateralRows,
@@ -2117,39 +2147,59 @@ async function reserveLayawayInventory(executor, { orderId, branchId }) {
       continue;
     }
 
+    // First, get the product code info for better error messages
+    const [codeRow] = await executor
+      .select({
+        id: productCodes.id,
+        code: productCodes.code,
+        name: productCodes.name,
+      })
+      .from(productCodes)
+      .where(eq(productCodes.id, item.codeId))
+      .limit(1);
+
+    if (!codeRow) {
+      throw new HttpError(400, `Product code ${item.codeId} not found`);
+    }
+
+    // Now find the version for this code and branch
     const [versionRow] = await executor
       .select({
         id: productCodeVersions.id,
         branchId: productCodeVersions.branchId,
         qtyOnHand: productCodeVersions.qtyOnHand,
         qtyReserved: productCodeVersions.qtyReserved,
-        code: productCodes.code,
-        name: productCodes.name,
       })
       .from(productCodeVersions)
-      .innerJoin(productCodes, eq(productCodes.id, productCodeVersions.productCodeId))
       .where(
         branchId != null
-          ? and(eq(productCodes.id, item.codeId), eq(productCodeVersions.branchId, branchId))
-          : eq(productCodes.id, item.codeId)
+          ? and(eq(productCodeVersions.productCodeId, item.codeId), eq(productCodeVersions.branchId, branchId))
+          : eq(productCodeVersions.productCodeId, item.codeId)
       )
       .limit(1);
 
     if (!versionRow) {
-      throw new HttpError(400, 'Product code version not found for order item');
+      const productLabel = codeRow.code
+        ? `${codeRow.code} · ${codeRow.name ?? ''}`.trim()
+        : codeRow.name ?? `Product #${codeRow.id}`;
+      const branchInfo = branchId != null ? ` for branch ${branchId}` : '';
+      throw new HttpError(400, `Product code version not found for ${productLabel}${branchInfo}. Please ensure the product has inventory in this branch.`);
     }
 
     if (branchId != null && Number(versionRow.branchId) !== Number(branchId)) {
-      throw new HttpError(400, 'Order item belongs to a different branch');
+      const productLabel = codeRow.code
+        ? `${codeRow.code} · ${codeRow.name ?? ''}`.trim()
+        : codeRow.name ?? `Product #${codeRow.id}`;
+      throw new HttpError(400, `Order item ${productLabel} belongs to a different branch`);
     }
 
     const available = Number(versionRow.qtyOnHand ?? 0) - Number(versionRow.qtyReserved ?? 0);
 
     if (available < qty) {
-      const label = versionRow.code
-        ? `${versionRow.code} · ${versionRow.name ?? ''}`.trim()
-        : versionRow.name ?? `#${versionRow.id}`;
-      throw new HttpError(409, `Insufficient quantity to reserve for ${label}`);
+      const label = codeRow.code
+        ? `${codeRow.code} · ${codeRow.name ?? ''}`.trim()
+        : codeRow.name ?? `Product #${codeRow.id}`;
+      throw new HttpError(409, `Insufficient quantity to reserve for ${label} (available: ${available}, requested: ${qty})`);
     }
 
     await executor
@@ -2183,9 +2233,13 @@ async function releaseLayawayInventory(executor, orderId) {
       .limit(1);
 
     if (versionRow) {
+      // Release reserved inventory and return it to available stock
       await executor
         .update(productCodeVersions)
-        .set({ qtyReserved: sql`GREATEST(${productCodeVersions.qtyReserved} - ${qty}, 0)` })
+        .set({ 
+          qtyReserved: sql`GREATEST(${productCodeVersions.qtyReserved} - ${qty}, 0)`,
+          qtyOnHand: sql`${productCodeVersions.qtyOnHand} + ${qty}`
+        })
         .where(eq(productCodeVersions.id, versionRow.id));
     }
   }
@@ -2395,6 +2449,19 @@ async function buildLayawayDashboardSnapshot(referenceDate = new Date()) {
 
   const completedToday = Number(completedTodayRow?.count ?? 0);
 
+  const [cancelledTodayRow] = await db
+    .select({ count: sql`COUNT(*)` })
+    .from(layaways)
+    .where(
+      and(
+        eq(layaways.status, 'cancelled'),
+        gte(layaways.updatedAt, todayStart),
+        lt(layaways.updatedAt, tomorrowStart),
+      ),
+    );
+
+  const cancelledToday = Number(cancelledTodayRow?.count ?? 0);
+
   const activePlans = [];
   const overduePlans = [];
 
@@ -2589,6 +2656,7 @@ async function buildLayawayDashboardSnapshot(referenceDate = new Date()) {
       activeCount: activePlans.length,
       overdueCount: overduePlans.length,
       completedToday,
+      cancelledToday,
       paymentsTodayCents,
       paymentsTodayCount,
       outstandingCents: outstandingTotalCents,
@@ -4016,6 +4084,167 @@ async function loadShiftMovements(shiftId) {
   };
 }
 
+async function loadAllCashTransactions(shiftId) {
+  const [shift] = await db
+    .select(shiftSelection)
+    .from(shifts)
+    .where(eq(shifts.id, shiftId))
+    .limit(1);
+
+  if (!shift) {
+    return null;
+  }
+
+  const shiftStartDate = shift.openedAt instanceof Date ? shift.openedAt : new Date(shift.openedAt);
+  const shiftEndDate = shift.closedAt 
+    ? (shift.closedAt instanceof Date ? shift.closedAt : new Date(shift.closedAt))
+    : new Date();
+  
+  const branchId = Number(shift.branchId);
+
+  // 1. Cash movements (manual adjustments)
+  const cashMovementRows = await db
+    .select(cashMovementSelection)
+    .from(cashMovements)
+    .where(eq(cashMovements.shiftId, shiftId))
+    .orderBy(desc(cashMovements.createdAt));
+
+  // 2. Payments with cash method and shiftId
+  const paymentRows = await db
+    .select({
+      id: payments.id,
+      orderId: payments.orderId,
+      invoiceId: payments.invoiceId,
+      method: payments.method,
+      amountCents: payments.amountCents,
+      createdAt: payments.createdAt,
+    })
+    .from(payments)
+    .where(and(
+      eq(payments.shiftId, shiftId),
+      eq(payments.method, 'cash')
+    ))
+    .orderBy(desc(payments.createdAt));
+
+  // 3. Loan payments with cash method (filtered by shift date range and branch)
+  const loanPaymentRows = await db
+    .select({
+      id: loanPayments.id,
+      loanId: loanPayments.loanId,
+      kind: loanPayments.kind,
+      amountCents: loanPayments.amountCents,
+      method: loanPayments.method,
+      createdAt: loanPayments.createdAt,
+    })
+    .from(loanPayments)
+    .innerJoin(loans, eq(loanPayments.loanId, loans.id))
+    .where(and(
+      eq(loanPayments.method, 'cash'),
+      eq(loans.branchId, branchId),
+      gte(loanPayments.createdAt, shiftStartDate),
+      lte(loanPayments.createdAt, shiftEndDate)
+    ))
+    .orderBy(desc(loanPayments.createdAt));
+
+  // 4. Layaway payments with cash method (filtered by shift date range and branch)
+  const layawayPaymentRows = await db
+    .select({
+      id: layawayPayments.id,
+      layawayId: layawayPayments.layawayId,
+      amountCents: layawayPayments.amountCents,
+      method: layawayPayments.method,
+      note: layawayPayments.note,
+      createdAt: layawayPayments.createdAt,
+    })
+    .from(layawayPayments)
+    .innerJoin(layaways, eq(layawayPayments.layawayId, layaways.id))
+    .where(and(
+      eq(layawayPayments.method, 'cash'),
+      eq(layaways.branchId, branchId),
+      gte(layawayPayments.createdAt, shiftStartDate),
+      lte(layawayPayments.createdAt, shiftEndDate)
+    ))
+    .orderBy(desc(layawayPayments.createdAt));
+
+  // 5. Sales returns with cash refund method (filtered by shift date range and branch)
+  const refundRows = await db
+    .select({
+      id: salesReturns.id,
+      invoiceId: salesReturns.invoiceId,
+      orderId: salesReturns.orderId,
+      refundMethod: salesReturns.refundMethod,
+      totalRefundCents: salesReturns.totalRefundCents,
+      reason: salesReturns.reason,
+      createdAt: salesReturns.createdAt,
+    })
+    .from(salesReturns)
+    .where(and(
+      eq(salesReturns.refundMethod, 'cash'),
+      eq(salesReturns.branchId, branchId),
+      gte(salesReturns.createdAt, shiftStartDate),
+      lte(salesReturns.createdAt, shiftEndDate)
+    ))
+    .orderBy(desc(salesReturns.createdAt));
+
+  // Consolidate all transactions into a unified format
+  const allTransactions = [
+    ...cashMovementRows.map((row) => ({
+      id: `cash_movement_${row.id}`,
+      type: 'adjustment',
+      kind: row.kind,
+      amountCents: Number(row.amountCents ?? 0),
+      reason: row.reason,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+      metadata: { cashMovementId: row.id },
+    })),
+    ...paymentRows.map((row) => ({
+      id: `payment_${row.id}`,
+      type: 'sale',
+      kind: 'sale',
+      amountCents: Number(row.amountCents ?? 0),
+      reason: null,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+      metadata: { paymentId: row.id, orderId: row.orderId, invoiceId: row.invoiceId },
+    })),
+    ...loanPaymentRows.map((row) => ({
+      id: `loan_payment_${row.id}`,
+      type: 'loan',
+      kind: row.kind,
+      amountCents: Number(row.amountCents ?? 0),
+      reason: null,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+      metadata: { loanPaymentId: row.id, loanId: row.loanId },
+    })),
+    ...layawayPaymentRows.map((row) => ({
+      id: `layaway_payment_${row.id}`,
+      type: 'layaway',
+      kind: 'payment',
+      amountCents: Number(row.amountCents ?? 0),
+      reason: row.note,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+      metadata: { layawayPaymentId: row.id, layawayId: row.layawayId },
+    })),
+    ...refundRows.map((row) => ({
+      id: `refund_${row.id}`,
+      type: 'refund',
+      kind: 'refund',
+      amountCents: Number(row.totalRefundCents ?? 0),
+      reason: row.reason,
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+      metadata: { refundId: row.id, invoiceId: row.invoiceId, orderId: row.orderId },
+    })),
+  ].sort((a, b) => {
+    const dateA = new Date(a.createdAt).getTime();
+    const dateB = new Date(b.createdAt).getTime();
+    return dateB - dateA; // Most recent first
+  });
+
+  return {
+    shift,
+    transactions: allTransactions,
+  };
+}
+
 function createShiftMovementHandler(kind, direction) {
   return async (req, res, next) => {
     try {
@@ -4501,13 +4730,25 @@ app.post('/api/shifts/open', async (req, res, next) => {
       return res.status(403).json({ error: 'Invalid PIN' });
     }
 
-    const [existingShift] = await db
+    // Check if user already has an open shift
+    const [existingUserShift] = await db
+      .select({ id: shifts.id })
+      .from(shifts)
+      .where(and(eq(shifts.openedBy, Number(openedBy)), isNull(shifts.closedAt)))
+      .limit(1);
+
+    if (existingUserShift) {
+      return res.status(409).json({ error: 'You already have an open shift. Close it before opening a new one.' });
+    }
+
+    // Check if branch already has an open shift (by a different user)
+    const [existingBranchShift] = await db
       .select({ id: shifts.id })
       .from(shifts)
       .where(and(eq(shifts.branchId, Number(branchId)), isNull(shifts.closedAt)))
       .limit(1);
 
-    if (existingShift) {
+    if (existingBranchShift) {
       return res.status(409).json({ error: 'A shift is already open for this branch' });
     }
 
@@ -6156,6 +6397,30 @@ app.get('/api/cash-movements', async (req, res, next) => {
   }
 });
 
+app.get('/api/shifts/:id/cash-transactions', async (req, res, next) => {
+  try {
+    const shiftId = Number(req.params.id);
+
+    if (!Number.isInteger(shiftId) || shiftId <= 0) {
+      return res.status(400).json({ error: 'shiftId must be a positive integer' });
+    }
+
+    const data = await loadAllCashTransactions(shiftId);
+
+    if (!data) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+
+    res.json(data);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
 app.get('/api/shifts/active', async (req, res, next) => {
   try {
     const branchId = Number(req.query.branchId);
@@ -6702,6 +6967,353 @@ app.get('/api/loans/next-ticket', async (req, res, next) => {
   }
 });
 
+app.get('/api/loans/search', async (req, res, next) => {
+  try {
+    const {
+      firstName = null,
+      lastName = null,
+      cedulaNo = null,
+      principalCents = null,
+      description = null,
+      branchId = null,
+      limit = 100,
+    } = req.query ?? {};
+
+    const filters = [];
+
+    // Branch filter
+    if (branchId) {
+      const numericBranchId = Number(branchId);
+      if (Number.isInteger(numericBranchId) && numericBranchId > 0) {
+        filters.push(eq(loans.branchId, numericBranchId));
+      }
+    }
+
+    // First name filter
+    if (firstName && typeof firstName === 'string' && firstName.trim().length > 0) {
+      const safeSearch = firstName.trim().replace(/[%_]/g, '\\$&');
+      filters.push(like(customers.firstName, `%${safeSearch}%`));
+    }
+
+    // Last name filter
+    if (lastName && typeof lastName === 'string' && lastName.trim().length > 0) {
+      const safeSearch = lastName.trim().replace(/[%_]/g, '\\$&');
+      filters.push(like(customers.lastName, `%${safeSearch}%`));
+    }
+
+    // Cedula filter
+    if (cedulaNo && typeof cedulaNo === 'string' && cedulaNo.trim().length > 0) {
+      const safeSearch = cedulaNo.trim().replace(/[%_]/g, '\\$&');
+      filters.push(like(customers.cedulaNo, `%${safeSearch}%`));
+    }
+
+    // Principal amount filter (exact match)
+    if (principalCents) {
+      const numericPrincipal = Number(principalCents);
+      if (Number.isFinite(numericPrincipal) && numericPrincipal > 0) {
+        filters.push(eq(loans.principalCents, Math.round(numericPrincipal)));
+      }
+    }
+
+    // Description filter (searches in collateral descriptions)
+    let descriptionFilter = null;
+    if (description && typeof description === 'string' && description.trim().length > 0) {
+      const safeSearch = description.trim().replace(/[%_]/g, '\\$&');
+      descriptionFilter = like(loanCollateral.description, `%${safeSearch}%`);
+    }
+
+    const limitValue = Number(limit);
+    const safeLimit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 500) : 100;
+
+    // Base query with joins
+    let baseQuery = db
+      .select({
+        id: loans.id,
+        branchId: loans.branchId,
+        customerId: loans.customerId,
+        ticketNumber: loans.ticketNumber,
+        principalCents: loans.principalCents,
+        interestModelId: loans.interestModelId,
+        interestRate: loans.interestRate,
+        dueDate: loans.dueDate,
+        status: loans.status,
+        comments: loans.comments,
+        createdAt: loans.createdAt,
+        updatedAt: loans.updatedAt,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+        customerPhone: customers.phone,
+        customerEmail: customers.email,
+        customerCedulaNo: customers.cedulaNo,
+        interestModelName: interestModels.name,
+      })
+      .from(loans)
+      .innerJoin(customers, eq(customers.id, loans.customerId))
+      .leftJoin(interestModels, eq(interestModels.id, loans.interestModelId));
+
+    // Add description filter with join if needed
+    if (descriptionFilter) {
+      baseQuery = baseQuery
+        .innerJoin(loanCollateral, eq(loanCollateral.loanId, loans.id))
+        .where(and(...filters, descriptionFilter))
+        .groupBy(loans.id);
+    } else if (filters.length > 0) {
+      baseQuery = baseQuery.where(and(...filters));
+    }
+
+    const loanRows = await baseQuery
+      .orderBy(desc(loans.createdAt), desc(loans.id))
+      .limit(safeLimit);
+
+    // Get collateral descriptions for each loan
+    const loanIds = loanRows.map((row) => row.id);
+    const collateralRows = loanIds.length > 0
+      ? await db
+          .select({
+            loanId: loanCollateral.loanId,
+            description: loanCollateral.description,
+          })
+          .from(loanCollateral)
+          .where(inArray(loanCollateral.loanId, loanIds))
+      : [];
+
+    const collateralMap = new Map();
+    for (const row of collateralRows) {
+      const loanId = Number(row.loanId);
+      if (!collateralMap.has(loanId)) {
+        collateralMap.set(loanId, []);
+      }
+      collateralMap.get(loanId).push(row.description);
+    }
+
+    const results = loanRows.map((row) => ({
+      id: Number(row.id),
+      branchId: Number(row.branchId),
+      customerId: Number(row.customerId),
+      ticketNumber: row.ticketNumber,
+      principalCents: Number(row.principalCents ?? 0),
+      interestModelId: Number(row.interestModelId),
+      interestModelName: row.interestModelName ?? null,
+      interestRate: row.interestRate == null ? null : Number(row.interestRate),
+      dueDate: formatDateValue(row.dueDate),
+      status: row.status,
+      comments: row.comments,
+      createdAt: row.createdAt?.toISOString?.() ?? row.createdAt,
+      updatedAt: row.updatedAt?.toISOString?.() ?? row.updatedAt,
+      customer: {
+        id: Number(row.customerId),
+        firstName: row.customerFirstName ?? null,
+        lastName: row.customerLastName ?? null,
+        phone: row.customerPhone ?? null,
+        email: row.customerEmail ?? null,
+        cedulaNo: row.customerCedulaNo ?? null,
+      },
+      collateralDescriptions: collateralMap.get(Number(row.id)) ?? [],
+    }));
+
+    res.json({ loans: results, count: results.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/loans/past-due', async (req, res, next) => {
+  try {
+    const {
+      branchId = null,
+      status = null,
+      search = '',
+      bucket = null,
+      limit = '300',
+      minDaysLate = null,
+      maxDaysLate = null,
+      asOf = null,
+    } = req.query ?? {};
+
+    const normalizedBranchId =
+      branchId == null || branchId === '' ? null : Number(Array.isArray(branchId) ? branchId[0] : branchId);
+
+    if (normalizedBranchId != null && (!Number.isInteger(normalizedBranchId) || normalizedBranchId <= 0)) {
+      return res.status(400).json({ error: 'branchId must be a positive integer when provided' });
+    }
+
+    const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
+    let statusFilter = null;
+    if (normalizedStatus) {
+      if (!['active', 'renewed'].includes(normalizedStatus)) {
+        return res.status(400).json({ error: 'status must be "active" or "renewed" when provided' });
+      }
+
+      statusFilter = normalizedStatus;
+    }
+
+    const statusList = statusFilter ? [statusFilter] : ['active', 'renewed'];
+
+    const searchTerm = typeof search === 'string' ? search.trim() : '';
+
+    const normalizedBucket =
+      typeof bucket === 'string' && allowedPastDueBuckets.has(bucket.trim()) ? bucket.trim() : null;
+
+    const minDaysValue =
+      minDaysLate == null || minDaysLate === '' ? null : Number(Array.isArray(minDaysLate) ? minDaysLate[0] : minDaysLate);
+    if (minDaysValue != null && (!Number.isFinite(minDaysValue) || minDaysValue < 0)) {
+      return res.status(400).json({ error: 'minDaysLate must be zero or greater when provided' });
+    }
+
+    const maxDaysValue =
+      maxDaysLate == null || maxDaysLate === '' ? null : Number(Array.isArray(maxDaysLate) ? maxDaysLate[0] : maxDaysLate);
+    if (maxDaysValue != null && (!Number.isFinite(maxDaysValue) || maxDaysValue < 0)) {
+      return res.status(400).json({ error: 'maxDaysLate must be zero or greater when provided' });
+    }
+
+    if (minDaysValue != null && maxDaysValue != null && minDaysValue > maxDaysValue) {
+      return res.status(400).json({ error: 'minDaysLate cannot be greater than maxDaysLate' });
+    }
+
+    const limitValue = Number(Array.isArray(limit) ? limit[0] : limit);
+    const safeLimit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 1000) : 300;
+
+    let referenceDate = new Date();
+    if (typeof asOf === 'string' && asOf.trim()) {
+      const parsed = parseDateOnly(asOf.trim());
+      if (parsed) {
+        referenceDate = parsed;
+      }
+    }
+
+    const asOfIso = referenceDate.toISOString().slice(0, 10);
+
+    const filters = [inArray(loans.status, statusList), sql`${loans.dueDate} <= ${asOfIso}`];
+
+    if (normalizedBranchId != null) {
+      filters.push(eq(loans.branchId, normalizedBranchId));
+    }
+
+    if (searchTerm) {
+      const safeSearch = searchTerm.replace(/[%_]/g, '\\$&');
+      const likePattern = `%${safeSearch}%`;
+      filters.push(
+        or(
+          like(loans.ticketNumber, likePattern),
+          like(customers.firstName, likePattern),
+          like(customers.lastName, likePattern),
+          like(customers.phone, likePattern)
+        )
+      );
+    }
+
+    const baseRows = await db
+      .select({
+        id: loans.id,
+        branchId: loans.branchId,
+        branchName: branches.name,
+        customerId: loans.customerId,
+        ticketNumber: loans.ticketNumber,
+        principalCents: loans.principalCents,
+        interestModelId: loans.interestModelId,
+        interestModelName: interestModels.name,
+        graceDays: interestModels.graceDays,
+        dueDate: loans.dueDate,
+        status: loans.status,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+        customerPhone: customers.phone,
+        customerEmail: customers.email,
+      })
+      .from(loans)
+      .leftJoin(customers, eq(customers.id, loans.customerId))
+      .leftJoin(interestModels, eq(interestModels.id, loans.interestModelId))
+      .leftJoin(branches, eq(branches.id, loans.branchId))
+      .where(and(...filters))
+      .orderBy(asc(loans.dueDate), asc(loans.id))
+      .limit(safeLimit);
+
+    const snapshots = await hydratePastDueLoans(db, baseRows, {
+      includeNotifications: true,
+      now: referenceDate,
+    });
+
+    const branchOptionMap = new Map();
+    for (const snapshot of snapshots) {
+      if (snapshot.branchId != null && !branchOptionMap.has(snapshot.branchId)) {
+        branchOptionMap.set(snapshot.branchId, {
+          id: snapshot.branchId,
+          name: snapshot.branchName ?? `Sucursal ${snapshot.branchId}`,
+        });
+      }
+    }
+
+    let filteredSnapshots = snapshots;
+
+    if (normalizedBucket) {
+      filteredSnapshots = filteredSnapshots.filter((loan) => loan.bucket === normalizedBucket);
+    }
+
+    if (minDaysValue != null) {
+      filteredSnapshots = filteredSnapshots.filter((loan) => (loan.daysLate ?? 0) >= minDaysValue);
+    }
+
+    if (maxDaysValue != null) {
+      filteredSnapshots = filteredSnapshots.filter((loan) => (loan.daysLate ?? 0) <= maxDaysValue);
+    }
+
+    if (normalizedBranchId != null) {
+      filteredSnapshots = filteredSnapshots.filter((loan) => loan.branchId === normalizedBranchId);
+    }
+
+    filteredSnapshots.sort((a, b) => {
+      const diffDays = (b.daysLate ?? 0) - (a.daysLate ?? 0);
+      if (diffDays !== 0) {
+        return diffDays;
+      }
+
+      const diffDue = (b.totalDueCents ?? 0) - (a.totalDueCents ?? 0);
+      if (diffDue !== 0) {
+        return diffDue;
+      }
+
+      return (a.ticketNumber ?? '').localeCompare(b.ticketNumber ?? '');
+    });
+
+    const summary = {
+      totalCount: filteredSnapshots.length,
+      totalPrincipalCents: 0,
+      totalInterestCents: 0,
+      totalDueCents: 0,
+      bucketCounts: Object.fromEntries(pastDueBucketOrder.map((bucketKey) => [bucketKey, 0])),
+    };
+
+    for (const loan of filteredSnapshots) {
+      summary.totalPrincipalCents += Math.max(0, Number(loan.outstandingPrincipalCents ?? 0));
+      summary.totalInterestCents += Math.max(0, Number(loan.outstandingInterestCents ?? 0));
+      summary.totalDueCents += Math.max(0, Number(loan.totalDueCents ?? 0));
+
+      if (loan.bucket && summary.bucketCounts[loan.bucket] != null) {
+        summary.bucketCounts[loan.bucket] += 1;
+      }
+    }
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      asOf: asOfIso,
+      filters: {
+        branchId: normalizedBranchId,
+        statuses: statusList,
+        bucket: normalizedBucket,
+        minDaysLate: minDaysValue,
+        maxDaysLate: maxDaysValue,
+        search: searchTerm,
+        limit: safeLimit,
+      },
+      availableBranches: Array.from(branchOptionMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+      summary,
+      loans: filteredSnapshots,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/loans/:id', async (req, res, next) => {
   try {
     const loanId = Number(req.params.id);
@@ -6709,6 +7321,143 @@ app.get('/api/loans/:id', async (req, res, next) => {
     if (!Number.isInteger(loanId) || loanId <= 0) {
       return res.status(400).json({ error: 'Loan id must be a positive integer' });
     }
+
+    const detail = await getLoanDetail(loanId);
+    res.json(detail);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.put('/api/loans/:id', async (req, res, next) => {
+  try {
+    const loanId = Number(req.params.id);
+
+    if (!Number.isInteger(loanId) || loanId <= 0) {
+      return res.status(400).json({ error: 'Loan id must be a positive integer' });
+    }
+
+    const { comments = null, dueDate = null, customerId = null, principalCents = null, collateral = null } = req.body ?? {};
+
+    await db.transaction(async (tx) => {
+      // Validate loan exists and is not closed
+      const [loanRow] = await tx
+        .select({ id: loans.id, status: loans.status, branchId: loans.branchId })
+        .from(loans)
+        .where(eq(loans.id, loanId))
+        .limit(1);
+
+      if (!loanRow) {
+        throw new HttpError(404, 'Loan not found');
+      }
+
+      if (closedLoanStatuses.has(loanRow.status)) {
+        throw new HttpError(409, 'Cannot edit a closed loan');
+      }
+
+      const updatePayload = {};
+
+      // Update customer if provided
+      if (customerId !== undefined && customerId !== null) {
+        const numericCustomerId = Number(customerId);
+        if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
+          throw new HttpError(400, 'customerId must be a positive integer');
+        }
+
+        // Validate customer exists and belongs to same branch
+        const [customerRow] = await tx
+          .select({ id: customers.id, branchId: customers.branchId })
+          .from(customers)
+          .where(eq(customers.id, numericCustomerId))
+          .limit(1);
+
+        if (!customerRow) {
+          throw new HttpError(404, 'Customer not found');
+        }
+
+        if (customerRow.branchId !== loanRow.branchId) {
+          throw new HttpError(400, 'Customer must belong to the same branch as the loan');
+        }
+
+        updatePayload.customerId = numericCustomerId;
+      }
+
+      // Update principal if provided
+      if (principalCents !== undefined && principalCents !== null) {
+        const normalizedPrincipal = parseAmount(principalCents);
+        if (normalizedPrincipal === null) {
+          throw new HttpError(400, 'principalCents must be greater than 0');
+        }
+        updatePayload.principalCents = normalizedPrincipal;
+      }
+
+      // Update comments if provided
+      if (comments !== undefined) {
+        const normalizedComments = typeof comments === 'string' && comments.trim().length > 0
+          ? comments.trim()
+          : null;
+        updatePayload.comments = normalizedComments;
+      }
+
+      // Update due date if provided
+      if (dueDate !== undefined && dueDate !== null) {
+        const normalizedDueDate = typeof dueDate === 'string' && dueDate.trim().length > 0
+          ? dueDate.trim()
+          : null;
+        
+        if (normalizedDueDate) {
+          // Validate date format (YYYY-MM-DD)
+          const dateMatch = normalizedDueDate.match(/^\d{4}-\d{2}-\d{2}$/);
+          if (!dateMatch) {
+            throw new HttpError(400, 'dueDate must be in YYYY-MM-DD format');
+          }
+          updatePayload.dueDate = normalizedDueDate;
+        } else {
+          updatePayload.dueDate = null;
+        }
+      }
+
+      // Update loan
+      if (Object.keys(updatePayload).length > 0) {
+        await tx
+          .update(loans)
+          .set(updatePayload)
+          .where(eq(loans.id, loanId));
+      }
+
+      // Update collateral if provided
+      if (collateral !== undefined && collateral !== null && Array.isArray(collateral)) {
+        // Get existing collateral
+        const existingCollateral = await tx
+          .select({ id: loanCollateral.id })
+          .from(loanCollateral)
+          .where(eq(loanCollateral.loanId, loanId))
+          .orderBy(asc(loanCollateral.id));
+
+        const normalizedCollateral = normalizeCollateralDraftList(collateral);
+
+        // Delete all existing collateral
+        if (existingCollateral.length > 0) {
+          await tx
+            .delete(loanCollateral)
+            .where(eq(loanCollateral.loanId, loanId));
+        }
+
+        // Insert new collateral
+        for (const item of normalizedCollateral) {
+          await tx.insert(loanCollateral).values({
+            loanId,
+            description: item.description,
+            estimatedValueCents: item.estimatedValueCents,
+            photoPath: item.photoPath,
+          });
+        }
+      }
+    });
 
     const detail = await getLoanDetail(loanId);
     res.json(detail);
@@ -7401,203 +8150,6 @@ app.post('/api/loans/:id/forfeit', async (req, res, next) => {
       return res.status(500).json({ error: 'Unable to create product code version' });
     }
 
-    next(error);
-  }
-});
-
-app.get('/api/loans/past-due', async (req, res, next) => {
-  try {
-    const {
-      branchId = null,
-      status = null,
-      search = '',
-      bucket = null,
-      limit = '300',
-      minDaysLate = null,
-      maxDaysLate = null,
-      asOf = null,
-    } = req.query ?? {};
-
-    const normalizedBranchId =
-      branchId == null || branchId === '' ? null : Number(Array.isArray(branchId) ? branchId[0] : branchId);
-
-    if (normalizedBranchId != null && (!Number.isInteger(normalizedBranchId) || normalizedBranchId <= 0)) {
-      return res.status(400).json({ error: 'branchId must be a positive integer when provided' });
-    }
-
-    const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
-    let statusFilter = null;
-    if (normalizedStatus) {
-      if (!['active', 'renewed'].includes(normalizedStatus)) {
-        return res.status(400).json({ error: 'status must be "active" or "renewed" when provided' });
-      }
-
-      statusFilter = normalizedStatus;
-    }
-
-    const statusList = statusFilter ? [statusFilter] : ['active', 'renewed'];
-
-    const searchTerm = typeof search === 'string' ? search.trim() : '';
-
-    const normalizedBucket =
-      typeof bucket === 'string' && allowedPastDueBuckets.has(bucket.trim()) ? bucket.trim() : null;
-
-    const minDaysValue =
-      minDaysLate == null || minDaysLate === '' ? null : Number(Array.isArray(minDaysLate) ? minDaysLate[0] : minDaysLate);
-    if (minDaysValue != null && (!Number.isFinite(minDaysValue) || minDaysValue < 0)) {
-      return res.status(400).json({ error: 'minDaysLate must be zero or greater when provided' });
-    }
-
-    const maxDaysValue =
-      maxDaysLate == null || maxDaysLate === '' ? null : Number(Array.isArray(maxDaysLate) ? maxDaysLate[0] : maxDaysLate);
-    if (maxDaysValue != null && (!Number.isFinite(maxDaysValue) || maxDaysValue < 0)) {
-      return res.status(400).json({ error: 'maxDaysLate must be zero or greater when provided' });
-    }
-
-    if (minDaysValue != null && maxDaysValue != null && minDaysValue > maxDaysValue) {
-      return res.status(400).json({ error: 'minDaysLate cannot be greater than maxDaysLate' });
-    }
-
-    const limitValue = Number(Array.isArray(limit) ? limit[0] : limit);
-    const safeLimit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 1000) : 300;
-
-    let referenceDate = new Date();
-    if (typeof asOf === 'string' && asOf.trim()) {
-      const parsed = parseDateOnly(asOf.trim());
-      if (parsed) {
-        referenceDate = parsed;
-      }
-    }
-
-    const asOfIso = referenceDate.toISOString().slice(0, 10);
-
-    const filters = [inArray(loans.status, statusList), sql`${loans.dueDate} <= ${asOfIso}`];
-
-    if (normalizedBranchId != null) {
-      filters.push(eq(loans.branchId, normalizedBranchId));
-    }
-
-    if (searchTerm) {
-      const safeSearch = searchTerm.replace(/[%_]/g, '\\$&');
-      const likePattern = `%${safeSearch}%`;
-      filters.push(
-        or(
-          like(loans.ticketNumber, likePattern),
-          like(customers.firstName, likePattern),
-          like(customers.lastName, likePattern),
-          like(customers.phone, likePattern)
-        )
-      );
-    }
-
-    const baseRows = await db
-      .select({
-        id: loans.id,
-        branchId: loans.branchId,
-        branchName: branches.name,
-        customerId: loans.customerId,
-        ticketNumber: loans.ticketNumber,
-        principalCents: loans.principalCents,
-        interestModelId: loans.interestModelId,
-        interestModelName: interestModels.name,
-        graceDays: interestModels.graceDays,
-        dueDate: loans.dueDate,
-        status: loans.status,
-        customerFirstName: customers.firstName,
-        customerLastName: customers.lastName,
-        customerPhone: customers.phone,
-        customerEmail: customers.email,
-      })
-      .from(loans)
-      .leftJoin(customers, eq(customers.id, loans.customerId))
-      .leftJoin(interestModels, eq(interestModels.id, loans.interestModelId))
-      .leftJoin(branches, eq(branches.id, loans.branchId))
-      .where(and(...filters))
-      .orderBy(asc(loans.dueDate), asc(loans.id))
-      .limit(safeLimit);
-
-    const snapshots = await hydratePastDueLoans(db, baseRows, {
-      includeNotifications: true,
-      now: referenceDate,
-    });
-
-    const branchOptionMap = new Map();
-    for (const snapshot of snapshots) {
-      if (snapshot.branchId != null && !branchOptionMap.has(snapshot.branchId)) {
-        branchOptionMap.set(snapshot.branchId, {
-          id: snapshot.branchId,
-          name: snapshot.branchName ?? `Sucursal ${snapshot.branchId}`,
-        });
-      }
-    }
-
-    let filteredSnapshots = snapshots;
-
-    if (normalizedBucket) {
-      filteredSnapshots = filteredSnapshots.filter((loan) => loan.bucket === normalizedBucket);
-    }
-
-    if (minDaysValue != null) {
-      filteredSnapshots = filteredSnapshots.filter((loan) => (loan.daysLate ?? 0) >= minDaysValue);
-    }
-
-    if (maxDaysValue != null) {
-      filteredSnapshots = filteredSnapshots.filter((loan) => (loan.daysLate ?? 0) <= maxDaysValue);
-    }
-
-    if (normalizedBranchId != null) {
-      filteredSnapshots = filteredSnapshots.filter((loan) => loan.branchId === normalizedBranchId);
-    }
-
-    filteredSnapshots.sort((a, b) => {
-      const diffDays = (b.daysLate ?? 0) - (a.daysLate ?? 0);
-      if (diffDays !== 0) {
-        return diffDays;
-      }
-
-      const diffDue = (b.totalDueCents ?? 0) - (a.totalDueCents ?? 0);
-      if (diffDue !== 0) {
-        return diffDue;
-      }
-
-      return (a.ticketNumber ?? '').localeCompare(b.ticketNumber ?? '');
-    });
-
-    const summary = {
-      totalCount: filteredSnapshots.length,
-      totalPrincipalCents: 0,
-      totalInterestCents: 0,
-      totalDueCents: 0,
-      bucketCounts: Object.fromEntries(pastDueBucketOrder.map((bucketKey) => [bucketKey, 0])),
-    };
-
-    for (const loan of filteredSnapshots) {
-      summary.totalPrincipalCents += Math.max(0, Number(loan.outstandingPrincipalCents ?? 0));
-      summary.totalInterestCents += Math.max(0, Number(loan.outstandingInterestCents ?? 0));
-      summary.totalDueCents += Math.max(0, Number(loan.totalDueCents ?? 0));
-
-      if (loan.bucket && summary.bucketCounts[loan.bucket] != null) {
-        summary.bucketCounts[loan.bucket] += 1;
-      }
-    }
-
-    res.json({
-      generatedAt: new Date().toISOString(),
-      asOf: asOfIso,
-      filters: {
-        branchId: normalizedBranchId,
-        statuses: statusList,
-        bucket: normalizedBucket,
-        minDaysLate: minDaysValue,
-        maxDaysLate: maxDaysValue,
-        search: searchTerm,
-        limit: safeLimit,
-      },
-      availableBranches: Array.from(branchOptionMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
-      summary,
-      loans: filteredSnapshots,
-    });
-  } catch (error) {
     next(error);
   }
 });
@@ -14111,15 +14663,59 @@ app.post('/api/payments', async (req, res, next) => {
       }
     }
 
+    let orderBranchId = null;
     if (orderId) {
       const [order] = await db
-        .select({ id: orders.id })
+        .select({ id: orders.id, branchId: orders.branchId })
         .from(orders)
         .where(eq(orders.id, orderId))
         .limit(1);
 
       if (!order) {
         return res.status(404).json({ error: 'Order not found' });
+      }
+      orderBranchId = Number(order.branchId);
+    }
+
+    let invoiceBranchId = null;
+    if (invoiceId) {
+      const [invoice] = await db
+        .select({ id: invoices.id, orderId: invoices.orderId })
+        .from(invoices)
+        .where(eq(invoices.id, invoiceId))
+        .limit(1);
+
+      if (!invoice) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
+
+      // Get branch from order if not already known
+      if (!orderBranchId && invoice.orderId) {
+        const [order] = await db
+          .select({ branchId: orders.branchId })
+          .from(orders)
+          .where(eq(orders.id, invoice.orderId))
+          .limit(1);
+        if (order) {
+          invoiceBranchId = Number(order.branchId);
+        }
+      }
+    }
+
+    // Auto-assign shiftId if not provided and we have a branch
+    let resolvedShiftId = shiftId;
+    if (!resolvedShiftId) {
+      const branchIdForShift = orderBranchId || invoiceBranchId;
+      if (branchIdForShift) {
+        const [activeShift] = await db
+          .select({ id: shifts.id })
+          .from(shifts)
+          .where(and(eq(shifts.branchId, branchIdForShift), isNull(shifts.closedAt)))
+          .orderBy(desc(shifts.id))
+          .limit(1);
+        if (activeShift) {
+          resolvedShiftId = Number(activeShift.id);
+        }
       }
     }
 
@@ -14169,7 +14765,7 @@ app.post('/api/payments', async (req, res, next) => {
       await tx.insert(payments).values({
         invoiceId,
         orderId,
-        shiftId,
+        shiftId: resolvedShiftId,
         method,
         amountCents: normalizedAmount,
         meta: paymentMeta,
@@ -14404,10 +15000,24 @@ app.post('/api/refunds', async (req, res, next) => {
         ? null
         : parsePositiveInteger(createdBy, 'createdBy');
 
-    const shiftIdValue =
+    let shiftIdValue =
       shiftId === null || shiftId === undefined || shiftId === ''
         ? null
         : parsePositiveInteger(shiftId, 'shiftId');
+
+    // Auto-assign shiftId if not provided and refund method is cash
+    // We need shiftId for cash refunds to appear in cash transactions
+    if (!shiftIdValue && normalizedMethod === 'cash' && detail.invoice.branchId) {
+      const [activeShift] = await db
+        .select({ id: shifts.id })
+        .from(shifts)
+        .where(and(eq(shifts.branchId, detail.invoice.branchId), isNull(shifts.closedAt)))
+        .orderBy(desc(shifts.id))
+        .limit(1);
+      if (activeShift) {
+        shiftIdValue = Number(activeShift.id);
+      }
+    }
 
     const normalizedReason = typeof reason === 'string' && reason.trim().length > 0 ? reason.trim() : null;
     const normalizedNotes = typeof notes === 'string' && notes.trim().length > 0 ? notes.trim() : null;
@@ -14482,20 +15092,11 @@ app.post('/api/refunds', async (req, res, next) => {
 
       let creditNoteRow = null;
 
-      if (normalizedMethod === 'cash') {
-        if (shiftIdValue != null) {
-          await tx.insert(cashMovements).values({
-            shiftId: shiftIdValue,
-            kind: 'refund',
-            amountCents: totalRefundCents,
-            reason:
-              normalizedReason ??
-              (detail.invoice.invoiceNo
-                ? `Refund ${detail.invoice.invoiceNo}`
-                : `Refund invoice ${detail.invoice.id}`),
-          });
-        }
-      } else if (normalizedMethod === 'store_credit') {
+      // Note: Cash refunds are tracked via salesReturns table and will appear
+      // in cash transaction history through loadAllCashTransactions which queries
+      // salesReturns directly. No need to create a separate cashMovement entry.
+
+      if (normalizedMethod === 'store_credit') {
         if (detail.invoice.customerId == null) {
           throw new HttpError(400, 'Customer is required for store credit refunds');
         }
@@ -15311,6 +15912,155 @@ app.get('/api/layaways/dashboard', async (req, res, next) => {
   }
 });
 
+app.get('/api/layaways/search', async (req, res, next) => {
+  try {
+    const {
+      firstName = null,
+      lastName = null,
+      cedulaNo = null,
+      orderNumber = null,
+      totalCents = null,
+      branchId = null,
+      limit = 100,
+    } = req.query ?? {};
+
+    const filters = [];
+
+    // Branch filter
+    if (branchId) {
+      const numericBranchId = Number(branchId);
+      if (Number.isInteger(numericBranchId) && numericBranchId > 0) {
+        filters.push(eq(layaways.branchId, numericBranchId));
+      }
+    }
+
+    // First name filter
+    if (firstName && typeof firstName === 'string' && firstName.trim().length > 0) {
+      const safeSearch = firstName.trim().replace(/[%_]/g, '\\$&');
+      filters.push(like(customers.firstName, `%${safeSearch}%`));
+    }
+
+    // Last name filter
+    if (lastName && typeof lastName === 'string' && lastName.trim().length > 0) {
+      const safeSearch = lastName.trim().replace(/[%_]/g, '\\$&');
+      filters.push(like(customers.lastName, `%${safeSearch}%`));
+    }
+
+    // Cedula filter
+    if (cedulaNo && typeof cedulaNo === 'string' && cedulaNo.trim().length > 0) {
+      const safeSearch = cedulaNo.trim().replace(/[%_]/g, '\\$&');
+      filters.push(like(customers.cedulaNo, `%${safeSearch}%`));
+    }
+
+    // Order number filter
+    if (orderNumber && typeof orderNumber === 'string' && orderNumber.trim().length > 0) {
+      const safeSearch = orderNumber.trim().replace(/[%_]/g, '\\$&');
+      filters.push(like(orders.orderNumber, `%${safeSearch}%`));
+    }
+
+    // Total amount filter (exact match)
+    if (totalCents) {
+      const numericTotal = Number(totalCents);
+      if (Number.isFinite(numericTotal) && numericTotal > 0) {
+        filters.push(eq(layaways.totalCents, Math.round(numericTotal)));
+      }
+    }
+
+    const limitValue = Number(limit);
+    const safeLimit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 500) : 100;
+
+    // Base query with joins
+    let baseQuery = db
+      .select({
+        id: layaways.id,
+        branchId: layaways.branchId,
+        customerId: layaways.customerId,
+        orderId: layaways.orderId,
+        orderNumber: orders.orderNumber,
+        totalCents: layaways.totalCents,
+        paidCents: layaways.paidCents,
+        dueDate: layaways.dueDate,
+        status: layaways.status,
+        createdAt: layaways.createdAt,
+        updatedAt: layaways.updatedAt,
+        customerFirstName: customers.firstName,
+        customerLastName: customers.lastName,
+        customerPhone: customers.phone,
+        customerEmail: customers.email,
+        customerCedulaNo: customers.cedulaNo,
+      })
+      .from(layaways)
+      .innerJoin(customers, eq(customers.id, layaways.customerId))
+      .leftJoin(orders, eq(orders.id, layaways.orderId));
+
+    if (filters.length > 0) {
+      baseQuery = baseQuery.where(and(...filters));
+    }
+
+    const layawayRows = await baseQuery
+      .orderBy(desc(layaways.createdAt), desc(layaways.id))
+      .limit(safeLimit);
+
+    // Get item descriptions for each layaway
+    const orderIds = Array.from(new Set(layawayRows.map((row) => Number(row.orderId)).filter((id) => Number.isFinite(id))));
+    const itemRows = orderIds.length > 0
+      ? await db
+          .select({
+            orderId: orderItems.orderId,
+            productName: productCodes.name,
+            productCode: productCodes.code,
+            qty: orderItems.qty,
+          })
+          .from(orderItems)
+          .leftJoin(productCodes, eq(productCodes.id, orderItems.codeId))
+          .where(inArray(orderItems.orderId, orderIds))
+      : [];
+
+    const itemMap = new Map();
+    for (const row of itemRows) {
+      const orderId = Number(row.orderId);
+      if (!Number.isFinite(orderId)) continue;
+      
+      if (!itemMap.has(orderId)) {
+        itemMap.set(orderId, []);
+      }
+      
+      const qty = Number(row.qty ?? 1);
+      const itemName = row.productName ?? row.productCode ?? 'Artículo';
+      const itemLabel = qty > 1 ? `${qty}× ${itemName}` : itemName;
+      itemMap.get(orderId).push(itemLabel);
+    }
+
+    const results = layawayRows.map((row) => ({
+      id: Number(row.id),
+      branchId: Number(row.branchId),
+      customerId: Number(row.customerId),
+      orderId: Number(row.orderId),
+      orderNumber: row.orderNumber ?? null,
+      totalCents: Number(row.totalCents ?? 0),
+      paidCents: Number(row.paidCents ?? 0),
+      balanceCents: Math.max(0, Number(row.totalCents ?? 0) - Number(row.paidCents ?? 0)),
+      dueDate: formatDateValue(row.dueDate),
+      status: row.status,
+      createdAt: row.createdAt?.toISOString?.() ?? row.createdAt,
+      updatedAt: row.updatedAt?.toISOString?.() ?? row.updatedAt,
+      customer: {
+        id: Number(row.customerId),
+        firstName: row.customerFirstName ?? null,
+        lastName: row.customerLastName ?? null,
+        phone: row.customerPhone ?? null,
+        email: row.customerEmail ?? null,
+        cedulaNo: row.customerCedulaNo ?? null,
+      },
+      itemDescriptions: itemMap.get(Number(row.orderId)) ?? [],
+    }));
+
+    res.json({ layaways: results, count: results.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post('/api/layaways', async (req, res, next) => {
   try {
     const { orderId, dueDate, initialPayment = null } = req.body ?? {};
@@ -15535,6 +16285,67 @@ app.post('/api/layaways/:id/pay', async (req, res, next) => {
   }
 });
 
+app.delete('/api/layaways/:id/payments/:paymentId', async (req, res, next) => {
+  try {
+    const layawayId = Number(req.params.id);
+    const paymentId = Number(req.params.paymentId);
+
+    if (!Number.isInteger(layawayId) || layawayId <= 0) {
+      return res.status(400).json({ error: 'Layaway id must be a positive integer' });
+    }
+
+    if (!Number.isInteger(paymentId) || paymentId <= 0) {
+      return res.status(400).json({ error: 'Payment id must be a positive integer' });
+    }
+
+    await db.transaction(async (tx) => {
+      const [layawayRow] = await tx
+        .select({ id: layaways.id, status: layaways.status })
+        .from(layaways)
+        .where(eq(layaways.id, layawayId))
+        .limit(1);
+
+      if (!layawayRow) {
+        throw new HttpError(404, 'Layaway not found');
+      }
+
+      if (layawayRow.status !== 'active') {
+        throw new HttpError(409, 'Only active layaways can have payments removed');
+      }
+
+      const [paymentRow] = await tx
+        .select({ id: layawayPayments.id, amountCents: layawayPayments.amountCents, layawayId: layawayPayments.layawayId })
+        .from(layawayPayments)
+        .where(and(eq(layawayPayments.id, paymentId), eq(layawayPayments.layawayId, layawayId)))
+        .limit(1);
+
+      if (!paymentRow) {
+        throw new HttpError(404, 'Payment not found');
+      }
+
+      const paymentAmount = Number(paymentRow.amountCents ?? 0);
+
+      await tx
+        .delete(layawayPayments)
+        .where(eq(layawayPayments.id, paymentId));
+
+      await tx
+        .update(layaways)
+        .set({ paidCents: sql`GREATEST(0, ${layaways.paidCents} - ${paymentAmount})` })
+        .where(eq(layaways.id, layawayId));
+    });
+
+    const detail = await getLayawayDetail(layawayId);
+    res.json(detail);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
 app.post('/api/layaways/:id/cancel', async (req, res, next) => {
   try {
     const layawayId = Number(req.params.id);
@@ -15569,6 +16380,154 @@ app.post('/api/layaways/:id/cancel', async (req, res, next) => {
         .update(orders)
         .set({ status: 'cancelled' })
         .where(eq(orders.id, layawayRow.orderId));
+    });
+
+    const detail = await getLayawayDetail(layawayId);
+    res.json(detail);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
+app.put('/api/layaways/:id', async (req, res, next) => {
+  try {
+    const layawayId = Number(req.params.id);
+
+    if (!Number.isInteger(layawayId) || layawayId <= 0) {
+      return res.status(400).json({ error: 'Layaway id must be a positive integer' });
+    }
+
+    const { dueDate = null, customerId = null, items = null } = req.body ?? {};
+
+    await db.transaction(async (tx) => {
+      // Validate layaway exists
+      const [layawayRow] = await tx
+        .select({ id: layaways.id, status: layaways.status, orderId: layaways.orderId, branchId: layaways.branchId })
+        .from(layaways)
+        .where(eq(layaways.id, layawayId))
+        .limit(1);
+
+      if (!layawayRow) {
+        throw new HttpError(404, 'Layaway not found');
+      }
+
+      if (layawayRow.status !== 'active') {
+        throw new HttpError(409, 'Only active layaways can be edited');
+      }
+
+      const updatePayload = {};
+
+      // Update customer if provided
+      if (customerId !== undefined && customerId !== null) {
+        const numericCustomerId = Number(customerId);
+        if (!Number.isInteger(numericCustomerId) || numericCustomerId <= 0) {
+          throw new HttpError(400, 'customerId must be a positive integer');
+        }
+
+        // Validate customer exists and belongs to same branch
+        const [customerRow] = await tx
+          .select({ id: customers.id, branchId: customers.branchId })
+          .from(customers)
+          .where(eq(customers.id, numericCustomerId))
+          .limit(1);
+
+        if (!customerRow) {
+          throw new HttpError(404, 'Customer not found');
+        }
+
+        if (customerRow.branchId !== layawayRow.branchId) {
+          throw new HttpError(400, 'Customer must belong to the same branch as the layaway');
+        }
+
+        updatePayload.customerId = numericCustomerId;
+
+        // Update order customer as well
+        await tx
+          .update(orders)
+          .set({ customerId: numericCustomerId })
+          .where(eq(orders.id, layawayRow.orderId));
+      }
+
+      // Update due date if provided
+      if (dueDate !== undefined && dueDate !== null) {
+        const normalizedDueDate = typeof dueDate === 'string' && dueDate.trim().length > 0
+          ? dueDate.trim()
+          : null;
+        
+        if (normalizedDueDate) {
+          const dateValue = new Date(normalizedDueDate);
+          if (Number.isNaN(dateValue.getTime())) {
+            throw new HttpError(400, 'dueDate must be a valid date');
+          }
+          updatePayload.dueDate = dateValue;
+        } else {
+          throw new HttpError(400, 'dueDate cannot be empty');
+        }
+      }
+
+      // Update layaway
+      if (Object.keys(updatePayload).length > 0) {
+        await tx
+          .update(layaways)
+          .set({ ...updatePayload, updatedAt: sql`CURRENT_TIMESTAMP` })
+          .where(eq(layaways.id, layawayId));
+      }
+
+      // Update item prices if provided
+      if (items !== undefined && items !== null && Array.isArray(items)) {
+        let newTotalCents = 0;
+
+        for (const item of items) {
+          const itemId = Number(item.id);
+          const priceCents = parseAmount(item.priceCents);
+
+          if (!Number.isInteger(itemId) || itemId <= 0) {
+            throw new HttpError(400, 'Each item must have a valid id');
+          }
+
+          if (priceCents === null || priceCents <= 0) {
+            throw new HttpError(400, 'Each item must have a valid priceCents greater than 0');
+          }
+
+          // Verify item belongs to the layaway's order
+          const [orderItemRow] = await tx
+            .select({ id: orderItems.id, qty: orderItems.qty })
+            .from(orderItems)
+            .where(and(eq(orderItems.id, itemId), eq(orderItems.orderId, layawayRow.orderId)))
+            .limit(1);
+
+          if (!orderItemRow) {
+            throw new HttpError(404, `Order item ${itemId} not found for this layaway`);
+          }
+
+          const qty = Number(orderItemRow.qty ?? 0);
+          const discountCents = item.discountCents != null ? parseAmount(item.discountCents) ?? 0 : 0;
+          const lineTotalCents = Math.round(qty * priceCents) - discountCents;
+
+          // Update order item price
+          await tx
+            .update(orderItems)
+            .set({ priceCents: Math.round(priceCents) })
+            .where(eq(orderItems.id, itemId));
+
+          newTotalCents += Math.max(0, lineTotalCents);
+        }
+
+        // Update order and layaway totals
+        await tx
+          .update(orders)
+          .set({ totalCents: newTotalCents, subtotalCents: newTotalCents })
+          .where(eq(orders.id, layawayRow.orderId));
+
+        await tx
+          .update(layaways)
+          .set({ totalCents: newTotalCents, updatedAt: sql`CURRENT_TIMESTAMP` })
+          .where(eq(layaways.id, layawayId));
+      }
     });
 
     const detail = await getLayawayDetail(layawayId);
@@ -15650,7 +16609,6 @@ app.post('/api/layaways/:id/pawn', async (req, res, next) => {
       interestModelId,
       dueDate,
       comments = null,
-      collateralDescription = null,
     } = req.body ?? {};
 
     if (!Number.isInteger(layawayId) || layawayId <= 0) {
@@ -15676,7 +16634,6 @@ app.post('/api/layaways/:id/pawn', async (req, res, next) => {
     }
 
     const normalizedComments = normalizeOptionalString(comments, { maxLength: 2000 });
-    const normalizedCollateralDescription = normalizeOptionalString(collateralDescription, { maxLength: 1000 });
 
     await db.transaction(async (tx) => {
       const [layawayRow] = await tx
@@ -15692,6 +16649,18 @@ app.post('/api/layaways/:id/pawn', async (req, res, next) => {
         })
         .from(layaways)
         .where(eq(layaways.id, layawayId))
+        .limit(1);
+
+      // Get order details for invoice creation
+      const [orderRow] = await tx
+        .select({
+          id: orders.id,
+          subtotalCents: orders.subtotalCents,
+          taxCents: orders.taxCents,
+          totalCents: orders.totalCents,
+        })
+        .from(orders)
+        .where(eq(orders.id, layawayRow.orderId))
         .limit(1);
 
       if (!layawayRow) {
@@ -15712,93 +16681,261 @@ app.post('/api/layaways/:id/pawn', async (req, res, next) => {
         throw new HttpError(400, 'Layaway must be overdue before converting to a pawn loan');
       }
 
-      const outstanding = Math.max(Number(layawayRow.totalCents ?? 0) - Number(layawayRow.paidCents ?? 0), 0);
+      const totalCents = Number(layawayRow.totalCents ?? 0);
+      const paidCents = Number(layawayRow.paidCents ?? 0);
 
-      if (outstanding <= 0) {
-        throw new HttpError(409, 'Layaway has no outstanding balance to convert');
+      if (paidCents <= 0) {
+        throw new HttpError(409, 'Layaway must have payments to convert to a pawn loan');
       }
 
-      const orderItemsForCollateral = await tx
+      // Get all order items with prices
+      const orderItemsData = await tx
         .select({
+          id: orderItems.id,
+          codeId: orderItems.codeId,
           qty: orderItems.qty,
+          priceCents: orderItems.priceCents,
+          discountCents: orderItems.discountCents,
           productName: productCodes.name,
           productCode: productCodes.code,
         })
         .from(orderItems)
         .innerJoin(productCodes, eq(productCodes.id, orderItems.codeId))
-        .leftJoin(productCodeVersions, eq(productCodeVersions.productCodeId, productCodes.id))
-        .where(eq(orderItems.orderId, layawayRow.orderId));
+        .where(eq(orderItems.orderId, layawayRow.orderId))
+        .orderBy(asc(orderItems.id));
 
-      const collateralEntries = orderItemsForCollateral.map((item) => {
+      if (orderItemsData.length === 0) {
+        throw new HttpError(400, 'Layaway has no items to convert');
+      }
+
+      // Calculate item values and proportions
+      const itemsWithValues = orderItemsData.map((item) => {
         const qty = Number(item.qty ?? 0);
-        const descriptionParts = [qty > 0 ? `${qty}x` : null, item.productName ?? null];
-
-        if (item.productCode) {
-          descriptionParts.push(`(${item.productCode})`);
-        }
+        const priceCents = Number(item.priceCents ?? 0);
+        const discountCents = Number(item.discountCents ?? 0);
+        const itemValueCents = Math.max(0, Math.round(qty * priceCents) - discountCents);
 
         return {
-          description: descriptionParts.filter(Boolean).join(' '),
-          estimatedValueCents: Math.floor(outstanding / Math.max(orderItemsForCollateral.length, 1)),
-          photoPath: null,
+          id: Number(item.id),
+          codeId: Number(item.codeId),
+          qty,
+          priceCents,
+          discountCents,
+          itemValueCents,
+          productName: item.productName,
+          productCode: item.productCode,
         };
       });
 
-      if (normalizedCollateralDescription) {
-        collateralEntries.unshift({
-          description: normalizedCollateralDescription,
-          estimatedValueCents: outstanding,
-          photoPath: null,
+      const totalItemsValue = itemsWithValues.reduce((sum, item) => sum + item.itemValueCents, 0);
+
+      if (totalItemsValue === 0) {
+        throw new HttpError(400, 'Layaway items have no value');
+      }
+
+      // Calculate proportional paid amount for each item (no rounding)
+      let itemsWithPaidAmount = itemsWithValues.map((item) => {
+        const proportion = item.itemValueCents / totalItemsValue;
+        const proportionalPaidCents = Math.round(paidCents * proportion);
+
+        return {
+          ...item,
+          proportionalPaidCents,
+        };
+      });
+
+      // Calculate principal for each item (what's still owed) - before rounding
+      itemsWithPaidAmount = itemsWithPaidAmount.map((item) => {
+        const principalCents = Math.max(0, item.itemValueCents - item.proportionalPaidCents);
+        return {
+          ...item,
+          principalCents,
+        };
+      });
+
+      // Round each item's principal to nearest 50 dollars (5000 cents, minimum 0)
+      itemsWithPaidAmount = itemsWithPaidAmount.map((item) => {
+        let roundedPrincipalCents = 0;
+        if (item.principalCents > 0) {
+          roundedPrincipalCents = Math.round(item.principalCents / 5000) * 5000;
+        }
+        return {
+          ...item,
+          principalCents: roundedPrincipalCents,
+        };
+      });
+
+      // Calculate total rounded item principals and adjust highest value item to absorb difference
+      const totalRoundedItemPrincipals = itemsWithPaidAmount.reduce((sum, item) => sum + item.principalCents, 0);
+      const totalActualItemPrincipals = itemsWithValues.reduce((sum, item) => sum + item.itemValueCents, 0) - paidCents;
+      const principalRoundingDifference = totalActualItemPrincipals - totalRoundedItemPrincipals;
+
+      // Adjust the highest value item's principal to absorb the rounding difference
+      if (principalRoundingDifference !== 0) {
+        // Sort by item value descending to find highest value item
+        const sortedItems = [...itemsWithPaidAmount].sort((a, b) => b.itemValueCents - a.itemValueCents);
+        const highestValueItem = sortedItems[0];
+        
+        // Find the item in the original array and adjust it
+        const itemIndex = itemsWithPaidAmount.findIndex((item) => item.id === highestValueItem.id);
+        if (itemIndex >= 0) {
+          // Add the difference to the highest value item's principal (rounding to nearest 50 dollars)
+          const newPrincipal = itemsWithPaidAmount[itemIndex].principalCents + principalRoundingDifference;
+          itemsWithPaidAmount[itemIndex].principalCents = Math.max(0, Math.round(newPrincipal / 5000) * 5000);
+        }
+      }
+
+      // Group items into chunks of max 4 items per loan
+      const MAX_ITEMS_PER_LOAN = 4;
+      const loanChunks = [];
+      for (let i = 0; i < itemsWithPaidAmount.length; i += MAX_ITEMS_PER_LOAN) {
+        loanChunks.push(itemsWithPaidAmount.slice(i, i + MAX_ITEMS_PER_LOAN));
+      }
+
+      // Generate ticket numbers for all loans
+      const ticketNumbers = [];
+      const baseTicketNumber = ticketNumber.trim();
+      
+      // Extract prefix and number from base ticket
+      const ticketMatch = baseTicketNumber.match(/^(.+?)(\d+)$/);
+      const prefix = ticketMatch ? ticketMatch[1] : 'PAWN-';
+      const baseNumber = ticketMatch ? Number(ticketMatch[2]) : 0;
+      const padLength = ticketMatch ? ticketMatch[2].length : 6;
+
+      for (let i = 0; i < loanChunks.length; i++) {
+        const ticketNum = baseNumber + i;
+        ticketNumbers.push(`${prefix}${String(ticketNum).padStart(padLength, '0')}`);
+      }
+
+      // Create loans for each chunk
+      const createdLoans = [];
+      const loanPrincipals = [];
+
+      // First pass: calculate and round each loan principal to nearest 50 cents
+      for (let chunkIndex = 0; chunkIndex < loanChunks.length; chunkIndex++) {
+        const chunk = loanChunks[chunkIndex];
+        // Principal is the sum of what's still owed for each item (already rounded to 50 cents)
+        const chunkPrincipalCents = chunk.reduce((sum, item) => sum + item.principalCents, 0);
+
+        if (chunkPrincipalCents <= 0) {
+          loanPrincipals.push(0);
+          continue; // Skip chunks with no principal
+        }
+
+        // Round to nearest 50 dollars (5000 cents)
+        const roundedPrincipalCents = Math.round(chunkPrincipalCents / 5000) * 5000;
+        loanPrincipals.push(roundedPrincipalCents);
+      }
+
+      // Calculate total rounded loan principals and adjust highest value loan
+      const totalRoundedLoanPrincipals = loanPrincipals.reduce((sum, principal) => sum + principal, 0);
+      const totalActualLoanPrincipals = itemsWithPaidAmount.reduce((sum, item) => sum + item.principalCents, 0);
+      const loanRoundingDifference = totalActualLoanPrincipals - totalRoundedLoanPrincipals;
+
+      // Adjust the highest value loan to absorb the rounding difference
+      if (loanRoundingDifference !== 0 && loanPrincipals.length > 0) {
+        const maxPrincipalIndex = loanPrincipals.reduce((maxIdx, principal, idx) => 
+          principal > loanPrincipals[maxIdx] ? idx : maxIdx, 0
+        );
+        const newPrincipal = loanPrincipals[maxPrincipalIndex] + loanRoundingDifference;
+        loanPrincipals[maxPrincipalIndex] = Math.max(5000, Math.round(newPrincipal / 5000) * 5000);
+      }
+
+      // Second pass: create loans with adjusted principals
+      for (let chunkIndex = 0; chunkIndex < loanChunks.length; chunkIndex++) {
+        const chunk = loanChunks[chunkIndex];
+        const chunkPrincipalCents = loanPrincipals[chunkIndex];
+
+        if (chunkPrincipalCents <= 0) {
+          continue; // Skip chunks with no principal
+        }
+
+        const chunkTicketNumber = ticketNumbers[chunkIndex];
+
+        // Create collateral entries for this chunk
+        // Distribute the rounded principal proportionally among items
+        const chunkActualPrincipal = chunk.reduce((sum, item) => sum + item.principalCents, 0);
+        const principalRatio = chunkActualPrincipal > 0 ? chunkPrincipalCents / chunkActualPrincipal : 1;
+        
+        const collateralEntries = chunk.map((item) => {
+          const descriptionParts = [];
+          if (item.qty > 1) {
+            descriptionParts.push(`${item.qty}x`);
+          }
+          descriptionParts.push(item.productName ?? item.productCode ?? 'Artículo');
+          if (item.productCode) {
+            descriptionParts.push(`(${item.productCode})`);
+          }
+
+          // Distribute the rounded principal proportionally
+          const itemEstimatedValue = Math.round(item.principalCents * principalRatio);
+
+          return {
+            description: descriptionParts.filter(Boolean).join(' '),
+            estimatedValueCents: itemEstimatedValue,
+            photoPath: null,
+          };
+        });
+
+        const prepared = await prepareLoanCreationInput(
+          tx,
+          {
+            branchId: layawayRow.branchId,
+            customerId: layawayRow.customerId,
+            ticketNumber: chunkTicketNumber,
+            interestModelId,
+            principalCents: chunkPrincipalCents,
+            comments: normalizedComments,
+            schedule: [
+              {
+                dueOn: pawnDueDate.toISOString().slice(0, 10),
+                interestCents: 0,
+                feeCents: 0,
+              },
+            ],
+            collateral: collateralEntries,
+            idImagePaths: [],
+          },
+          { allowZeroInterest: true },
+        );
+
+        const loan = await createLoanWithPreparedPayload(tx, prepared);
+        createdLoans.push(loan.loan);
+      }
+
+      if (createdLoans.length === 0) {
+        throw new HttpError(400, 'No loans could be created from layaway items');
+      }
+
+      // Fulfill the layaway inventory (sell the items) since the remaining balance becomes the pawn loan principal
+      await fulfillLayawayInventory(tx, layawayId, layawayRow.orderId);
+
+      // Create invoice for the sale (receipt for customer when picking up items)
+      if (orderRow) {
+        const invoiceNo = `INV-${Date.now()}`;
+        await tx.insert(invoices).values({
+          orderId: layawayRow.orderId,
+          invoiceNo,
+          totalCents: orderRow.totalCents,
+          taxCents: orderRow.taxCents ?? 0,
         });
       }
 
-      if (collateralEntries.length === 0) {
-        collateralEntries.push({
-          description: 'Converted from layaway balance',
-          estimatedValueCents: outstanding,
-          photoPath: null,
-        });
-      }
-
-      const prepared = await prepareLoanCreationInput(
-        tx,
-        {
-          branchId: layawayRow.branchId,
-          customerId: layawayRow.customerId,
-          ticketNumber: ticketNumber.trim(),
-          interestModelId,
-          principalCents: outstanding,
-          comments: normalizedComments,
-          schedule: [
-            {
-              dueOn: pawnDueDate.toISOString().slice(0, 10),
-              interestCents: 0,
-              feeCents: 0,
-            },
-          ],
-          collateral: collateralEntries,
-          idImagePaths: [],
-        },
-        { allowZeroInterest: true },
-      );
-
-      const loan = await createLoanWithPreparedPayload(tx, prepared);
-
-      await releaseLayawayInventory(tx, layawayRow.orderId);
-
+      // Update layaway with first loan ID (for backward compatibility)
       await tx
         .update(layaways)
         .set({
           status: 'pawned',
-          pawnLoanId: loan.loan.id,
+          pawnLoanId: createdLoans[0].id,
           pawnedAt: new Date(),
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })
         .where(eq(layaways.id, layawayId));
 
+      // Mark order as completed since items are sold
       await tx
         .update(orders)
-        .set({ status: 'cancelled' })
+        .set({ status: 'completed' })
         .where(eq(orders.id, layawayRow.orderId));
     });
 
@@ -18022,6 +19159,121 @@ app.get('/api/settings/active-branch', async (req, res, next) => {
   }
 });
 
+async function getOrCreateCurrentUser(executor = db) {
+  // Try to find Maria user by name
+  const [existingUser] = await executor
+    .select({
+      id: users.id,
+      branchId: users.branchId,
+      email: users.email,
+      phone: users.phone,
+      fullName: users.fullName,
+      roleId: users.roleId,
+      isActive: users.isActive,
+    })
+    .from(users)
+    .where(and(
+      like(users.fullName, '%Maria%'),
+      eq(users.isActive, true)
+    ))
+    .limit(1);
+
+  if (existingUser) {
+    return {
+      id: Number(existingUser.id),
+      branchId: Number(existingUser.branchId),
+      email: existingUser.email,
+      phone: existingUser.phone,
+      fullName: existingUser.fullName,
+      roleId: Number(existingUser.roleId),
+      isActive: existingUser.isActive,
+    };
+  }
+
+  // If not found, create Maria user
+  // First, get the active branch
+  const branch = await loadActiveBranch(executor);
+  
+  // Get cashier role (or manager if cashier doesn't exist)
+  const [cashierRole] = await executor
+    .select({ id: roles.id })
+    .from(roles)
+    .where(eq(roles.name, 'cashier'))
+    .limit(1);
+
+  const [managerRole] = await executor
+    .select({ id: roles.id })
+    .from(roles)
+    .where(eq(roles.name, 'manager'))
+    .limit(1);
+
+  const roleId = cashierRole ? Number(cashierRole.id) : (managerRole ? Number(managerRole.id) : null);
+  
+  if (!roleId) {
+    throw new HttpError(500, 'No se encontró un rol válido para crear el usuario');
+  }
+
+  // Hash PIN: "1234" (default PIN)
+  const pinHash = crypto.createHash('sha256').update('1234').digest('hex');
+
+  await executor
+    .insert(users)
+    .values({
+      branchId: branch.id,
+      email: 'maria@pawn.test',
+      phone: '+1-809-555-0100',
+      fullName: 'Maria P.',
+      pinHash: Buffer.from(pinHash, 'hex'),
+      roleId: roleId,
+      isActive: true,
+    });
+
+  const [createdUser] = await executor
+    .select({
+      id: users.id,
+      branchId: users.branchId,
+      email: users.email,
+      phone: users.phone,
+      fullName: users.fullName,
+      roleId: users.roleId,
+      isActive: users.isActive,
+    })
+    .from(users)
+    .where(and(
+      eq(users.fullName, 'Maria P.'),
+      eq(users.branchId, branch.id)
+    ))
+    .orderBy(desc(users.id))
+    .limit(1);
+
+  if (!createdUser) {
+    throw new HttpError(500, 'No se pudo crear el usuario');
+  }
+
+  return {
+    id: Number(createdUser.id),
+    branchId: Number(createdUser.branchId),
+    email: createdUser.email,
+    phone: createdUser.phone,
+    fullName: createdUser.fullName,
+    roleId: Number(createdUser.roleId),
+    isActive: createdUser.isActive,
+  };
+}
+
+app.get('/api/settings/current-user', async (req, res, next) => {
+  try {
+    const user = await getOrCreateCurrentUser();
+    res.json({ user });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    next(error);
+  }
+});
+
 app.post('/api/settings', async (req, res, next) => {
   try {
     const identifiers = resolveScopeIdentifiers({
@@ -19348,6 +20600,10 @@ app.use((req, res) => {
 const startServer = async () => {
   try {
     await connectDB();
+    
+    // Start backup scheduler
+    const { startBackupScheduler } = await import('./services/backup-scheduler.js');
+    await startBackupScheduler();
     
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);

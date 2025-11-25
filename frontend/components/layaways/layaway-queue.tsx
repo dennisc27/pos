@@ -13,7 +13,6 @@ export function LayawayQueue({
   footer,
   selectedIds,
   onToggleSelect,
-  onToggleAutopay,
   onLogContact
 }: {
   title: string;
@@ -26,7 +25,6 @@ export function LayawayQueue({
   footer?: React.ReactNode;
   selectedIds?: string[];
   onToggleSelect?: (id: string) => void;
-  onToggleAutopay?: (plan: LayawayPlan) => void;
   onLogContact?: (plan: LayawayPlan) => void;
 }) {
   const hasSelection = typeof onToggleSelect === "function";
@@ -115,14 +113,6 @@ export function LayawayQueue({
                   ) : null}
                 </div>
                 <div className="flex flex-col items-start gap-1 text-xs text-slate-600 dark:text-slate-300">
-                  <button
-                    onClick={() => onToggleAutopay?.(plan)}
-                    className={`rounded-full border border-slate-300 px-2 py-0.5 text-[11px] uppercase tracking-wide transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:hover:border-slate-500 ${
-                      plan.autopay ? "text-emerald-600 dark:text-emerald-300" : "text-slate-600 dark:text-slate-300"
-                    }`}
-                  >
-                    {plan.autopay ? "AutoCobro" : "Activar AutoCobro"}
-                  </button>
                   <span className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-500">
                     {plan.contactPreference}
                   </span>

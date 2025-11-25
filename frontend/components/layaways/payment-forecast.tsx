@@ -1,31 +1,20 @@
 import type { PaymentScheduleItem } from "./types";
 import { LayawaysCard } from "./layaways-card";
-import { channelPillColor, formatCurrency, formatPercent } from "./utils";
+import { channelPillColor, formatCurrency } from "./utils";
 
 export function PaymentForecast({
   items,
-  autopayPenetration,
   onUpdateStatus,
-  onConvertToAuto,
   onQueueReminder
 }: {
   items: PaymentScheduleItem[];
-  autopayPenetration: number;
   onUpdateStatus?: (id: string, status: PaymentScheduleItem["status"], note?: string) => void;
-  onConvertToAuto?: (id: string) => void;
   onQueueReminder?: (id: string) => void;
 }) {
   return (
     <LayawaysCard
       title="Cobros programados"
       subtitle="Próximas cuotas y modalidad de cobro"
-      action={
-        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-          <span className="rounded-full border border-slate-300 px-2 py-0.5 uppercase tracking-wide dark:border-slate-700">
-            {formatPercent(autopayPenetration)} AutoCobro
-          </span>
-        </div>
-      }
     >
       <div className="space-y-4">
         {items.map((item) => (
@@ -45,7 +34,7 @@ export function PaymentForecast({
               <span
                 className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${channelPillColor(item.channel)}`}
               >
-                {item.channel === "auto" ? "AutoCobro" : item.channel}
+                {item.channel === "auto" ? "Automático" : item.channel}
               </span>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
@@ -106,14 +95,6 @@ export function PaymentForecast({
                       className="rounded-full border border-slate-300 px-2 py-0.5 font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300"
                     >
                       Recordatorio
-                    </button>
-                  ) : null}
-                  {onConvertToAuto && item.channel !== "auto" ? (
-                    <button
-                      onClick={() => onConvertToAuto(item.id)}
-                      className="rounded-full border border-slate-300 px-2 py-0.5 font-semibold text-emerald-600 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-slate-700 dark:text-emerald-300"
-                    >
-                      Migrar a AutoCobro
                     </button>
                   ) : null}
                 </div>

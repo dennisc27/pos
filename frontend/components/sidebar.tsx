@@ -29,6 +29,7 @@ import {
   PackagePlus,
   PackageSearch,
   QrCode,
+  Search,
   ShoppingBag,
   ShoppingCart,
   Undo2,
@@ -73,9 +74,10 @@ const sections: NavSection[] = [
     title: "Loans & Layaway",
     items: [
       { name: "New loan", href: "/loans/new", icon: HandCoins },
+      { name: "Search", href: "/loans/search", icon: Search },
       { name: "Past-due", href: "/loans/due", icon: Hourglass },
       { name: "InstaPawn", href: "/loans/instapawn", icon: QrCode },
-      { name: "Layaway", href: "/layaway/new", icon: BadgeDollarSign },
+      { name: "Layaway", href: "/layaways", icon: BadgeDollarSign },
     ],
   },
   {

@@ -16,7 +16,8 @@ import {
   Watch,
   X,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Package
 } from "lucide-react";
 
 import { ProductGallery } from "@/components/pos/product-gallery";
@@ -52,6 +53,11 @@ const DEFAULT_TAX_RATE = 0.18;
 const WALK_IN_CUSTOMER = "Walk-in customer";
 const WALK_IN_DESCRIPTOR = "Default walk-in profile";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+
+type TaxSettings = {
+  taxIncluded: boolean;
+  taxRate: number;
+};
 const PAYMENT_METHOD_MAP: Record<TenderBreakdown["method"], "cash" | "card" | "transfer" | "gift_card" | "credit_note"> = {
   cash: "cash",
   card: "card",
@@ -95,22 +101,28 @@ function mapInventoryItems(items: InventoryResponseItem[] | undefined): Product[
     return [];
   }
 
-  return items.map((item) => {
-    const versionId = item.productCodeVersionId ?? item.productCodeId;
-    const availableQty = Number(item.availableQty ?? item.qtyOnHand ?? 0);
+  return items
+    .filter((item) => {
+      // Only include items that have a valid productCodeVersionId
+      // productCodeId is not sufficient - we need the version ID
+      return item.productCodeVersionId != null && item.productCodeVersionId > 0;
+    })
+    .map((item) => {
+      const versionId = item.productCodeVersionId!; // We've filtered out nulls above
+      const availableQty = Number(item.availableQty ?? item.qtyOnHand ?? 0);
 
-    return {
-      id: String(versionId ?? 0),
-      name: item.name ?? item.code ?? "Unnamed product",
-      sku: item.sku ?? item.code ?? `SKU-${versionId ?? "0"}`,
-      categoryId: item.categoryId != null ? String(item.categoryId) : "uncategorized",
-      price: Math.max(0, Number(item.priceCents ?? 0)) / 100,
-      stock: availableQty,
-      highlight: availableQty <= 1 ? "Low stock" : undefined,
-      previewLabel: (item.code ?? item.name ?? "").slice(0, 2).toUpperCase(),
-      variant: item.description ?? undefined,
-    } satisfies Product;
-  });
+      return {
+        id: String(versionId),
+        name: item.name ?? item.code ?? "Unnamed product",
+        sku: item.sku ?? item.code ?? `SKU-${versionId}`,
+        categoryId: item.categoryId != null ? String(item.categoryId) : "uncategorized",
+        price: Math.max(0, Number(item.priceCents ?? 0)) / 100,
+        stock: availableQty,
+        highlight: availableQty <= 1 ? "Low stock" : undefined,
+        previewLabel: (item.code ?? item.name ?? "").slice(0, 2).toUpperCase(),
+        variant: item.description ?? undefined,
+      } satisfies Product;
+    });
 }
 
 type CustomerSearchResult = {
@@ -121,11 +133,11 @@ type CustomerSearchResult = {
   lastActivityAt: string | null;
 };
 
-function buildSummary(items: CartLine[], tenders: TenderBreakdown[]): SaleSummary {
+function buildSummary(items: CartLine[], tenders: TenderBreakdown[], taxRate: number = DEFAULT_TAX_RATE): SaleSummary {
   // Calculate subtotal as base price (price / (1 + tax_rate)) rounded to 2 decimals per line item
   // This ensures price changes are reflected in the totals
   const subtotal = items.reduce((sum, item) => {
-    const rate = item.taxRate ?? DEFAULT_TAX_RATE;
+    const rate = item.taxRate ?? taxRate;
     const unitPrice = Math.max(item.price, 0);
     // Calculate base price per unit: price / (1 + tax_rate)
     const unitBase = unitPrice / (1 + rate);
@@ -191,6 +203,7 @@ function parseAmount(input: string): number | null {
 
 export default function PosPage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
+  const [taxSettings, setTaxSettings] = useState<TaxSettings>({ taxIncluded: true, taxRate: DEFAULT_TAX_RATE });
   const [categories, setCategories] = useState<ProductCategory[]>([DEFAULT_CATEGORY]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
@@ -224,6 +237,41 @@ export default function PosPage() {
   const [isLoadingCreditNotes, setIsLoadingCreditNotes] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
   const [pendingTenderAmount, setPendingTenderAmount] = useState<number>(0);
+  const [isLayawayDialogOpen, setIsLayawayDialogOpen] = useState(false);
+  const [layawayDueDate, setLayawayDueDate] = useState<string>("");
+  const [layawayTermOption, setLayawayTermOption] = useState<"1month" | "3months" | "manual">("1month");
+  const [layawayFirstPayment, setLayawayFirstPayment] = useState<string>("");
+  const [layawayPaymentMethod, setLayawayPaymentMethod] = useState<"cash" | "card" | "transfer">("cash");
+  const [isCreatingLayaway, setIsCreatingLayaway] = useState(false);
+  const [layawayError, setLayawayError] = useState<string | null>(null);
+  const [isLayawaySuccessDialogOpen, setIsLayawaySuccessDialogOpen] = useState(false);
+  const [layawaySuccessMessage, setLayawaySuccessMessage] = useState<string | null>(null);
+  const [stockError, setStockError] = useState<string | null>(null);
+
+  // Load tax settings from database
+  useEffect(() => {
+    const loadTaxSettings = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/settings?scope=global&keys=tax.config`);
+        if (response.ok) {
+          const data = await response.json();
+          const taxEntry = data.entries?.find((entry: { key: string }) => entry.key === "tax.config");
+          if (taxEntry?.value) {
+            // Tax rate is stored as percentage (e.g., 18 for 18%), convert to decimal (0.18)
+            const taxRatePercent = Number(taxEntry.value.taxRate ?? DEFAULT_TAX_RATE * 100);
+            setTaxSettings({
+              taxIncluded: Boolean(taxEntry.value.taxIncluded ?? true),
+              taxRate: taxRatePercent / 100,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load tax settings:", error);
+        // Keep default values
+      }
+    };
+    loadTaxSettings();
+  }, []);
 
   const resolveProductVersionId = useCallback((productId: string) => {
     const numeric = Number(productId);
@@ -232,6 +280,10 @@ export default function PosPage() {
 
   const loadInventory = useCallback(
     async (options?: { signal?: AbortSignal }) => {
+      if (!activeBranch?.id) {
+        return;
+      }
+
       try {
         setIsLoadingProducts(true);
         setProductError(null);
@@ -240,6 +292,7 @@ export default function PosPage() {
           pageSize: "60",
           status: "active",
           availability: "in_stock",
+          branchId: String(activeBranch.id),
         });
         const response = await fetch(`${API_BASE_URL}/api/inventory?${params.toString()}`, {
           signal: options?.signal,
@@ -290,17 +343,29 @@ export default function PosPage() {
         }
       }
     },
-    []
+    [activeBranch?.id]
   );
 
   useEffect(() => {
+    if (!activeBranch?.id) {
+      return;
+    }
+
     const controller = new AbortController();
     loadInventory({ signal: controller.signal });
 
     return () => {
       controller.abort();
     };
-  }, [loadInventory]);
+  }, [loadInventory, activeBranch?.id]);
+
+  // Clear cart when branch changes to prevent cross-branch issues
+  useEffect(() => {
+    if (activeBranch?.id && cartLines.length > 0) {
+      setCartLines([]);
+      setTenderBreakdown([]);
+    }
+  }, [activeBranch?.id]);
 
   const loadFullInventory = useCallback(async () => {
     try {
@@ -359,19 +424,49 @@ export default function PosPage() {
     qty: 1,
     price: product.price,
     listPrice: product.price,
-    taxRate: DEFAULT_TAX_RATE,
+    taxRate: taxSettings.taxRate,
     variant: product.variant,
     status: product.highlight ? "featured" : undefined
-  }), []);
+  }), [taxSettings.taxRate]);
 
   const addProductToCart = useCallback(
     (product: Product) => {
+      setStockError(null);
+      
       setCartLines((previous) => {
         const existing = previous.find((line) => line.id === product.id);
+        
         if (existing) {
+          // Calculate available stock: product stock minus current quantity in cart
+          const qtyInCart = existing.qty;
+          const availableStock = Math.max(0, product.stock - qtyInCart);
+          
+          if (availableStock <= 0) {
+            setStockError(`No stock available for ${product.name}`);
+            setTimeout(() => setStockError(null), 3000);
+            return previous;
+          }
+          
+          // Increment quantity, but cap at available stock
+          const newQty = qtyInCart + 1;
+          if (newQty > product.stock) {
+            setStockError(`Only ${product.stock} available in stock for ${product.name}`);
+            setTimeout(() => setStockError(null), 3000);
+            return previous.map((line) =>
+              line.id === product.id ? { ...line, qty: product.stock } : line
+            );
+          }
+          
           return previous.map((line) =>
-            line.id === product.id ? { ...line, qty: line.qty + 1 } : line
+            line.id === product.id ? { ...line, qty: newQty } : line
           );
+        }
+
+        // Adding new product to cart
+        if (product.stock <= 0) {
+          setStockError(`No stock available for ${product.name}`);
+          setTimeout(() => setStockError(null), 3000);
+          return previous;
         }
 
         return [createLineFromProduct(product), ...previous];
@@ -407,14 +502,23 @@ export default function PosPage() {
     });
   }, [activeCategoryId, products, searchTerm]);
 
-  const saleSummary = useMemo(() => buildSummary(cartLines, tenderBreakdown), [cartLines, tenderBreakdown]);
+  const saleSummary = useMemo(() => buildSummary(cartLines, tenderBreakdown, taxSettings.taxRate), [cartLines, tenderBreakdown, taxSettings.taxRate]);
 
   const handleToggleProduct = useCallback(
     (product: Product) => {
+      setStockError(null);
+      
       setCartLines((previous) => {
         const existing = previous.find((line) => line.id === product.id);
         if (existing) {
           return previous.filter((line) => line.id !== product.id);
+        }
+
+        // Check stock before adding
+        if (product.stock <= 0) {
+          setStockError(`No stock available for ${product.name}`);
+          setTimeout(() => setStockError(null), 3000);
+          return previous;
         }
 
         return [createLineFromProduct(product), ...previous];
@@ -428,10 +532,44 @@ export default function PosPage() {
   }, []);
 
   const handleQuantityChange = useCallback((lineId: string, quantity: number) => {
+    setStockError(null);
+    
+    // Find the product to check available stock
+    const product = products.find((p) => p.id === lineId);
+    if (!product) {
+      // If product not found, allow the change (might be a custom item)
+      setCartLines((previous) =>
+        previous.map((line) => (line.id === lineId ? { ...line, qty: Math.max(1, quantity) } : line))
+      );
+      return;
+    }
+
+    // Each product appears at most once in the cart, so available stock is simply product.stock
+    const availableStock = product.stock;
+
+    // If quantity exceeds available stock, cap it and show error
+    if (quantity > availableStock) {
+      const maxAllowed = Math.max(1, availableStock);
+      setStockError(
+        availableStock > 0
+          ? `Only ${availableStock} available in stock for ${product.name}`
+          : `No stock available for ${product.name}`
+      );
+      
+      // Clear error after 3 seconds
+      setTimeout(() => setStockError(null), 3000);
+      
+      setCartLines((previous) =>
+        previous.map((line) => (line.id === lineId ? { ...line, qty: maxAllowed } : line))
+      );
+      return;
+    }
+
+    // Valid quantity, update normally
     setCartLines((previous) =>
       previous.map((line) => (line.id === lineId ? { ...line, qty: Math.max(1, quantity) } : line))
     );
-  }, []);
+  }, [products]);
 
   const handlePriceChange = useCallback(
     async (lineId: string, price: number) => {
@@ -675,9 +813,9 @@ export default function PosPage() {
             productCodeVersionId: resolveProductVersionId(line.id),
             qty: line.qty,
             unitPriceCents: Math.round(line.price * 100),
-            taxRate: line.taxRate ?? DEFAULT_TAX_RATE,
+            taxRate: line.taxRate ?? taxSettings.taxRate,
           })),
-          taxRate: DEFAULT_TAX_RATE,
+          taxRate: taxSettings.taxRate,
         }),
       });
 
@@ -696,7 +834,7 @@ export default function PosPage() {
         },
         body: JSON.stringify({
           orderId: order.id,
-          taxRate: DEFAULT_TAX_RATE,
+          taxRate: taxSettings.taxRate,
         }),
       });
 
@@ -705,6 +843,18 @@ export default function PosPage() {
       }
 
       const invoice = await invoiceResponse.json();
+
+      // Get active shift for the branch to associate payments
+      let activeShiftId: number | null = null;
+      try {
+        const shiftResponse = await fetch(`${API_BASE_URL}/api/shifts/active?branchId=${activeBranch.id}`);
+        if (shiftResponse.ok) {
+          const shiftData = await shiftResponse.json();
+          activeShiftId = shiftData.shift?.id ?? null;
+        }
+      } catch {
+        // If shift lookup fails, continue without shiftId
+      }
 
       const hasCashTender = tenderBreakdown.some((item) => item.method === "cash");
       const tenderLines = hasCashTender || saleSummary.cashDue <= 0
@@ -743,18 +893,32 @@ export default function PosPage() {
           paymentMeta.creditNoteId = tender.creditNoteId;
         }
 
+        const paymentPayload: {
+          invoiceId: number;
+          orderId: number;
+          method: string;
+          amountCents: number;
+          shiftId?: number;
+          meta?: { reference?: string; creditNoteId?: number } | null;
+        } = {
+          invoiceId: invoice.id,
+          orderId: order.id,
+          method,
+          amountCents: Math.round(tender.amount * 100),
+          meta: paymentMeta,
+        };
+
+        // Add shiftId if available
+        if (activeShiftId !== null) {
+          paymentPayload.shiftId = activeShiftId;
+        }
+
         const paymentResponse = await fetch(`${API_BASE_URL}/api/payments`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            invoiceId: invoice.id,
-            orderId: order.id,
-            method,
-            amountCents: Math.round(tender.amount * 100),
-            meta: paymentMeta,
-          }),
+          body: JSON.stringify(paymentPayload),
         });
 
         if (!paymentResponse.ok) {
@@ -809,6 +973,206 @@ export default function PosPage() {
     clearCart();
   }, [clearCart]);
 
+  const calculateDueDate = useCallback((months: number): string => {
+    const date = new Date();
+    date.setMonth(date.getMonth() + months);
+    return date.toISOString().split("T")[0];
+  }, []);
+
+  const handleOpenLayawayDialog = useCallback(() => {
+    // Always open the dialog, but set error messages if validation fails
+    // This ensures the user gets feedback about what's wrong
+    
+    // Set default to 1 month
+    setLayawayTermOption("1month");
+    setLayawayDueDate(calculateDueDate(1));
+
+    // Validate and set error messages
+    if (cartLines.length === 0) {
+      setLayawayError("Cart is empty. Add items to create a layaway.");
+    } else if (!selectedCustomerId) {
+      setLayawayError("A customer must be selected to create a layaway.");
+    } else if (!activeBranch) {
+      setLayawayError(
+        branchError ?? "Configura una sucursal activa en ajustes para poder registrar ventas."
+      );
+    } else {
+      setLayawayError(null);
+    }
+
+    setIsLayawayDialogOpen(true);
+  }, [cartLines.length, selectedCustomerId, activeBranch, branchError, calculateDueDate]);
+
+  const handleCloseLayawayDialog = useCallback(() => {
+    setIsLayawayDialogOpen(false);
+    setLayawayDueDate("");
+    setLayawayTermOption("1month");
+    setLayawayFirstPayment("");
+    setLayawayPaymentMethod("cash");
+    setLayawayError(null);
+    setIsCreatingLayaway(false);
+  }, []);
+
+  const handleLayawayTermChange = useCallback((option: "1month" | "3months" | "manual") => {
+    setLayawayTermOption(option);
+    if (option === "1month") {
+      setLayawayDueDate(calculateDueDate(1));
+    } else if (option === "3months") {
+      setLayawayDueDate(calculateDueDate(3));
+    } else {
+      // For manual, set to 1 month as default but user can change it
+      setLayawayDueDate(calculateDueDate(1));
+    }
+  }, [calculateDueDate]);
+
+  const handleCreateLayaway = useCallback(async () => {
+    if (cartLines.length === 0) {
+      setLayawayError("Cart is empty. Add items to create a layaway.");
+      return;
+    }
+
+    if (!selectedCustomerId) {
+      setLayawayError("A customer must be selected to create a layaway.");
+      return;
+    }
+
+    if (!activeBranch) {
+      setLayawayError(
+        branchError ?? "Configura una sucursal activa en ajustes para poder registrar ventas."
+      );
+      return;
+    }
+
+    if (!layawayDueDate) {
+      setLayawayError("Due date is required.");
+      return;
+    }
+
+    const dueDateValue = new Date(layawayDueDate);
+    if (Number.isNaN(dueDateValue.getTime())) {
+      setLayawayError("Invalid due date.");
+      return;
+    }
+
+    // Validate first payment if provided
+    let firstPaymentCents: number | null = null;
+    if (layawayFirstPayment.trim()) {
+      const parsed = parseFloat(layawayFirstPayment.replace(/,/g, ""));
+      if (Number.isNaN(parsed) || parsed < 0) {
+        setLayawayError("First payment must be a valid positive number.");
+        return;
+      }
+      firstPaymentCents = Math.round(parsed * 100);
+      if (firstPaymentCents > Math.round(saleSummary.total * 100)) {
+        setLayawayError("First payment cannot exceed the total amount.");
+        return;
+      }
+    }
+
+    try {
+      setIsCreatingLayaway(true);
+      setLayawayError(null);
+
+      // Create order first
+      const orderResponse = await fetch(`${API_BASE_URL}/api/orders`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          branchId: activeBranch.id,
+          userId: 7, // Cajera Principal
+          customerId: selectedCustomerId,
+          items: cartLines.map((line) => ({
+            productCodeVersionId: resolveProductVersionId(line.id),
+            qty: line.qty,
+            unitPriceCents: Math.round(line.price * 100),
+            taxRate: line.taxRate ?? taxSettings.taxRate,
+          })),
+          taxRate: taxSettings.taxRate,
+        }),
+      });
+
+      if (!orderResponse.ok) {
+        const errorData = await orderResponse.json().catch(() => ({}));
+        throw new Error(errorData?.error ?? `Order creation failed (${orderResponse.status})`);
+      }
+
+      const order = await orderResponse.json();
+
+      // Create layaway
+      const layawayPayload: {
+        orderId: number;
+        dueDate: string;
+        initialPayment?: {
+          amountCents: number;
+          method: string;
+        };
+      } = {
+        orderId: order.id,
+        dueDate: dueDateValue.toISOString(),
+      };
+
+      // Add initial payment if provided
+      if (firstPaymentCents !== null && firstPaymentCents > 0) {
+        layawayPayload.initialPayment = {
+          amountCents: firstPaymentCents,
+          method: layawayPaymentMethod,
+        };
+      }
+
+      const layawayResponse = await fetch(`${API_BASE_URL}/api/layaways`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(layawayPayload),
+      });
+
+      if (!layawayResponse.ok) {
+        const errorData = await layawayResponse.json().catch(() => ({}));
+        throw new Error(errorData?.error ?? `Layaway creation failed (${layawayResponse.status})`);
+      }
+
+      const layaway = await layawayResponse.json();
+
+      // Close dialog and show success
+      setIsLayawayDialogOpen(false);
+      setLayawaySuccessMessage(`Layaway #${layaway.layaway?.id ?? order.id} created successfully.`);
+      setIsLayawaySuccessDialogOpen(true);
+
+      // Refresh inventory
+      await loadInventory();
+      if (isInventoryModalOpen) {
+        await loadFullInventory();
+      }
+    } catch (error) {
+      console.error("Create layaway failed", error);
+      setLayawayError(error instanceof Error ? error.message : "Unable to create layaway. Please try again.");
+    } finally {
+      setIsCreatingLayaway(false);
+    }
+  }, [
+    cartLines,
+    selectedCustomerId,
+    activeBranch,
+    branchError,
+    layawayDueDate,
+    layawayFirstPayment,
+    layawayPaymentMethod,
+    saleSummary,
+    resolveProductVersionId,
+    loadInventory,
+    isInventoryModalOpen,
+    loadFullInventory,
+  ]);
+
+  const handleCloseLayawaySuccessDialog = useCallback(() => {
+    setIsLayawaySuccessDialogOpen(false);
+    setLayawaySuccessMessage(null);
+    clearCart();
+  }, [clearCart]);
+
   const closeCustomerDialog = useCallback(() => {
     setCustomerDialogMode(null);
     setCustomerInput("");
@@ -834,6 +1198,141 @@ export default function PosPage() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [customerDialogMode, closeCustomerDialog]);
+
+  // ESC key handler for Payment Dialog
+  useEffect(() => {
+    if (!isPaymentDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && finalizeState !== "processing") {
+        event.preventDefault();
+        handleClosePaymentDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPaymentDialogOpen, finalizeState, handleClosePaymentDialog]);
+
+  // ESC key handler for Success Dialog
+  useEffect(() => {
+    if (!isSuccessDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleCloseSuccessDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isSuccessDialogOpen, handleCloseSuccessDialog]);
+
+  // ESC key handler for Inventory Modal
+  useEffect(() => {
+    if (!isInventoryModalOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleCloseInventoryModal();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isInventoryModalOpen, handleCloseInventoryModal]);
+
+  // ESC key handler for Credit Note Dialog
+  useEffect(() => {
+    if (!isCreditNoteDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCreditNoteDialogOpen(false);
+        setPendingTenderAmount(0);
+        setCreditNotes([]);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isCreditNoteDialogOpen]);
+
+  // ESC key handler for Void Dialog
+  useEffect(() => {
+    if (!isVoidDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsVoidDialogOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isVoidDialogOpen]);
+
+  // ESC key handler for Layaway Dialog
+  useEffect(() => {
+    if (!isLayawayDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !isCreatingLayaway) {
+        event.preventDefault();
+        handleCloseLayawayDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isLayawayDialogOpen, isCreatingLayaway, handleCloseLayawayDialog]);
+
+  // ESC key handler for Layaway Success Dialog
+  useEffect(() => {
+    if (!isLayawaySuccessDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleCloseLayawaySuccessDialog();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isLayawaySuccessDialogOpen, handleCloseLayawaySuccessDialog]);
 
   useEffect(() => {
     if (!customerDialogMode) {
@@ -1036,6 +1535,11 @@ export default function PosPage() {
             ) : isLoadingProducts ? (
               <p className="text-xs text-slate-500 dark:text-slate-400">Loading inventory...</p>
             ) : null}
+            {stockError ? (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-50 px-4 py-2 text-xs text-amber-600 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+                {stockError}
+              </div>
+            ) : null}
             <ProductGallery
               categories={categories}
               products={filteredProducts}
@@ -1073,7 +1577,7 @@ export default function PosPage() {
       </div>
       <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800/70 dark:bg-slate-900/90">
         <div className="flex justify-center">
-          <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="grid w-full max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4">
             <button
               onClick={() => setIsVoidDialogOpen(true)}
               className="flex items-center justify-center gap-2 rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 transition hover:border-rose-500/70 hover:text-rose-500 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300 dark:hover:border-rose-400/70 dark:hover:text-rose-200"
@@ -1091,6 +1595,13 @@ export default function PosPage() {
             <button className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white">
               <Landmark className="h-4 w-4" />
               Bank transaction
+            </button>
+            <button
+              onClick={handleOpenLayawayDialog}
+              className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 dark:border-slate-800/80 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:text-white"
+            >
+              <Package className="h-4 w-4" />
+              Layaway
             </button>
           </div>
         </div>
@@ -1502,6 +2013,243 @@ export default function PosPage() {
               <button
                 type="button"
                 onClick={handleCloseSuccessDialog}
+                className="rounded-lg border border-emerald-600/70 bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-600 hover:text-emerald-600 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200 dark:hover:border-emerald-400/80 dark:hover:text-emerald-100"
+              >
+                Start New Sale
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {isLayawayDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={handleCloseLayawayDialog}
+        >
+          <form
+            className="w-full max-w-md space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateLayaway();
+            }}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Create Layaway</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Set the due date for this layaway plan.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseLayawayDialog}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close layaway dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Payment Term <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleLayawayTermChange("1month")}
+                    className={`rounded-lg border px-4 py-3 text-sm font-medium transition ${
+                      layawayTermOption === "1month"
+                        ? "border-sky-500 bg-sky-500/15 text-sky-700 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100"
+                        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                    }`}
+                  >
+                    1 Month
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLayawayTermChange("3months")}
+                    className={`rounded-lg border px-4 py-3 text-sm font-medium transition ${
+                      layawayTermOption === "3months"
+                        ? "border-sky-500 bg-sky-500/15 text-sky-700 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100"
+                        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                    }`}
+                  >
+                    3 Months
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLayawayTermChange("manual")}
+                    className={`rounded-lg border px-4 py-3 text-sm font-medium transition ${
+                      layawayTermOption === "manual"
+                        ? "border-sky-500 bg-sky-500/15 text-sky-700 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100"
+                        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                    }`}
+                  >
+                    Manual
+                  </button>
+                </div>
+                {layawayTermOption === "manual" ? (
+                  <div className="mt-3">
+                    <label htmlFor="layaway-due-date" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      Due Date <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      id="layaway-due-date"
+                      type="date"
+                      value={layawayDueDate}
+                      onChange={(e) => setLayawayDueDate(e.target.value)}
+                      min={new Date().toISOString().split("T")[0]}
+                      required
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-sky-400"
+                    />
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-lg border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300">
+                    Due date: {formatDateForDisplay(layawayDueDate)}
+                  </div>
+                )}
+              </div>
+              <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span>Total Amount</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    {formatCurrency(saleSummary.total)}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  First Payment (Optional)
+                </label>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLayawayPaymentMethod("cash")}
+                      className={`rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                        layawayPaymentMethod === "cash"
+                          ? "border-sky-500 bg-sky-500/15 text-sky-700 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                      }`}
+                    >
+                      Cash
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLayawayPaymentMethod("card")}
+                      className={`rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                        layawayPaymentMethod === "card"
+                          ? "border-sky-500 bg-sky-500/15 text-sky-700 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                      }`}
+                    >
+                      Card
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLayawayPaymentMethod("transfer")}
+                      className={`rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                        layawayPaymentMethod === "transfer"
+                          ? "border-sky-500 bg-sky-500/15 text-sky-700 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-slate-600"
+                      }`}
+                    >
+                      Transfer
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={layawayFirstPayment}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/[^0-9.,]/g, "");
+                      setLayawayFirstPayment(value);
+                    }}
+                    placeholder="RD$ 0.00"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-sky-400"
+                  />
+                  {layawayFirstPayment && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Remaining balance: {formatCurrency(Math.max(0, saleSummary.total - (parseFloat(layawayFirstPayment.replace(/,/g, "")) || 0)))}
+                    </p>
+                  )}
+                </div>
+              </div>
+              {layawayError ? (
+                <div className="rounded-xl border border-rose-400/60 bg-rose-50 px-4 py-2 text-sm text-rose-600 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+                  {layawayError}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCloseLayawayDialog}
+                disabled={isCreatingLayaway}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800/80 dark:text-slate-300 dark:hover:border-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  isCreatingLayaway ||
+                  !layawayDueDate ||
+                  !!layawayError ||
+                  cartLines.length === 0 ||
+                  !selectedCustomerId ||
+                  !activeBranch
+                }
+                className="inline-flex items-center gap-2 rounded-lg border border-sky-500/70 bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:border-sky-500 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-70 dark:border-sky-500/60 dark:bg-sky-500/20 dark:text-sky-100 dark:hover:border-sky-400/80 dark:hover:text-white"
+              >
+                {isCreatingLayaway ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Layaway"
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+      {isLayawaySuccessDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur"
+          onClick={handleCloseLayawaySuccessDialog}
+        >
+          <div
+            className="w-full max-w-md space-y-5 rounded-3xl border border-slate-200/70 bg-white p-6 shadow-2xl dark:border-slate-800/80 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-emerald-600 dark:text-emerald-300">Layaway Created</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  {layawaySuccessMessage ?? "Layaway plan created successfully."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseLayawaySuccessDialog}
+                className="rounded-full border border-slate-200/70 p-2 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                aria-label="Close success dialog"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCloseLayawaySuccessDialog}
                 className="rounded-lg border border-emerald-600/70 bg-emerald-600/15 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-600 hover:text-emerald-600 dark:border-emerald-500/60 dark:bg-emerald-500/20 dark:text-emerald-200 dark:hover:border-emerald-400/80 dark:hover:text-emerald-100"
               >
                 Start New Sale

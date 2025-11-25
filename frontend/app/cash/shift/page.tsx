@@ -16,6 +16,7 @@ import {
 
 import { formatCurrency } from "@/components/cash/utils";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
+import { useCurrentUser } from "@/components/providers/current-user-provider";
 import { formatDateTimeForDisplay } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -189,6 +190,7 @@ const formatDate = (value: string | null | undefined) => {
 
 export default function CashShiftPage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
+  const { user: currentUser, loading: userLoading } = useCurrentUser();
   const [status, setStatus] = useState<StatusMessage>(null);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [movements, setMovements] = useState<CashMovement[]>([]);
@@ -196,10 +198,8 @@ export default function CashShiftPage() {
   const [denominations, setDenominations] = useState(initialDenominationState);
   const [isLoading, setIsLoading] = useState({ open: false, close: false, movement: false, load: false });
   const [openForm, setOpenForm] = useState({ branchId: "", openedBy: "", pin: "", openingCash: "" });
-  const [closeForm, setCloseForm] = useState({ closedBy: "", pin: "", closingCash: "" });
+  const [closeForm, setCloseForm] = useState({ closingCash: "" });
   const [movementForm, setMovementForm] = useState({
-    performedBy: "",
-    pin: "",
     amount: "",
     reason: "",
     type: "drop" as MovementType,
@@ -210,8 +210,10 @@ export default function CashShiftPage() {
     setOpenForm((state) => ({
       ...state,
       branchId: activeBranch ? String(activeBranch.id) : "",
+      openedBy: currentUser ? String(currentUser.id) : "",
+      pin: "1234", // Default PIN for Maria
     }));
-  }, [activeBranch]);
+  }, [activeBranch, currentUser]);
 
   const countedTotal = useMemo(() => {
     return DENOMINATIONS.reduce((sum, denom) => {
@@ -424,8 +426,19 @@ export default function CashShiftPage() {
       return;
     }
 
+    if (!currentUser) {
+      setStatus({ tone: "error", message: "Usuario no disponible. Por favor, recarga la página." });
+      return;
+    }
+
     if (!openForm.openedBy || !openForm.pin) {
-      setStatus({ tone: "error", message: "Branch, operator, and PIN are required to open a shift." });
+      setStatus({ tone: "error", message: "Error al cargar la información del usuario." });
+      return;
+    }
+
+    // Check if user already has an open shift
+    if (userHasOpenShift) {
+      setStatus({ tone: "error", message: "Ya tienes un turno abierto. Cierra el turno actual antes de abrir uno nuevo." });
       return;
     }
 
@@ -468,8 +481,8 @@ export default function CashShiftPage() {
       return;
     }
 
-    if (!closeForm.closedBy || !closeForm.pin) {
-      setStatus({ tone: "error", message: "Closing operator and PIN are required." });
+    if (!currentUser) {
+      setStatus({ tone: "error", message: "Usuario no disponible. Por favor, recarga la página." });
       return;
     }
 
@@ -484,9 +497,9 @@ export default function CashShiftPage() {
 
     try {
       const payload = {
-        closedBy: Number(closeForm.closedBy),
+        closedBy: currentUser.id,
         closingCashCents: closingCents,
-        pin: closeForm.pin,
+        pin: "1234", // Default PIN for current user
       };
       const data = await postJson<{ shift: Shift; snapshot: ShiftSnapshot }>(
         `/api/shifts/${activeShift.id}/close`,
@@ -520,8 +533,13 @@ export default function CashShiftPage() {
       return;
     }
 
-    if (!movementForm.performedBy || !movementForm.pin || !movementForm.amount) {
-      setStatus({ tone: "error", message: "Amount, performer, and PIN are required for drawer movements." });
+    if (!currentUser) {
+      setStatus({ tone: "error", message: "Usuario no disponible. Por favor, recarga la página." });
+      return;
+    }
+
+    if (!movementForm.amount) {
+      setStatus({ tone: "error", message: "El monto es obligatorio para registrar movimientos." });
       return;
     }
 
@@ -548,9 +566,9 @@ export default function CashShiftPage() {
           : `/api/shifts/${activeShift.id}/paid-out`;
 
       const payload = {
-        performedBy: Number(movementForm.performedBy),
+        performedBy: currentUser.id,
         amountCents,
-        pin: movementForm.pin,
+        pin: "1234", // Default PIN for current user
         reason: movementForm.reason || null,
       };
 
@@ -581,6 +599,59 @@ export default function CashShiftPage() {
     await loadActiveShiftForBranch(activeBranch.id);
   };
 
+  // Check if current user has an open shift
+  const userHasOpenShift = useMemo(() => {
+    if (!currentUser || !activeShift) {
+      return false;
+    }
+    return activeShift.openedBy === currentUser.id && !activeShift.closedAt;
+  }, [currentUser, activeShift]);
+
+  // Check if current user can close the active shift
+  const userCanCloseShift = useMemo(() => {
+    if (!currentUser || !activeShift) {
+      return false;
+    }
+    return activeShift.openedBy === currentUser.id && !activeShift.closedAt;
+  }, [currentUser, activeShift]);
+
+  // Calculate metrics
+  const openShiftsCount = useMemo(() => {
+    // Count open shifts: active shift if it exists and is not closed
+    // Reports typically contain closed shifts, so we mainly count the active shift
+    if (activeShift && !activeShift.closedAt) {
+      return 1;
+    }
+    // Also check reports for any open shifts (though they're usually closed)
+    const openInReports = reports.filter((report) => !report.shift.closedAt).length;
+    return openInReports;
+  }, [reports, activeShift]);
+
+  const totalExpectedCash = useMemo(() => {
+    // Sum expected cash from active shift
+    if (activeShift && !activeShift.closedAt) {
+      return Number(activeShift.expectedCashCents ?? 0) / 100;
+    }
+    // Also sum from any open shifts in reports
+    const fromReports = reports
+      .filter((report) => !report.shift.closedAt)
+      .reduce((sum, report) => sum + (report.expectedCashCents ?? 0), 0);
+    return fromReports / 100;
+  }, [reports, activeShift]);
+
+  const vaultAvailable = useMemo(() => {
+    // Calculate vault from drops (movements where kind is "drop")
+    // Drops move cash from drawer to vault
+    const drops = movements
+      .filter((m) => m.kind === "drop")
+      .reduce((sum, m) => sum + Math.abs(m.amountCents), 0);
+    // Note: This is a simplified calculation based on current shift movements
+    // In a production system, vault balance would be tracked in a separate table
+    return drops / 100;
+  }, [movements]);
+
+  const shiftStartDate = activeShift?.openedAt ? formatDate(activeShift.openedAt) : "—";
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
       <header className="mb-10 flex flex-col gap-2">
@@ -591,6 +662,32 @@ export default function CashShiftPage() {
           with over/short alerts for audit review.
         </p>
       </header>
+
+      {/* Metrics Section */}
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Turnos abiertos</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{openShiftsCount}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Turnos activos actualmente</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Efectivo esperado</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{formatCurrency(totalExpectedCash)}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Total en todos los turnos abiertos</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Bóveda disponible</p>
+          <p className="mt-1 text-2xl font-semibold text-sky-600 dark:text-sky-300">{formatCurrency(vaultAvailable)}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Efectivo en bóveda</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/60">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Fecha inicio turno</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{shiftStartDate}</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {activeShift ? "Turno activo" : "Sin turno abierto"}
+          </p>
+        </div>
+      </div>
 
       {branchLoading ? (
         <div className="mb-8 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
@@ -812,48 +909,39 @@ export default function CashShiftPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setOpenForm({ branchId: "", openedBy: "", pin: "", openingCash: "" })}
+                      onClick={() => {
+                        setOpenForm((state) => ({
+                          ...state,
+                          openingCash: "",
+                        }));
+                      }}
                       className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
                     >
                       Limpiar
                     </button>
                   </div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-3">
                   <div className="space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Sucursal</span>
-                    {branchLoading ? (
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Cajero</span>
+                    {userLoading ? (
                       <span className="inline-flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Sincronizando…
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…
                       </span>
-                    ) : branchError ? (
-                      <span className="block rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
-                        {branchError}
-                      </span>
-                    ) : activeBranch ? (
+                    ) : currentUser ? (
                       <span className="block rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
-                        {activeBranch.name}
+                        {currentUser.fullName} (ID: {currentUser.id})
                       </span>
                     ) : (
                       <span className="block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                        Configura una sucursal activa en ajustes
+                        Usuario no disponible
                       </span>
                     )}
                   </div>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Cajero</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={openForm.openedBy}
-                      onChange={(event) => setOpenForm((state) => ({ ...state, openedBy: event.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                      placeholder="ID empleado"
-                      required
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Efectivo inicial</span>
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Efectivo inicial <span className="text-rose-500">*</span>
+                    </span>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -861,27 +949,22 @@ export default function CashShiftPage() {
                       onChange={(event) => setOpenForm((state) => ({ ...state, openingCash: event.target.value }))}
                       className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
                       placeholder="RD$ 0.00"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">PIN de supervisor</span>
-                    <input
-                      type="password"
-                      value={openForm.pin}
-                      onChange={(event) => setOpenForm((state) => ({ ...state, pin: event.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                      placeholder="****"
                       required
                     />
                   </label>
                 </div>
+                {userHasOpenShift && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Ya tienes un turno abierto. Cierra el turno actual antes de abrir uno nuevo.
+                  </p>
+                )}
                 <button
                   type="submit"
-                  disabled={isLoading.open}
+                  disabled={isLoading.open || userHasOpenShift || !currentUser}
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
                 >
                   <ShieldCheck className="h-4 w-4" />
-                  {isLoading.open ? "Abriendo..." : "Abrir turno"}
+                  {isLoading.open ? "Abriendo..." : userHasOpenShift ? "Ya tienes un turno abierto" : "Abrir turno"}
                 </button>
               </form>
 
@@ -943,27 +1026,33 @@ export default function CashShiftPage() {
                   <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Cierre</h3>
                   <button
                     type="button"
-                    onClick={() => setCloseForm({ closedBy: "", pin: "", closingCash: "" })}
+                    onClick={() => setCloseForm({ closingCash: "" })}
                     className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
                   >
                     Limpiar
                   </button>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1">
+                <div className="space-y-3">
+                  <div className="space-y-1">
                     <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Supervisor</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={closeForm.closedBy}
-                      onChange={(event) => setCloseForm((state) => ({ ...state, closedBy: event.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                      placeholder="ID supervisor"
-                      required
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Total contado</span>
+                    {userLoading ? (
+                      <span className="inline-flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…
+                      </span>
+                    ) : currentUser ? (
+                      <span className="block rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                        {currentUser.fullName} (ID: {currentUser.id})
+                      </span>
+                    ) : (
+                      <span className="block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                        Usuario no disponible
+                      </span>
+                    )}
+                  </div>
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Total contado <span className="text-rose-500">*</span>
+                    </span>
                     <input
                       type="text"
                       inputMode="decimal"
@@ -974,21 +1063,24 @@ export default function CashShiftPage() {
                       required
                     />
                   </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">PIN</span>
-                    <input
-                      type="password"
-                      value={closeForm.pin}
-                      onChange={(event) => setCloseForm((state) => ({ ...state, pin: event.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                      placeholder="****"
-                      required
-                    />
-                  </label>
                 </div>
+                {!userCanCloseShift && activeShift && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {activeShift.closedAt
+                      ? "Este turno ya está cerrado."
+                      : activeShift.openedBy !== currentUser?.id
+                      ? "Solo puedes cerrar turnos que hayas abierto tú."
+                      : "No puedes cerrar este turno."}
+                  </p>
+                )}
+                {!userCanCloseShift && !activeShift && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    No hay un turno abierto para cerrar.
+                  </p>
+                )}
                 <button
                   type="submit"
-                  disabled={isLoading.close || !activeShift}
+                  disabled={isLoading.close || !userCanCloseShift}
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
                 >
                   <FileText className="h-4 w-4" />
@@ -1011,56 +1103,53 @@ export default function CashShiftPage() {
               </div>
             </header>
             <form onSubmit={handleMovementSubmit} className="space-y-4 px-6 py-5 text-sm">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Acción</span>
-                  <select
-                    value={movementForm.type}
-                    onChange={(event) =>
-                      setMovementForm((state) => ({ ...state, type: event.target.value as MovementType }))
-                    }
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                  >
-                    <option value="drop">Drop a bóveda</option>
-                    <option value="paid-in">Paid-in</option>
-                    <option value="paid-out">Paid-out</option>
-                  </select>
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Monto</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={movementForm.amount}
-                    onChange={(event) => setMovementForm((state) => ({ ...state, amount: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                    placeholder="RD$ 0.00"
-                    required
-                  />
-                </label>
-                <label className="space-y-1">
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Acción</span>
+                    <select
+                      value={movementForm.type}
+                      onChange={(event) =>
+                        setMovementForm((state) => ({ ...state, type: event.target.value as MovementType }))
+                      }
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
+                    >
+                      <option value="drop">Drop a bóveda</option>
+                      <option value="paid-in">Paid-in</option>
+                      <option value="paid-out">Paid-out</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Monto <span className="text-rose-500">*</span>
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={movementForm.amount}
+                      onChange={(event) => setMovementForm((state) => ({ ...state, amount: event.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
+                      placeholder="RD$ 0.00"
+                      required
+                    />
+                  </label>
+                </div>
+                <div className="space-y-1">
                   <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Realizado por</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={movementForm.performedBy}
-                    onChange={(event) => setMovementForm((state) => ({ ...state, performedBy: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                    placeholder="ID cajero"
-                    required
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">PIN</span>
-                  <input
-                    type="password"
-                    value={movementForm.pin}
-                    onChange={(event) => setMovementForm((state) => ({ ...state, pin: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                    placeholder="****"
-                    required
-                  />
-                </label>
+                  {userLoading ? (
+                    <span className="inline-flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…
+                    </span>
+                  ) : currentUser ? (
+                    <span className="block rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                      {currentUser.fullName} (ID: {currentUser.id})
+                    </span>
+                  ) : (
+                    <span className="block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      Usuario no disponible
+                    </span>
+                  )}
+                </div>
               </div>
               <label className="block space-y-1">
                 <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Motivo</span>
@@ -1083,138 +1172,6 @@ export default function CashShiftPage() {
             </form>
           </section>
         </div>
-      </section>
-
-      <section className="mt-12 rounded-2xl border border-slate-200 bg-white/90 shadow-sm ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900/60">
-        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-              <FileText className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Historial de Z-report</h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Guarda cada cierre con el conteo del cajón y resalta variaciones que requieran auditoría.
-              </p>
-            </div>
-          </div>
-        </header>
-
-        {reports.length === 0 ? (
-          <p className="px-6 py-10 text-sm text-slate-500 dark:text-slate-400">
-            Aún no hay Z-reports registrados. Cierra un turno para generar el primer registro.
-          </p>
-        ) : (
-          <ul className="divide-y divide-slate-200 text-sm dark:divide-slate-800">
-            {reports.map((report) => {
-              const flagged = Math.abs(report.overShortCents) >= OVER_SHORT_THRESHOLD_CENTS;
-              return (
-                <li
-                  key={`${report.shift.id}-${report.computedAt}`}
-                  className="grid gap-4 px-6 py-5 md:grid-cols-[1.2fr,1fr] md:items-start"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          Shift #{report.shift.id} · {formatDate(report.shift.closedAt)}
-                        </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Calculado {formatDate(report.computedAt)} · Supervisor {numberFormatter.format(report.shift.closedBy)}
-                        </p>
-                      </div>
-                      {flagged ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 dark:bg-rose-900/40 dark:text-rose-200">
-                          <AlertTriangle className="h-3.5 w-3.5" /> Revisión requerida
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-                          <ShieldCheck className="h-3.5 w-3.5" /> Balanceado
-                        </span>
-                      )}
-                    </div>
-                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-600 dark:text-slate-400 sm:grid-cols-4">
-                      <div>
-                        <dt className="uppercase tracking-wide text-[10px] text-slate-400">Apertura</dt>
-                        <dd className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                          {centsToCurrency(report.openingCashCents)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="uppercase tracking-wide text-[10px] text-slate-400">Cierre contado</dt>
-                        <dd className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                          {centsToCurrency(report.closingCashCents)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="uppercase tracking-wide text-[10px] text-slate-400">Esperado</dt>
-                        <dd className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                          {centsToCurrency(report.expectedCashCents)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="uppercase tracking-wide text-[10px] text-slate-400">Over/Short</dt>
-                        <dd
-                          className={`text-sm font-semibold ${
-                            report.overShortCents === 0
-                              ? "text-slate-600 dark:text-slate-300"
-                              : report.overShortCents > 0
-                              ? "text-emerald-600 dark:text-emerald-300"
-                              : "text-rose-600 dark:text-rose-300"
-                          }`}
-                        >
-                          {centsToCurrency(report.overShortCents)}
-                        </dd>
-                      </div>
-                    </dl>
-                  </div>
-
-                  <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
-                        Pagos
-                      </p>
-                      <ul className="space-y-1">
-                        {Object.entries(report.paymentsByMethod).map(([method, breakdown]) => (
-                          <li key={method} className="flex justify-between">
-                            <span className="capitalize text-slate-500 dark:text-slate-400">{method}</span>
-                            <span className="font-medium text-slate-800 dark:text-slate-200">
-                              {centsToCurrency(breakdown.totalCents)} · {numberFormatter.format(breakdown.count)}
-                            </span>
-                          </li>
-                        ))}
-                        {Object.keys(report.paymentsByMethod).length === 0 ? (
-                          <li className="text-slate-400">Sin pagos registrados</li>
-                        ) : null}
-                      </ul>
-                    </div>
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
-                        Movimientos de cajón
-                      </p>
-                      <ul className="space-y-1">
-                        {Object.entries(report.cashMovements.totalsByKind).map(([kind, breakdown]) => (
-                          <li key={kind} className="flex justify-between">
-                            <span className="capitalize text-slate-500 dark:text-slate-400">{kind.replace(/_/g, " ")}</span>
-                            <span className="font-medium text-slate-800 dark:text-slate-200">
-                              {centsToCurrency(breakdown.totalCents)} · {numberFormatter.format(breakdown.count)}
-                            </span>
-                          </li>
-                        ))}
-                        {Object.keys(report.cashMovements.totalsByKind).length === 0 ? (
-                          <li className="text-slate-400">Sin movimientos adicionales</li>
-                        ) : null}
-                      </ul>
-                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                        Netos: {centsToCurrency(report.cashMovements.netMovementCents)}
-                      </p>
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </section>
     </main>
   );

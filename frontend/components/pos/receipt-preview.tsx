@@ -2,6 +2,7 @@ import { Printer, QrCode } from "lucide-react";
 import { CartLine, SaleSummary, TenderBreakdown } from "./types";
 import { PosCard } from "./pos-card";
 import { formatCurrency } from "./utils";
+import { useCurrentUser } from "@/components/providers/current-user-provider";
 
 export function ReceiptPreview({
   items,
@@ -16,6 +17,7 @@ export function ReceiptPreview({
   onFinalize?: () => void;
   isProcessing?: boolean;
 }) {
+  const { user } = useCurrentUser();
   return (
     <PosCard
       title="Receipt preview"
@@ -90,7 +92,7 @@ export function ReceiptPreview({
           ))}
         </div>
         <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-[11px] text-slate-500 dark:border-slate-800/60 dark:text-slate-500">
-          <span>Attended by Maria P.</span>
+          <span>Attended by {user?.fullName ?? "Usuario"}</span>
           <span>Customer copy</span>
         </div>
         <div className="flex items-center justify-between rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-[11px] text-slate-600 transition dark:border-slate-700/80 dark:bg-slate-950/80 dark:text-slate-400">

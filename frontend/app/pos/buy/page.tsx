@@ -409,7 +409,35 @@ export default function PosBuyPage() {
 
     setLoading(true);
     try {
-      const payload = {
+      // Get active shift for the branch to associate purchases
+      let activeShiftId: number | null = null;
+      try {
+        const shiftResponse = await fetch(`${API_BASE_URL}/api/shifts/active?branchId=${activeBranch.id}`);
+        if (shiftResponse.ok) {
+          const shiftData = await shiftResponse.json();
+          activeShiftId = shiftData.shift?.id ?? null;
+        }
+      } catch {
+        // If shift lookup fails, continue without shiftId
+      }
+
+      const payload: {
+        branchId: number;
+        userId: number;
+        payoutMethod: string;
+        seller: typeof seller;
+        items: Array<{
+          description: string;
+          resaleValue: number;
+          accessories: string | null;
+          notes: string | null;
+          serial: string | null;
+          condition: string;
+          photos: string[];
+        }>;
+        managerNotes: string | null;
+        shiftId?: number;
+      } = {
         branchId: activeBranch.id,
         userId: 7,   // Cajera Principal
         payoutMethod,
@@ -425,6 +453,11 @@ export default function PosBuyPage() {
         })),
         managerNotes,
       };
+
+      // Add shiftId if available
+      if (activeShiftId !== null) {
+        payload.shiftId = activeShiftId;
+      }
 
       const response = await fetch(`${API_BASE_URL}/api/pos/buys`, {
         method: "POST",

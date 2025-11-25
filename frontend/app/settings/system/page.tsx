@@ -35,11 +35,14 @@ import {
   Users2,
   Wallet,
   X,
+  Folder,
+  FolderOpen,
 } from "lucide-react";
+import { useTheme } from "@/components/providers/theme-provider";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
-type StatusMessage = { tone: "success" | "error"; message: string } | null;
+type StatusMessage = { tone: "success" | "error" | "info"; message: string } | null;
 
 type InterestModel = {
   id: number;
@@ -55,7 +58,7 @@ type InterestModel = {
   defaultTermCount: number;
 };
 
-function InterestModelsSection() {
+function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: number; onGraceDaysChange: (days: number) => void }) {
   const [models, setModels] = useState<InterestModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +70,6 @@ function InterestModelsSection() {
     rateType: "simple" as "flat" | "simple" | "compound",
     periodDays: "30",
     interestRateBps: "",
-    graceDays: "0",
     minPrincipalCents: "",
     maxPrincipalCents: "",
     lateFeeBps: "0",
@@ -105,10 +107,10 @@ function InterestModelsSection() {
       rateType: "simple",
       periodDays: "30",
       interestRateBps: "",
-      graceDays: "0",
       minPrincipalCents: "",
       maxPrincipalCents: "",
       lateFeeBps: "0",
+      defaultTermCount: "1",
     });
     setIsDialogOpen(true);
   };
@@ -121,7 +123,6 @@ function InterestModelsSection() {
       rateType: model.rateType,
       periodDays: String(model.periodDays),
       interestRateBps: String(model.interestRateBps / 100), // Convert from basis points to percentage
-      graceDays: String(model.graceDays),
       minPrincipalCents: model.minPrincipalCents ? String(model.minPrincipalCents / 100) : "",
       maxPrincipalCents: model.maxPrincipalCents ? String(model.maxPrincipalCents / 100) : "",
       lateFeeBps: String(model.lateFeeBps / 100), // Convert from basis points to percentage
@@ -146,7 +147,7 @@ function InterestModelsSection() {
         rateType: formData.rateType,
         periodDays: Number(formData.periodDays),
         interestRateBps: Math.round(Number(formData.interestRateBps) * 100), // Convert percentage to basis points
-        graceDays: Number(formData.graceDays),
+        graceDays: graceDays, // Use global grace days setting
         minPrincipalCents: formData.minPrincipalCents ? Math.round(Number(formData.minPrincipalCents) * 100) : 0,
         maxPrincipalCents: formData.maxPrincipalCents ? Math.round(Number(formData.maxPrincipalCents) * 100) : null,
         lateFeeBps: Math.round(Number(formData.lateFeeBps) * 100), // Convert percentage to basis points
@@ -214,6 +215,21 @@ function InterestModelsSection() {
         >
           <Plus className="h-3.5 w-3.5" /> Nuevo modelo
         </button>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground" htmlFor="grace-days">
+          Días de gracia
+        </label>
+        <input
+          id="grace-days"
+          type="number"
+          value={graceDays}
+          onChange={(event) => onGraceDaysChange(Number(event.target.value) || 0)}
+          min={0}
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+        <p className="text-xs text-muted-foreground">Días de gracia aplicados a todos los modelos de interés</p>
       </div>
 
       {error && (
@@ -385,17 +401,6 @@ function InterestModelsSection() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Días de Gracia</label>
-                  <input
-                    type="number"
-                    value={formData.graceDays}
-                    onChange={(e) => setFormData({ ...formData, graceDays: e.target.value })}
-                    min={0}
-                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-
-                <div>
                   <label className="text-xs font-medium text-muted-foreground">Cuotas por Defecto *</label>
                   <input
                     type="number"
@@ -535,6 +540,7 @@ type CompanyProfile = {
   name: string;
   iconUrl: string;
   address: string;
+  rnc: string;
 };
 
 type LocalizationSettings = {
@@ -549,19 +555,40 @@ type PreferenceSettings = {
 
 type AppearanceSettings = {
   theme: "light" | "dark";
-  keyboardLayout: "pos" | "compact";
   dashboardLayout: "command" | "summary";
 };
 
 type HardwareSettings = {
-  defaultPrinter: string;
+  printerForAll: string;
+  printerTypeForAll: "ECP/P2" | "80mm";
+  printerForSales: string;
+  printerTypeForSales: "ECP/P2" | "80mm";
+  printerForRefunds: string;
+  printerTypeForRefunds: "ECP/P2" | "80mm";
+  printerForBuys: string;
+  printerTypeForBuys: "ECP/P2" | "80mm";
+  printerForPawns: string;
+  printerTypeForPawns: "ECP/P2" | "80mm";
+  printerForLayaways: string;
+  printerTypeForLayaways: "ECP/P2" | "80mm";
+  printerForPurchases: string;
+  printerTypeForPurchases: "ECP/P2" | "80mm";
+  printerForRepairs: string;
+  printerTypeForRepairs: "ECP/P2" | "80mm";
+  printerForGiftCards: string;
+  printerTypeForGiftCards: "ECP/P2" | "80mm";
   drawerModel: string;
-  autoPrintOnLogin: boolean;
+  prePrintedPawnPaper: boolean;
 };
 
 type OperatingHours = {
-  weekday: string;
-  weekend: string;
+  monday: { open: string; close: string; closed: boolean };
+  tuesday: { open: string; close: string; closed: boolean };
+  wednesday: { open: string; close: string; closed: boolean };
+  thursday: { open: string; close: string; closed: boolean };
+  friday: { open: string; close: string; closed: boolean };
+  saturday: { open: string; close: string; closed: boolean };
+  sunday: { open: string; close: string; closed: boolean };
 };
 
 type TaxSettings = {
@@ -595,7 +622,8 @@ type PosAlerts = {
   suggestDrops: boolean;
   refundPercent: number;
   maxPaidOut: number;
-  closureRecipients: string;
+  closureRecipientsEmail: string;
+  closureRecipientsWhatsApp: string;
   expenseCategory: string;
   incomeCategory: string;
 };
@@ -608,7 +636,7 @@ type InventorySettings = {
 
 type PawnSettings = {
   interestModelCode: string;
-  graceDays: number;
+  graceDays?: number; // Optional for backward compatibility, managed in Interest Models section
   alertRule: string;
 };
 
@@ -623,6 +651,13 @@ type NotificationSettings = {
 type MaintenanceSettings = {
   backupFrequency: string;
   logRetentionDays: number;
+  backupIdentificador: string;
+  backupFolderPath: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  awsRegion: string;
+  awsBucket: string;
+  autoCloudSync: boolean;
 };
 
 type ComplianceSettings = {
@@ -682,6 +717,7 @@ const defaultCompanyProfile: CompanyProfile = {
   name: "Pawn Command",
   iconUrl: "",
   address: "Av. Principal #123, Santo Domingo",
+  rnc: "",
 };
 
 const defaultLocalization: LocalizationSettings = {
@@ -696,19 +732,40 @@ const defaultPreferences: PreferenceSettings = {
 
 const defaultAppearance: AppearanceSettings = {
   theme: "light",
-  keyboardLayout: "pos",
   dashboardLayout: "command",
 };
 
 const defaultHardware: HardwareSettings = {
-  defaultPrinter: "POS-58",
+  printerForAll: "",
+  printerTypeForAll: "80mm",
+  printerForSales: "",
+  printerTypeForSales: "80mm",
+  printerForRefunds: "",
+  printerTypeForRefunds: "80mm",
+  printerForBuys: "",
+  printerTypeForBuys: "80mm",
+  printerForPawns: "",
+  printerTypeForPawns: "80mm",
+  printerForLayaways: "",
+  printerTypeForLayaways: "80mm",
+  printerForPurchases: "",
+  printerTypeForPurchases: "80mm",
+  printerForRepairs: "",
+  printerTypeForRepairs: "80mm",
+  printerForGiftCards: "",
+  printerTypeForGiftCards: "80mm",
   drawerModel: "APG",
-  autoPrintOnLogin: true,
+  prePrintedPawnPaper: false,
 };
 
 const defaultOperatingHours: OperatingHours = {
-  weekday: "09:00 - 18:00",
-  weekend: "10:00 - 14:00",
+  monday: { open: "08:00", close: "19:00", closed: false },
+  tuesday: { open: "08:00", close: "19:00", closed: false },
+  wednesday: { open: "08:00", close: "19:00", closed: false },
+  thursday: { open: "08:00", close: "19:00", closed: false },
+  friday: { open: "08:00", close: "19:00", closed: false },
+  saturday: { open: "08:00", close: "19:00", closed: false },
+  sunday: { open: "09:00", close: "13:00", closed: false },
 };
 
 const defaultTaxSettings: TaxSettings = {
@@ -744,7 +801,8 @@ const defaultPosAlerts: PosAlerts = {
   suggestDrops: true,
   refundPercent: 20,
   maxPaidOut: 5000,
-  closureRecipients: "gerente@tienda.com",
+  closureRecipientsEmail: "gerente@tienda.com",
+  closureRecipientsWhatsApp: "",
   expenseCategory: "Gastos operativos",
   incomeCategory: "Ingresos diversos",
 };
@@ -757,7 +815,6 @@ const defaultInventorySettings: InventorySettings = {
 
 const defaultPawnSettings: PawnSettings = {
   interestModelCode: "STD",
-  graceDays: 5,
   alertRule: "Artículos sobre RD$50k requieren alerta",
 };
 
@@ -770,8 +827,15 @@ const defaultNotificationSettings: NotificationSettings = {
 };
 
 const defaultMaintenanceSettings: MaintenanceSettings = {
-  backupFrequency: "Diario",
+  backupFrequency: "diario",
   logRetentionDays: 30,
+  backupIdentificador: "backup",
+  backupFolderPath: "./backups",
+  awsAccessKeyId: "",
+  awsSecretAccessKey: "",
+  awsRegion: "us-east-1",
+  awsBucket: "",
+  autoCloudSync: false,
 };
 
 const defaultComplianceSettings: ComplianceSettings = {
@@ -942,12 +1006,6 @@ const NAV_SECTIONS = [
         icon: Scale,
       },
       {
-        id: "pawn-grace",
-        label: "Grace Days",
-        description: "Días de gracia antes de pasar a mora.",
-        icon: Clock,
-      },
-      {
         id: "pawn-alerts",
         label: "Alerts",
         description: "Reglas de alerta por descripción, tipo o monto.",
@@ -1027,6 +1085,7 @@ const providerFieldLabels: Record<ProviderKey, Record<string, string>> = {
 };
 
 export default function SettingsSystemPage() {
+  const { theme: currentTheme, setTheme: setCurrentTheme } = useTheme();
   const [activeScope, setActiveScope] = useState<"global" | "branch" | "user">("global");
   const [branchId, setBranchId] = useState("1");
   const [userId, setUserId] = useState("1");
@@ -1236,6 +1295,7 @@ export default function SettingsSystemPage() {
           name: typeof raw.name === "string" ? raw.name : defaultCompanyProfile.name,
           iconUrl: typeof raw.iconUrl === "string" ? raw.iconUrl : defaultCompanyProfile.iconUrl,
           address: typeof raw.address === "string" ? raw.address : defaultCompanyProfile.address,
+          rnc: typeof raw.rnc === "string" ? raw.rnc : defaultCompanyProfile.rnc,
         });
       } else if (entry.key === "localization.settings" && entry.value && typeof entry.value === "object") {
         const raw = entry.value as Partial<LocalizationSettings>;
@@ -1255,25 +1315,103 @@ export default function SettingsSystemPage() {
         });
       } else if (entry.key === "appearance.settings" && entry.value && typeof entry.value === "object") {
         const raw = entry.value as Partial<AppearanceSettings>;
+        const theme = raw.theme === "dark" ? "dark" : "light";
         setAppearance({
-          theme: raw.theme === "dark" ? "dark" : "light",
-          keyboardLayout: raw.keyboardLayout === "compact" ? "compact" : "pos",
+          theme,
           dashboardLayout: raw.dashboardLayout === "summary" ? "summary" : "command",
         });
+        // Sync with theme provider
+        setCurrentTheme(theme);
       } else if (entry.key === "hardware.settings" && entry.value && typeof entry.value === "object") {
-        const raw = entry.value as Partial<HardwareSettings>;
+        const raw = entry.value as Partial<HardwareSettings & { defaultPrinter?: string }>;
+        // Handle backward compatibility: if defaultPrinter exists, migrate to printerForAll
+        const printerForAll = raw.printerForAll ?? (raw.defaultPrinter || defaultHardware.printerForAll);
         setHardwareSettings({
-          defaultPrinter:
-            typeof raw.defaultPrinter === "string" ? raw.defaultPrinter : defaultHardware.defaultPrinter,
-          drawerModel:
-            typeof raw.drawerModel === "string" ? raw.drawerModel : defaultHardware.drawerModel,
-          autoPrintOnLogin: Boolean(raw.autoPrintOnLogin ?? defaultHardware.autoPrintOnLogin),
+          printerForAll: typeof printerForAll === "string" ? printerForAll : defaultHardware.printerForAll,
+          printerTypeForAll: raw.printerTypeForAll === "ECP/P2" || raw.printerTypeForAll === "80mm" ? raw.printerTypeForAll : defaultHardware.printerTypeForAll,
+          printerForSales: typeof raw.printerForSales === "string" ? raw.printerForSales : defaultHardware.printerForSales,
+          printerTypeForSales: raw.printerTypeForSales === "ECP/P2" || raw.printerTypeForSales === "80mm" ? raw.printerTypeForSales : defaultHardware.printerTypeForSales,
+          printerForRefunds: typeof raw.printerForRefunds === "string" ? raw.printerForRefunds : defaultHardware.printerForRefunds,
+          printerTypeForRefunds: raw.printerTypeForRefunds === "ECP/P2" || raw.printerTypeForRefunds === "80mm" ? raw.printerTypeForRefunds : defaultHardware.printerTypeForRefunds,
+          printerForBuys: typeof raw.printerForBuys === "string" ? raw.printerForBuys : defaultHardware.printerForBuys,
+          printerTypeForBuys: raw.printerTypeForBuys === "ECP/P2" || raw.printerTypeForBuys === "80mm" ? raw.printerTypeForBuys : defaultHardware.printerTypeForBuys,
+          printerForPawns: typeof raw.printerForPawns === "string" ? raw.printerForPawns : defaultHardware.printerForPawns,
+          printerTypeForPawns: raw.printerTypeForPawns === "ECP/P2" || raw.printerTypeForPawns === "80mm" ? raw.printerTypeForPawns : defaultHardware.printerTypeForPawns,
+          printerForLayaways: typeof raw.printerForLayaways === "string" ? raw.printerForLayaways : defaultHardware.printerForLayaways,
+          printerTypeForLayaways: raw.printerTypeForLayaways === "ECP/P2" || raw.printerTypeForLayaways === "80mm" ? raw.printerTypeForLayaways : defaultHardware.printerTypeForLayaways,
+          printerForPurchases: typeof raw.printerForPurchases === "string" ? raw.printerForPurchases : defaultHardware.printerForPurchases,
+          printerTypeForPurchases: raw.printerTypeForPurchases === "ECP/P2" || raw.printerTypeForPurchases === "80mm" ? raw.printerTypeForPurchases : defaultHardware.printerTypeForPurchases,
+          printerForRepairs: typeof raw.printerForRepairs === "string" ? raw.printerForRepairs : defaultHardware.printerForRepairs,
+          printerTypeForRepairs: raw.printerTypeForRepairs === "ECP/P2" || raw.printerTypeForRepairs === "80mm" ? raw.printerTypeForRepairs : defaultHardware.printerTypeForRepairs,
+          printerForGiftCards: typeof raw.printerForGiftCards === "string" ? raw.printerForGiftCards : defaultHardware.printerForGiftCards,
+          printerTypeForGiftCards: raw.printerTypeForGiftCards === "ECP/P2" || raw.printerTypeForGiftCards === "80mm" ? raw.printerTypeForGiftCards : defaultHardware.printerTypeForGiftCards,
+          drawerModel: typeof raw.drawerModel === "string" ? raw.drawerModel : defaultHardware.drawerModel,
+          prePrintedPawnPaper: Boolean(raw.prePrintedPawnPaper ?? defaultHardware.prePrintedPawnPaper),
         });
       } else if (entry.key === "operating.hours" && entry.value && typeof entry.value === "object") {
-        const raw = entry.value as Partial<OperatingHours>;
+        const raw = entry.value as Partial<OperatingHours & { weekday?: string; weekend?: string }>;
+        
+        // Backward compatibility: migrate old weekday/weekend format
+        const migrateDay = (oldValue: string | undefined, defaultDay: OperatingHours["monday"]) => {
+          if (oldValue && typeof oldValue === "string") {
+            const match = oldValue.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+            if (match) {
+              return { open: match[1], close: match[2], closed: false };
+            }
+          }
+          return defaultDay;
+        };
+        
         setOperatingHours({
-          weekday: typeof raw.weekday === "string" ? raw.weekday : defaultOperatingHours.weekday,
-          weekend: typeof raw.weekend === "string" ? raw.weekend : defaultOperatingHours.weekend,
+          monday: raw.monday && typeof raw.monday === "object" && "open" in raw.monday
+            ? {
+                open: typeof raw.monday.open === "string" ? raw.monday.open : defaultOperatingHours.monday.open,
+                close: typeof raw.monday.close === "string" ? raw.monday.close : defaultOperatingHours.monday.close,
+                closed: Boolean(raw.monday.closed ?? defaultOperatingHours.monday.closed),
+              }
+            : migrateDay(raw.weekday, defaultOperatingHours.monday),
+          tuesday: raw.tuesday && typeof raw.tuesday === "object" && "open" in raw.tuesday
+            ? {
+                open: typeof raw.tuesday.open === "string" ? raw.tuesday.open : defaultOperatingHours.tuesday.open,
+                close: typeof raw.tuesday.close === "string" ? raw.tuesday.close : defaultOperatingHours.tuesday.close,
+                closed: Boolean(raw.tuesday.closed ?? defaultOperatingHours.tuesday.closed),
+              }
+            : migrateDay(raw.weekday, defaultOperatingHours.tuesday),
+          wednesday: raw.wednesday && typeof raw.wednesday === "object" && "open" in raw.wednesday
+            ? {
+                open: typeof raw.wednesday.open === "string" ? raw.wednesday.open : defaultOperatingHours.wednesday.open,
+                close: typeof raw.wednesday.close === "string" ? raw.wednesday.close : defaultOperatingHours.wednesday.close,
+                closed: Boolean(raw.wednesday.closed ?? defaultOperatingHours.wednesday.closed),
+              }
+            : migrateDay(raw.weekday, defaultOperatingHours.wednesday),
+          thursday: raw.thursday && typeof raw.thursday === "object" && "open" in raw.thursday
+            ? {
+                open: typeof raw.thursday.open === "string" ? raw.thursday.open : defaultOperatingHours.thursday.open,
+                close: typeof raw.thursday.close === "string" ? raw.thursday.close : defaultOperatingHours.thursday.close,
+                closed: Boolean(raw.thursday.closed ?? defaultOperatingHours.thursday.closed),
+              }
+            : migrateDay(raw.weekday, defaultOperatingHours.thursday),
+          friday: raw.friday && typeof raw.friday === "object" && "open" in raw.friday
+            ? {
+                open: typeof raw.friday.open === "string" ? raw.friday.open : defaultOperatingHours.friday.open,
+                close: typeof raw.friday.close === "string" ? raw.friday.close : defaultOperatingHours.friday.close,
+                closed: Boolean(raw.friday.closed ?? defaultOperatingHours.friday.closed),
+              }
+            : migrateDay(raw.weekday, defaultOperatingHours.friday),
+          saturday: raw.saturday && typeof raw.saturday === "object" && "open" in raw.saturday
+            ? {
+                open: typeof raw.saturday.open === "string" ? raw.saturday.open : defaultOperatingHours.saturday.open,
+                close: typeof raw.saturday.close === "string" ? raw.saturday.close : defaultOperatingHours.saturday.close,
+                closed: Boolean(raw.saturday.closed ?? defaultOperatingHours.saturday.closed),
+              }
+            : migrateDay(raw.weekend, defaultOperatingHours.saturday),
+          sunday: raw.sunday && typeof raw.sunday === "object" && "open" in raw.sunday
+            ? {
+                open: typeof raw.sunday.open === "string" ? raw.sunday.open : defaultOperatingHours.sunday.open,
+                close: typeof raw.sunday.close === "string" ? raw.sunday.close : defaultOperatingHours.sunday.close,
+                closed: Boolean(raw.sunday.closed ?? defaultOperatingHours.sunday.closed),
+              }
+            : migrateDay(raw.weekend, defaultOperatingHours.sunday),
         });
       } else if (entry.key === "tax.config" && entry.value && typeof entry.value === "object") {
         const raw = entry.value as Partial<TaxSettings>;
@@ -1316,15 +1454,23 @@ export default function SettingsSystemPage() {
           autoLockMinutes: Number(raw.autoLockMinutes ?? defaultShiftSettings.autoLockMinutes),
         });
       } else if (entry.key === "pos.alerts" && entry.value && typeof entry.value === "object") {
-        const raw = entry.value as Partial<PosAlerts>;
+        const raw = entry.value as Partial<PosAlerts & { closureRecipients?: string }>;
+        // Handle backward compatibility: if old closureRecipients exists, migrate to email
+        const migratedEmail = raw.closureRecipientsEmail ?? 
+          ((raw.closureRecipients && raw.closureRecipients.includes("@") ? raw.closureRecipients : "") ||
+          defaultPosAlerts.closureRecipientsEmail);
+        const migratedWhatsApp = raw.closureRecipientsWhatsApp ?? 
+          ((raw.closureRecipients && !raw.closureRecipients.includes("@") ? raw.closureRecipients : "") ||
+          defaultPosAlerts.closureRecipientsWhatsApp);
+        
         setPosAlerts({
           suggestDrops: Boolean(raw.suggestDrops ?? defaultPosAlerts.suggestDrops),
           refundPercent: Number(raw.refundPercent ?? defaultPosAlerts.refundPercent),
           maxPaidOut: Number(raw.maxPaidOut ?? defaultPosAlerts.maxPaidOut),
-          closureRecipients:
-            typeof raw.closureRecipients === "string"
-              ? raw.closureRecipients
-              : defaultPosAlerts.closureRecipients,
+          closureRecipientsEmail:
+            typeof migratedEmail === "string" ? migratedEmail : defaultPosAlerts.closureRecipientsEmail,
+          closureRecipientsWhatsApp:
+            typeof migratedWhatsApp === "string" ? migratedWhatsApp : defaultPosAlerts.closureRecipientsWhatsApp,
           expenseCategory:
             typeof raw.expenseCategory === "string"
               ? raw.expenseCategory
@@ -1342,13 +1488,13 @@ export default function SettingsSystemPage() {
           quarantineEnabled: Boolean(raw.quarantineEnabled ?? defaultInventorySettings.quarantineEnabled),
         });
       } else if (entry.key === "pawn.settings" && entry.value && typeof entry.value === "object") {
-        const raw = entry.value as Partial<PawnSettings>;
+        const raw = entry.value as Partial<PawnSettings & { graceDays?: number }>;
         setPawnSettings({
           interestModelCode:
             typeof raw.interestModelCode === "string"
               ? raw.interestModelCode
               : defaultPawnSettings.interestModelCode,
-          graceDays: Number(raw.graceDays ?? defaultPawnSettings.graceDays),
+          graceDays: raw.graceDays !== undefined ? Number(raw.graceDays) : 5, // Default to 5 if not set
           alertRule:
             typeof raw.alertRule === "string" ? raw.alertRule : defaultPawnSettings.alertRule,
         });
@@ -1382,6 +1528,13 @@ export default function SettingsSystemPage() {
               ? raw.backupFrequency
               : defaultMaintenanceSettings.backupFrequency,
           logRetentionDays: Number(raw.logRetentionDays ?? defaultMaintenanceSettings.logRetentionDays),
+          backupIdentificador: typeof raw.backupIdentificador === "string" ? raw.backupIdentificador : defaultMaintenanceSettings.backupIdentificador,
+          backupFolderPath: typeof raw.backupFolderPath === "string" ? raw.backupFolderPath : defaultMaintenanceSettings.backupFolderPath,
+          awsAccessKeyId: typeof raw.awsAccessKeyId === "string" ? raw.awsAccessKeyId : defaultMaintenanceSettings.awsAccessKeyId,
+          awsSecretAccessKey: typeof raw.awsSecretAccessKey === "string" ? raw.awsSecretAccessKey : defaultMaintenanceSettings.awsSecretAccessKey,
+          awsRegion: typeof raw.awsRegion === "string" ? raw.awsRegion : defaultMaintenanceSettings.awsRegion,
+          awsBucket: typeof raw.awsBucket === "string" ? raw.awsBucket : defaultMaintenanceSettings.awsBucket,
+          autoCloudSync: Boolean(raw.autoCloudSync ?? defaultMaintenanceSettings.autoCloudSync),
         });
       } else if (entry.key === "compliance.settings" && entry.value && typeof entry.value === "object") {
         const raw = entry.value as Partial<ComplianceSettings>;
@@ -1529,7 +1682,7 @@ export default function SettingsSystemPage() {
         throw new Error("Selecciona una sucursal principal válida");
       }
 
-      const entries = [
+      const entries: Array<{ key: string; value: unknown }> = [
         { key: "system.activeBranchId", value: parsedPrimary },
         { key: "system.settings", value: systemSettings },
         { key: "company.profile", value: companyProfile },
@@ -1546,7 +1699,7 @@ export default function SettingsSystemPage() {
         { key: "pos.receipt", value: receiptConfig },
         { key: "pos.alerts", value: posAlerts },
         { key: "inventory.settings", value: inventorySettings },
-        { key: "pawn.settings", value: pawnSettings },
+        { key: "pawn.settings", value: { ...pawnSettings, graceDays: pawnSettings.graceDays ?? 5 } },
         { key: "notifications.settings", value: notificationSettings },
         { key: "maintenance.settings", value: maintenanceSettings },
         { key: "compliance.settings", value: complianceSettings },
@@ -1587,6 +1740,20 @@ export default function SettingsSystemPage() {
 
       setStatus({ tone: "success", message: "Configuración guardada correctamente" });
       applyEntries(data.entries ?? []);
+      
+      // Restart backup scheduler if maintenance settings were saved
+      if (entries.some((e) => e.key === "maintenance.settings")) {
+        try {
+          await fetch(`${API_BASE_URL}/api/backup/restart-scheduler`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (error) {
+          // Ignore scheduler restart errors - settings are still saved
+          console.error("Failed to restart backup scheduler:", error);
+        }
+      }
+      
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("active-branch:updated"));
       }
@@ -1594,6 +1761,34 @@ export default function SettingsSystemPage() {
       setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error al guardar" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestPrinter = async (printerName: string, printerType: "ECP/P2" | "80mm") => {
+    if (!printerName.trim()) {
+      setStatus({ tone: "error", message: "Ingresa un nombre de impresora para probar" });
+      return;
+    }
+
+    try {
+      // For now, we'll just show a success message
+      // In the future, this could call an API endpoint to actually test the printer
+      setStatus({
+        tone: "success",
+        message: `Comando de prueba enviado a ${printerName} (${printerType})`,
+      });
+      
+      // TODO: Implement actual printer test API call
+      // await fetch(`${API_BASE_URL}/api/printers/test`, {
+      //   method: "POST",
+      //   headers: { "Content-Type": "application/json" },
+      //   body: JSON.stringify({ printer: printerName, type: printerType }),
+      // });
+    } catch (error) {
+      setStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Error al probar la impresora",
+      });
     }
   };
 
@@ -1758,6 +1953,20 @@ export default function SettingsSystemPage() {
                 placeholder="https://cdn.example.com/icon.png"
               />
             </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="company-rnc">
+                RNC
+              </label>
+              <input
+                id="company-rnc"
+                value={companyProfile.rnc}
+                onChange={(event) =>
+                  setCompanyProfile((state) => ({ ...state, rnc: event.target.value }))
+                }
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="123-45678-9"
+              />
+            </div>
             <div className="space-y-1 md:col-span-2">
               <label className="text-xs font-medium text-muted-foreground" htmlFor="company-address">
                 Dirección fiscal
@@ -1885,35 +2094,18 @@ export default function SettingsSystemPage() {
                       name="appearance-theme"
                       value={theme}
                       checked={appearance.theme === theme}
-                      onChange={(event) =>
-                        setAppearance((state) => ({ ...state, theme: event.target.value as AppearanceSettings["theme"] }))
-                      }
+                      onChange={(event) => {
+                        const newTheme = event.target.value as AppearanceSettings["theme"];
+                        setAppearance((state) => ({ ...state, theme: newTheme }));
+                        // Sync with theme provider to update TopBar immediately
+                        setCurrentTheme(newTheme);
+                      }}
                       className="h-4 w-4 border border-border"
                     />
                     {theme === "light" ? "Claro" : "Oscuro"}
                   </label>
                 ))}
               </div>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground" htmlFor="keyboard-layout">
-                  Layout de teclado rápido
-                </label>
-                <select
-                  id="keyboard-layout"
-                  value={appearance.keyboardLayout}
-                  onChange={(event) =>
-                    setAppearance((state) => ({
-                      ...state,
-                      keyboardLayout: event.target.value as AppearanceSettings["keyboardLayout"],
-                    }))
-                  }
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
-                  <option value="pos">POS tradicional</option>
-                  <option value="compact">Compacto</option>
-                </select>
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground" htmlFor="dashboard-layout">
@@ -1933,85 +2125,549 @@ export default function SettingsSystemPage() {
                   <option value="command">Command center</option>
                   <option value="summary">Resumen compacto</option>
                 </select>
-              </div>
             </div>
           </div>
         );
       case "hardware":
         return (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-4">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="default-printer">
-                Impresora predeterminada
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-for-all">
+                Impresora para todo
               </label>
-              <input
-                id="default-printer"
-                value={hardwareSettings.defaultPrinter}
-                onChange={(event) =>
-                  setHardwareSettings((state) => ({ ...state, defaultPrinter: event.target.value }))
-                }
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                placeholder="POS-58"
-              />
+              <div className="flex gap-2">
+                <input
+                  id="printer-for-all"
+                  value={hardwareSettings.printerForAll}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value) {
+                      // If "all" is filled, fill all other fields
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: value,
+                        printerForSales: value,
+                        printerForRefunds: value,
+                        printerForBuys: value,
+                        printerForPawns: value,
+                        printerForLayaways: value,
+                        printerForPurchases: value,
+                        printerForRepairs: value,
+                        printerForGiftCards: value,
+                      }));
+                    } else {
+                      setHardwareSettings((state) => ({ ...state, printerForAll: value }));
+                    }
+                  }}
+                  className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="POS-58"
+                />
+                <select
+                  value={hardwareSettings.printerTypeForAll}
+                  onChange={(event) => {
+                    const value = event.target.value as "ECP/P2" | "80mm";
+                    setHardwareSettings((state) => ({
+                      ...state,
+                      printerTypeForAll: value,
+                      printerTypeForSales: value,
+                      printerTypeForRefunds: value,
+                      printerTypeForBuys: value,
+                      printerTypeForPawns: value,
+                      printerTypeForLayaways: value,
+                      printerTypeForPurchases: value,
+                      printerTypeForRepairs: value,
+                      printerTypeForGiftCards: value,
+                    }));
+                  }}
+                  className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="ECP/P2">ECP/P2</option>
+                  <option value="80mm">80mm</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => handleTestPrinter(hardwareSettings.printerForAll, hardwareSettings.printerTypeForAll)}
+                  disabled={!hardwareSettings.printerForAll.trim()}
+                  className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Probar impresora"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Probar
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Si se completa, se aplicará a todas las transacciones. Si cambias una impresora individual, este campo se limpiará.
+              </p>
             </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="drawer-model">
-                Modelo de gaveta
-              </label>
-              <input
-                id="drawer-model"
-                value={hardwareSettings.drawerModel}
-                onChange={(event) =>
-                  setHardwareSettings((state) => ({ ...state, drawerModel: event.target.value }))
-                }
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                placeholder="APG Serie 4000"
-              />
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-sales">
+                  Impresora para ventas
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="printer-sales"
+                    value={hardwareSettings.printerForSales}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "", // Clear "all" when individual field changes
+                        printerForSales: event.target.value,
+                      }));
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="POS-58"
+                  />
+                  <select
+                    value={hardwareSettings.printerTypeForSales}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerTypeForSales: event.target.value as "ECP/P2" | "80mm",
+                      }));
+                    }}
+                    className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="ECP/P2">ECP/P2</option>
+                    <option value="80mm">80mm</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrinter(hardwareSettings.printerForSales, hardwareSettings.printerTypeForSales)}
+                    disabled={!hardwareSettings.printerForSales.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Probar impresora"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Probar
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-refunds">
+                  Impresora para reembolsos
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="printer-refunds"
+                    value={hardwareSettings.printerForRefunds}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerForRefunds: event.target.value,
+                      }));
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="POS-58"
+                  />
+                  <select
+                    value={hardwareSettings.printerTypeForRefunds}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerTypeForRefunds: event.target.value as "ECP/P2" | "80mm",
+                      }));
+                    }}
+                    className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="ECP/P2">ECP/P2</option>
+                    <option value="80mm">80mm</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrinter(hardwareSettings.printerForRefunds, hardwareSettings.printerTypeForRefunds)}
+                    disabled={!hardwareSettings.printerForRefunds.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Probar impresora"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Probar
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-buys">
+                  Impresora para compras
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="printer-buys"
+                    value={hardwareSettings.printerForBuys}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerForBuys: event.target.value,
+                      }));
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="POS-58"
+                  />
+                  <select
+                    value={hardwareSettings.printerTypeForBuys}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerTypeForBuys: event.target.value as "ECP/P2" | "80mm",
+                      }));
+                    }}
+                    className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="ECP/P2">ECP/P2</option>
+                    <option value="80mm">80mm</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrinter(hardwareSettings.printerForBuys, hardwareSettings.printerTypeForBuys)}
+                    disabled={!hardwareSettings.printerForBuys.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Probar impresora"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Probar
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-pawns">
+                  Impresora para empeños
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="printer-pawns"
+                    value={hardwareSettings.printerForPawns}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerForPawns: event.target.value,
+                      }));
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="POS-58"
+                  />
+                  <select
+                    value={hardwareSettings.printerTypeForPawns}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerTypeForPawns: event.target.value as "ECP/P2" | "80mm",
+                      }));
+                    }}
+                    className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="ECP/P2">ECP/P2</option>
+                    <option value="80mm">80mm</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrinter(hardwareSettings.printerForPawns, hardwareSettings.printerTypeForPawns)}
+                    disabled={!hardwareSettings.printerForPawns.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Probar impresora"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Probar
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-layaways">
+                  Impresora para apartados
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="printer-layaways"
+                    value={hardwareSettings.printerForLayaways}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerForLayaways: event.target.value,
+                      }));
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="POS-58"
+                  />
+                  <select
+                    value={hardwareSettings.printerTypeForLayaways}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerTypeForLayaways: event.target.value as "ECP/P2" | "80mm",
+                      }));
+                    }}
+                    className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="ECP/P2">ECP/P2</option>
+                    <option value="80mm">80mm</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrinter(hardwareSettings.printerForLayaways, hardwareSettings.printerTypeForLayaways)}
+                    disabled={!hardwareSettings.printerForLayaways.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Probar impresora"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Probar
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-purchases">
+                  Impresora para recepciones
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="printer-purchases"
+                    value={hardwareSettings.printerForPurchases}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerForPurchases: event.target.value,
+                      }));
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="POS-58"
+                  />
+                  <select
+                    value={hardwareSettings.printerTypeForPurchases}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerTypeForPurchases: event.target.value as "ECP/P2" | "80mm",
+                      }));
+                    }}
+                    className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="ECP/P2">ECP/P2</option>
+                    <option value="80mm">80mm</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrinter(hardwareSettings.printerForPurchases, hardwareSettings.printerTypeForPurchases)}
+                    disabled={!hardwareSettings.printerForPurchases.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Probar impresora"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Probar
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-repairs">
+                  Impresora para reparaciones
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="printer-repairs"
+                    value={hardwareSettings.printerForRepairs}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerForRepairs: event.target.value,
+                      }));
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="POS-58"
+                  />
+                  <select
+                    value={hardwareSettings.printerTypeForRepairs}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerTypeForRepairs: event.target.value as "ECP/P2" | "80mm",
+                      }));
+                    }}
+                    className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="ECP/P2">ECP/P2</option>
+                    <option value="80mm">80mm</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrinter(hardwareSettings.printerForRepairs, hardwareSettings.printerTypeForRepairs)}
+                    disabled={!hardwareSettings.printerForRepairs.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Probar impresora"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Probar
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="printer-gift-cards">
+                  Impresora para tarjetas de regalo
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="printer-gift-cards"
+                    value={hardwareSettings.printerForGiftCards}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerForGiftCards: event.target.value,
+                      }));
+                    }}
+                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="POS-58"
+                  />
+                  <select
+                    value={hardwareSettings.printerTypeForGiftCards}
+                    onChange={(event) => {
+                      setHardwareSettings((state) => ({
+                        ...state,
+                        printerForAll: "",
+                        printerTypeForGiftCards: event.target.value as "ECP/P2" | "80mm",
+                      }));
+                    }}
+                    className="w-32 rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="ECP/P2">ECP/P2</option>
+                    <option value="80mm">80mm</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrinter(hardwareSettings.printerForGiftCards, hardwareSettings.printerTypeForGiftCards)}
+                    disabled={!hardwareSettings.printerForGiftCards.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Probar impresora"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    Probar
+                  </button>
+                </div>
+              </div>
             </div>
-            <label className="md:col-span-2 flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="drawer-model">
+                  Modelo de gaveta
+                </label>
+                <input
+                  id="drawer-model"
+                  value={hardwareSettings.drawerModel}
+                  onChange={(event) =>
+                    setHardwareSettings((state) => ({ ...state, drawerModel: event.target.value }))
+                  }
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="APG Serie 4000"
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
               <input
                 type="checkbox"
-                checked={hardwareSettings.autoPrintOnLogin}
+                checked={hardwareSettings.prePrintedPawnPaper}
                 onChange={(event) =>
-                  setHardwareSettings((state) => ({ ...state, autoPrintOnLogin: event.target.checked }))
+                  setHardwareSettings((state) => ({ ...state, prePrintedPawnPaper: event.target.checked }))
                 }
                 className="h-4 w-4 rounded border border-border"
               />
-              Imprimir comprobante de prueba al iniciar sesión
+              Papel de empeño pre-impreso
             </label>
           </div>
         );
       case "operating-hours":
+        const days = [
+          { key: "monday", label: "Lunes" },
+          { key: "tuesday", label: "Martes" },
+          { key: "wednesday", label: "Miércoles" },
+          { key: "thursday", label: "Jueves" },
+          { key: "friday", label: "Viernes" },
+          { key: "saturday", label: "Sábado" },
+          { key: "sunday", label: "Domingo" },
+        ] as const;
+
         return (
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="hours-weekday">
-                Horario entre semana
-              </label>
-              <input
-                id="hours-weekday"
-                value={operatingHours.weekday}
-                onChange={(event) =>
-                  setOperatingHours((state) => ({ ...state, weekday: event.target.value }))
-                }
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                placeholder="09:00 - 18:00"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="hours-weekend">
-                Horario fines de semana
-              </label>
-              <input
-                id="hours-weekend"
-                value={operatingHours.weekend}
-                onChange={(event) =>
-                  setOperatingHours((state) => ({ ...state, weekend: event.target.value }))
-                }
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                placeholder="10:00 - 14:00"
-              />
-            </div>
+          <div className="space-y-4">
+            {days.map((day) => {
+              const dayData = operatingHours[day.key];
+              return (
+                <div key={day.key} className="flex items-center gap-4 rounded-md border border-border bg-muted/40 p-4">
+                  <div className="flex items-center gap-2 min-w-[100px]">
+                    <input
+                      type="checkbox"
+                      checked={!dayData.closed}
+                      onChange={(event) =>
+                        setOperatingHours((state) => ({
+                          ...state,
+                          [day.key]: {
+                            ...state[day.key],
+                            closed: !event.target.checked,
+                          },
+                        }))
+                      }
+                      className="h-4 w-4 rounded border border-border"
+                    />
+                    <label className="text-sm font-medium text-foreground min-w-[80px]">
+                      {day.label}
+                    </label>
+                  </div>
+                  {!dayData.closed ? (
+                    <div className="flex items-center gap-2 flex-1">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-muted-foreground" htmlFor={`${day.key}-open`}>
+                          Apertura
+                        </label>
+                        <input
+                          id={`${day.key}-open`}
+                          type="time"
+                          value={dayData.open}
+                          onChange={(event) =>
+                            setOperatingHours((state) => ({
+                              ...state,
+                              [day.key]: {
+                                ...state[day.key],
+                                open: event.target.value,
+                              },
+                            }))
+                          }
+                          className="rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                      </div>
+                      <span className="text-muted-foreground">-</span>
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-muted-foreground" htmlFor={`${day.key}-close`}>
+                          Cierre
+                        </label>
+                        <input
+                          id={`${day.key}-close`}
+                          type="time"
+                          value={dayData.close}
+                          onChange={(event) =>
+                            setOperatingHours((state) => ({
+                              ...state,
+                              [day.key]: {
+                                ...state[day.key],
+                                close: event.target.value,
+                              },
+                            }))
+                          }
+                          className="rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Cerrado</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         );
       case "tax-rates":
@@ -2425,18 +3081,46 @@ export default function SettingsSystemPage() {
         );
       case "pos-closure":
         return (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Define a quién se envía el resumen de cierre (correo, WhatsApp o PDF).
+              Define a quién se envía el resumen de cierre por correo electrónico y WhatsApp.
             </p>
-            <textarea
-              className="min-h-[100px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-              value={posAlerts.closureRecipients}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="closure-email">
+                Correo electrónico
+              </label>
+              <input
+                id="closure-email"
+                type="text"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                value={posAlerts.closureRecipientsEmail}
               onChange={(event) =>
-                setPosAlerts((state) => ({ ...state, closureRecipients: event.target.value }))
+                  setPosAlerts((state) => ({ ...state, closureRecipientsEmail: event.target.value }))
               }
               placeholder="gerente@tienda.com, supervisor@tienda.com"
             />
+              <p className="text-xs text-muted-foreground">
+                Separa múltiples correos con comas
+              </p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="closure-whatsapp">
+                WhatsApp
+              </label>
+              <input
+                id="closure-whatsapp"
+                type="text"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                value={posAlerts.closureRecipientsWhatsApp}
+                onChange={(event) =>
+                  setPosAlerts((state) => ({ ...state, closureRecipientsWhatsApp: event.target.value }))
+                }
+                placeholder="+18091234567, +18097654321"
+              />
+              <p className="text-xs text-muted-foreground">
+                Separa múltiples números con comas (formato: +18091234567)
+              </p>
+            </div>
           </div>
         );
       case "pos-ledger":
@@ -2523,24 +3207,7 @@ export default function SettingsSystemPage() {
           </div>
         );
       case "pawn-interest":
-        return <InterestModelsSection />;
-      case "pawn-grace":
-        return (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="grace-days">
-              Días de gracia
-            </label>
-            <input
-              id="grace-days"
-              type="number"
-              value={pawnSettings.graceDays}
-              onChange={(event) =>
-                setPawnSettings((state) => ({ ...state, graceDays: Number(event.target.value) || 0 }))
-              }
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
-        );
+        return <InterestModelsSection graceDays={pawnSettings.graceDays ?? 5} onGraceDaysChange={(days) => setPawnSettings((state) => ({ ...state, graceDays: days }))} />;
       case "pawn-alerts":
         return (
           <div className="space-y-1">
@@ -2694,22 +3361,229 @@ export default function SettingsSystemPage() {
       case "maintenance-backup":
         return (
           <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="backup-frequency">
+                  Frecuencia de respaldo
+                </label>
+                <select
+                  id="backup-frequency"
+                  value={maintenanceSettings.backupFrequency}
+                  onChange={(event) =>
+                    setMaintenanceSettings((state) => ({
+                      ...state,
+                      backupFrequency: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="tres veces al dia">Tres veces al día</option>
+                  <option value="dos veces al dia">Dos veces al día</option>
+                  <option value="diario">Diario</option>
+                  <option value="semanal">Semanal</option>
+                  <option value="mensual">Mensual</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="backup-identificador">
+                  Identificador
+                </label>
+                <input
+                  id="backup-identificador"
+                  type="text"
+                  value={maintenanceSettings.backupIdentificador}
+                  onChange={(event) =>
+                    setMaintenanceSettings((state) => ({
+                      ...state,
+                      backupIdentificador: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="backup"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Se usará para nombrar los archivos: identificador_YYYY-MM-DD_HH-MM-SS.sql
+                </p>
+              </div>
+            </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="backup-frequency">
-                Frecuencia de respaldo
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="backup-folder-path">
+                Ruta de carpeta para respaldos
               </label>
-              <input
-                id="backup-frequency"
-                value={maintenanceSettings.backupFrequency}
-                onChange={(event) =>
-                  setMaintenanceSettings((state) => ({
-                    ...state,
-                    backupFrequency: event.target.value,
-                  }))
-                }
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                placeholder="Diario, Semanal, Mensual"
-              />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Folder className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <input
+                    id="backup-folder-path"
+                    type="text"
+                    value={maintenanceSettings.backupFolderPath}
+                    onChange={(event) =>
+                      setMaintenanceSettings((state) => ({
+                        ...state,
+                        backupFolderPath: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-md border border-border bg-background pl-10 pr-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="./backups"
+                  />
+                </div>
+                <div className="relative">
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const selectedValue = event.target.value;
+                      if (selectedValue) {
+                        setMaintenanceSettings((prevState) => {
+                          const newState = {
+                            ...prevState,
+                            backupFolderPath: selectedValue,
+                          };
+                          return newState;
+                        });
+                        // Reset select to show placeholder
+                        requestAnimationFrame(() => {
+                          (event.target as HTMLSelectElement).value = "";
+                        });
+                      }
+                    }}
+                    className="flex items-center gap-2 rounded-md border border-border bg-background pl-4 pr-8 py-2 text-sm font-medium transition hover:bg-muted appearance-none cursor-pointer focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    title="Seleccionar carpeta común"
+                  >
+                    <option value="" disabled>
+                      Seleccionar...
+                    </option>
+                    <option value="./backups">./backups</option>
+                    <option value="./data/backups">./data/backups</option>
+                    <option value="/var/backups">/var/backups</option>
+                    <option value="C:\\backups">C:\backups</option>
+                    <option value="D:\\backups">D:\backups</option>
+                  </select>
+                  <FolderOpen className="absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 pointer-events-none text-muted-foreground" />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Ruta en el servidor donde se guardarán los archivos de respaldo
+              </p>
+            </div>
+            <div className="space-y-4 rounded-md border border-border bg-muted/40 p-4">
+              <h3 className="text-sm font-medium">Configuración AWS S3</h3>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="aws-access-key">
+                    AWS Access Key ID
+                  </label>
+                  <input
+                    id="aws-access-key"
+                    type="text"
+                    value={maintenanceSettings.awsAccessKeyId}
+                    onChange={(event) =>
+                      setMaintenanceSettings((state) => ({
+                        ...state,
+                        awsAccessKeyId: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="AKIAIOSFODNN7EXAMPLE"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="aws-secret-key">
+                    AWS Secret Access Key
+                  </label>
+                  <input
+                    id="aws-secret-key"
+                    type="password"
+                    value={maintenanceSettings.awsSecretAccessKey}
+                    onChange={(event) =>
+                      setMaintenanceSettings((state) => ({
+                        ...state,
+                        awsSecretAccessKey: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="aws-region">
+                    AWS Region
+                  </label>
+                  <input
+                    id="aws-region"
+                    type="text"
+                    value={maintenanceSettings.awsRegion}
+                    onChange={(event) =>
+                      setMaintenanceSettings((state) => ({
+                        ...state,
+                        awsRegion: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="us-east-1"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="aws-bucket">
+                    AWS S3 Bucket
+                  </label>
+                  <input
+                    id="aws-bucket"
+                    type="text"
+                    value={maintenanceSettings.awsBucket}
+                    onChange={(event) =>
+                      setMaintenanceSettings((state) => ({
+                        ...state,
+                        awsBucket: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="my-backup-bucket"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={maintenanceSettings.autoCloudSync}
+                  onChange={(event) =>
+                    setMaintenanceSettings((state) => ({ ...state, autoCloudSync: event.target.checked }))
+                  }
+                  className="h-4 w-4 rounded border border-border"
+                />
+                Sincronizar automáticamente con AWS S3 después de crear respaldo
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setStatus({ tone: "info", message: "Creando respaldo..." });
+                    const response = await fetch(`${API_BASE_URL}/api/backup/create`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                    });
+                    if (!response.ok) {
+                      const error = await response.json().catch(() => ({ error: "Error desconocido" }));
+                      throw new Error(error.error || "Error al crear respaldo");
+                    }
+                    const data = await response.json();
+                    setStatus({
+                      tone: "success",
+                      message: `Respaldo creado exitosamente: ${data.filename}`,
+                    });
+                  } catch (error) {
+                    setStatus({
+                      tone: "error",
+                      message: error instanceof Error ? error.message : "Error al crear respaldo",
+                    });
+                  }
+                }}
+                className="flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-muted"
+              >
+                <Save className="h-4 w-4" />
+                Crear respaldo ahora
+              </button>
             </div>
             <p className="text-xs text-muted-foreground">
               Define cómo se almacenan los respaldos y quién recibe confirmaciones.

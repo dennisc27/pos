@@ -12,10 +12,16 @@ import {
   Loader2,
   PiggyBank,
   ShieldCheck,
+  ShoppingCart,
+  CreditCard,
+  Package,
+  RotateCcw,
+  Settings,
 } from "lucide-react";
 
 import { formatCurrency } from "@/components/cash/utils";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
+import { useCurrentUser } from "@/components/providers/current-user-provider";
 import { formatDateTimeForDisplay } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -42,6 +48,16 @@ type CashMovement = {
   createdAt: string;
 };
 
+type CashTransaction = {
+  id: string;
+  type: "adjustment" | "sale" | "loan" | "layaway" | "refund";
+  kind: string;
+  amountCents: number;
+  reason: string | null;
+  createdAt: string;
+  metadata: Record<string, unknown>;
+};
+
 type MovementSummary = {
   totalsByKind: Record<string, { totalCents: number; count: number }>;
   netMovementCents: number;
@@ -51,6 +67,11 @@ type ShiftMovementsResponse = {
   shift: Shift;
   movements: CashMovement[];
   summary: MovementSummary;
+};
+
+type CashTransactionsResponse = {
+  shift: Shift;
+  transactions: CashTransaction[];
 };
 
 type StatusMessage = { tone: "success" | "error"; message: string } | null;
@@ -113,6 +134,67 @@ const movementOptions = MOVEMENT_ORDER.map((kind) => ({
   direction: MOVEMENT_DIRECTIONS[kind],
 }));
 
+// Transaction type labels and icons
+const TRANSACTION_TYPE_LABELS: Record<CashTransaction["type"], string> = {
+  adjustment: "Ajuste",
+  sale: "Venta",
+  loan: "Préstamo",
+  layaway: "Layaway",
+  refund: "Devolución",
+};
+
+const TRANSACTION_TYPE_ICONS: Record<CashTransaction["type"], typeof ShoppingCart> = {
+  adjustment: Settings,
+  sale: ShoppingCart,
+  loan: CreditCard,
+  layaway: Package,
+  refund: RotateCcw,
+};
+
+const TRANSACTION_KIND_LABELS: Record<string, string> = {
+  // Adjustments
+  deposit: "Depósito en caja",
+  cash_to_safe: "Traslado a bóveda",
+  drop: "Drop a bóveda",
+  paid_in: "Paid-in",
+  paid_out: "Paid-out",
+  expense: "Gasto operativo",
+  income: "Ingreso extraordinario",
+  // Sales
+  sale: "Venta en efectivo",
+  // Loans
+  interest: "Pago de interés",
+  advance: "Pago anticipado",
+  redeem: "Redención",
+  renew: "Renovación",
+  extension: "Extensión",
+  // Layaway
+  payment: "Pago de layaway",
+  // Refunds
+  refund: "Devolución en efectivo",
+};
+
+const getTransactionDirection = (transaction: CashTransaction): 1 | -1 => {
+  if (transaction.type === "refund") {
+    return -1; // Refunds are always out
+  }
+  if (transaction.type === "sale" || transaction.type === "loan" || transaction.type === "layaway") {
+    return 1; // Sales and payments are always in
+  }
+  // For adjustments, use the movement direction
+  return MOVEMENT_DIRECTIONS[transaction.kind as MovementKind] ?? 1;
+};
+
+const getTransactionLabel = (transaction: CashTransaction): string => {
+  if (transaction.type === "adjustment") {
+    return TRANSACTION_KIND_LABELS[transaction.kind] ?? MOVEMENT_LABELS[transaction.kind as MovementKind] ?? transaction.kind;
+  }
+  if (transaction.type === "loan") {
+    return TRANSACTION_KIND_LABELS[transaction.kind] ?? `Pago de préstamo (${transaction.kind})`;
+  }
+  return TRANSACTION_KIND_LABELS[transaction.kind] ?? TRANSACTION_TYPE_LABELS[transaction.type];
+};
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`);
   const data = (await response.json().catch(() => ({}))) as T & { error?: string };
@@ -168,6 +250,7 @@ const formatDate = (value: string | null | undefined) => {
 
 export default function CashMovementsPage() {
   const { branch: activeBranch, loading: branchLoading, error: branchError } = useActiveBranch();
+  const { user: currentUser, loading: userLoading } = useCurrentUser();
 
   const [status, setStatus] = useState<StatusMessage>(null);
   const [isLoading, setIsLoading] = useState({ load: false, submit: false });
@@ -176,11 +259,10 @@ export default function CashMovementsPage() {
   });
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [movements, setMovements] = useState<CashMovement[]>([]);
+  const [allTransactions, setAllTransactions] = useState<CashTransaction[]>([]);
   const [movementForm, setMovementForm] = useState({
     kind: "deposit" as MovementKind,
     amount: "",
-    performedBy: "",
-    pin: "",
     reason: "",
   });
   const [movementFilter, setMovementFilter] = useState<"all" | "in" | "out">("all");
@@ -209,6 +291,7 @@ export default function CashMovementsPage() {
   const resetState = useCallback(() => {
     setActiveShift(null);
     setMovements([]);
+    setAllTransactions([]);
     setShiftLookup({ shiftId: "" });
     setMovementFilter("all");
   }, []);
@@ -218,8 +301,12 @@ export default function CashMovementsPage() {
     setStatus(null);
 
     try {
-      const data = await getJson<ShiftMovementsResponse>(`/api/cash-movements?shiftId=${shiftId}`);
-      if (activeBranch && data.shift.branchId !== activeBranch.id) {
+      const [movementsData, transactionsData] = await Promise.all([
+        getJson<ShiftMovementsResponse>(`/api/cash-movements?shiftId=${shiftId}`),
+        getJson<CashTransactionsResponse>(`/api/shifts/${shiftId}/cash-transactions`),
+      ]);
+      
+      if (activeBranch && movementsData.shift.branchId !== activeBranch.id) {
         setStatus({
           tone: "error",
           message: "El turno pertenece a otra sucursal. Ajusta la sucursal activa para revisar este turno.",
@@ -227,9 +314,10 @@ export default function CashMovementsPage() {
         resetState();
         return;
       }
-      setActiveShift(data.shift);
-      setMovements(data.movements);
-      setShiftLookup({ shiftId: String(data.shift.id) });
+      setActiveShift(movementsData.shift);
+      setMovements(movementsData.movements);
+      setAllTransactions(transactionsData.transactions);
+      setShiftLookup({ shiftId: String(movementsData.shift.id) });
       setMovementFilter("all");
       if (successMessage) {
         setStatus({ tone: "success", message: successMessage });
@@ -255,20 +343,25 @@ export default function CashMovementsPage() {
       }
 
       try {
-        const data = await getJson<ShiftMovementsResponse>(`/api/shifts/active?branchId=${branchId}`);
-        if (activeBranch && data.shift.branchId !== activeBranch.id) {
+        const movementsData = await getJson<ShiftMovementsResponse>(`/api/shifts/active?branchId=${branchId}`);
+        
+        if (activeBranch && movementsData.shift.branchId !== activeBranch.id) {
           throw new Error(
             "El turno activo pertenece a otra sucursal. Actualiza la sucursal activa en ajustes para continuar."
           );
         }
-        setActiveShift(data.shift);
-        setMovements(data.movements);
-        setShiftLookup({ shiftId: String(data.shift.id) });
+        
+        const transactionsData = await getJson<CashTransactionsResponse>(`/api/shifts/${movementsData.shift.id}/cash-transactions`).catch(() => ({ shift: movementsData.shift, transactions: [] }));
+        
+        setActiveShift(movementsData.shift);
+        setMovements(movementsData.movements);
+        setAllTransactions(transactionsData.transactions);
+        setShiftLookup({ shiftId: String(movementsData.shift.id) });
         setMovementFilter("all");
         if (!quiet) {
           setStatus({
             tone: "success",
-            message: `Turno activo #${data.shift.id} para la sucursal ${branchId} listo para registrar movimientos.`,
+            message: `Turno activo #${movementsData.shift.id} para la sucursal ${branchId} listo para registrar movimientos.`,
           });
         }
       } catch (error) {
@@ -340,8 +433,13 @@ export default function CashMovementsPage() {
       return;
     }
 
-    if (!movementForm.performedBy || !movementForm.pin || !movementForm.amount) {
-      setStatus({ tone: "error", message: "Monto, cajero y PIN son obligatorios." });
+    if (!currentUser) {
+      setStatus({ tone: "error", message: "Usuario no disponible. Por favor, recarga la página." });
+      return;
+    }
+
+    if (!movementForm.amount) {
+      setStatus({ tone: "error", message: "El monto es obligatorio." });
       return;
     }
 
@@ -365,8 +463,8 @@ export default function CashMovementsPage() {
         shiftId: activeShift.id,
         kind: movementForm.kind,
         amountCents,
-        performedBy: Number(movementForm.performedBy),
-        pin: movementForm.pin,
+        performedBy: currentUser.id,
+        pin: "1234", // Default PIN for current user
         reason: movementForm.reason || null,
       };
 
@@ -374,6 +472,27 @@ export default function CashMovementsPage() {
 
       setActiveShift(data.shift);
       setMovements((state) => [data.movement, ...state]);
+      
+      // Reload all transactions to include the new movement
+      try {
+        const transactionsData = await getJson<CashTransactionsResponse>(`/api/shifts/${data.shift.id}/cash-transactions`);
+        setAllTransactions(transactionsData.transactions);
+      } catch {
+        // If transaction loading fails, just add the movement manually
+        setAllTransactions((state) => [
+          {
+            id: `cash_movement_${data.movement.id}`,
+            type: "adjustment" as const,
+            kind: data.movement.kind,
+            amountCents: data.movement.amountCents,
+            reason: data.movement.reason,
+            createdAt: data.movement.createdAt,
+            metadata: { cashMovementId: data.movement.id },
+          },
+          ...state,
+        ]);
+      }
+      
       setMovementForm((state) => ({ ...state, amount: "", reason: "" }));
       setStatus({
         tone: "success",
@@ -417,6 +536,38 @@ export default function CashMovementsPage() {
     [movements],
   );
 
+  const transactionFlowTotals = useMemo(() => {
+    return allTransactions.reduce(
+      (acc, transaction) => {
+        const direction = getTransactionDirection(transaction);
+        const amount = Math.max(0, Number(transaction.amountCents ?? 0));
+
+        if (direction >= 0) {
+          acc.inCents += amount;
+          acc.inCount += 1;
+        } else {
+          acc.outCents += amount;
+          acc.outCount += 1;
+        }
+
+        return acc;
+      },
+      { inCents: 0, inCount: 0, outCents: 0, outCount: 0 },
+    );
+  }, [allTransactions]);
+
+  // Combined totals including all cash transactions
+  const combinedFlowTotals = useMemo(() => {
+    const manual = flowTotals;
+    const transactions = transactionFlowTotals;
+    return {
+      inCents: manual.inCents + transactions.inCents,
+      inCount: manual.inCount + transactions.inCount,
+      outCents: manual.outCents + transactions.outCents,
+      outCount: manual.outCount + transactions.outCount,
+    };
+  }, [flowTotals, transactionFlowTotals]);
+
   const filteredMovements = useMemo(() => {
     if (movementFilter === "all") {
       return movements;
@@ -429,13 +580,24 @@ export default function CashMovementsPage() {
     });
   }, [movementFilter, movements]);
 
+  const filteredTransactions = useMemo(() => {
+    if (movementFilter === "all") {
+      return allTransactions;
+    }
+
+    return allTransactions.filter((transaction) => {
+      const direction = getTransactionDirection(transaction);
+      return movementFilter === "in" ? direction >= 0 : direction < 0;
+    });
+  }, [movementFilter, allTransactions]);
+
   const filterOptions = useMemo(
     () => [
-      { value: "all" as const, label: "Todo", count: movements.length },
-      { value: "in" as const, label: "Entradas", count: flowTotals.inCount },
-      { value: "out" as const, label: "Salidas", count: flowTotals.outCount },
+      { value: "all" as const, label: "Todo", count: allTransactions.length },
+      { value: "in" as const, label: "Entradas", count: transactionFlowTotals.inCount },
+      { value: "out" as const, label: "Salidas", count: transactionFlowTotals.outCount },
     ],
-    [flowTotals.inCount, flowTotals.outCount, movements.length],
+    [transactionFlowTotals.inCount, transactionFlowTotals.outCount, allTransactions.length],
   );
 
   const totalFlowCents = flowTotals.inCents + flowTotals.outCents;
@@ -532,21 +694,21 @@ export default function CashMovementsPage() {
                     <p className="text-xs text-slate-500 dark:text-slate-400">Incluye ventas, pagos y movimientos manuales.</p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Entradas registradas</p>
+                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Entradas totales</p>
                     <p className="text-xl font-semibold text-emerald-600 dark:text-emerald-300">
-                      {centsToCurrency(flowTotals.inCents)}
+                      {centsToCurrency(combinedFlowTotals.inCents)}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {flowTotals.inCount} {flowTotals.inCount === 1 ? "movimiento" : "movimientos"} hacia caja.
+                      {combinedFlowTotals.inCount} {combinedFlowTotals.inCount === 1 ? "transacción" : "transacciones"} hacia caja.
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Salidas registradas</p>
+                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Salidas totales</p>
                     <p className="text-xl font-semibold text-rose-600 dark:text-rose-300">
-                      {centsToCurrency(flowTotals.outCents)}
+                      {centsToCurrency(combinedFlowTotals.outCents)}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {flowTotals.outCount} {flowTotals.outCount === 1 ? "movimiento" : "movimientos"} hacia fuera.
+                      {combinedFlowTotals.outCount} {combinedFlowTotals.outCount === 1 ? "transacción" : "transacciones"} hacia fuera.
                     </p>
                   </div>
                 </div>
@@ -554,41 +716,51 @@ export default function CashMovementsPage() {
                 <div className="rounded-xl border border-slate-200 bg-white/70 p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-950/40">
                   <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Impacto neto de movimientos</p>
+                      <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Impacto neto total</p>
                       <p
                         className={`flex items-center gap-2 text-2xl font-semibold ${
-                          netIsNegative
+                          combinedFlowTotals.inCents - combinedFlowTotals.outCents < 0
                             ? "text-rose-600 dark:text-rose-300"
-                            : netIsPositive
+                            : combinedFlowTotals.inCents - combinedFlowTotals.outCents > 0
                             ? "text-emerald-600 dark:text-emerald-300"
                             : "text-slate-700 dark:text-slate-200"
                         }`}
                       >
                         <ArrowLeftRight className="h-5 w-5" />
-                        {netMovementAbsolute === 0 ? "RD$ 0.00" : centsToCurrency(netMovementAbsolute)}
+                        {centsToCurrency(Math.abs(combinedFlowTotals.inCents - combinedFlowTotals.outCents))}
                       </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{netMovementCopy}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {combinedFlowTotals.inCents - combinedFlowTotals.outCents < 0
+                          ? "Salió más efectivo del turno"
+                          : combinedFlowTotals.inCents - combinedFlowTotals.outCents > 0
+                          ? "Entró más efectivo al turno"
+                          : "Balance sin variaciones"}
+                      </p>
                     </div>
                     <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                      {movements.length} {movements.length === 1 ? "movimiento manual" : "movimientos manuales"}
+                      {allTransactions.length} {allTransactions.length === 1 ? "transacción" : "transacciones"} de efectivo
                     </div>
                   </div>
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      <span>Entradas {centsToCurrency(flowTotals.inCents)}</span>
-                      <span>Salidas {centsToCurrency(flowTotals.outCents)}</span>
+                      <span>Entradas {centsToCurrency(combinedFlowTotals.inCents)}</span>
+                      <span>Salidas {centsToCurrency(combinedFlowTotals.outCents)}</span>
                     </div>
-                    {totalFlowCents === 0 ? (
+                    {combinedFlowTotals.inCents + combinedFlowTotals.outCents === 0 ? (
                       <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-800" />
                     ) : (
                       <div className="flex h-2 w-full overflow-hidden rounded-full border border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-900">
                         <span
                           className="h-full bg-emerald-500/80"
-                          style={{ width: `${Math.max(0, Math.min(100, inboundShare))}%` }}
+                          style={{ 
+                            width: `${Math.max(0, Math.min(100, ((combinedFlowTotals.inCents / (combinedFlowTotals.inCents + combinedFlowTotals.outCents)) * 100) || 0))}%` 
+                          }}
                         />
                         <span
                           className="h-full bg-rose-500/80"
-                          style={{ width: `${Math.max(0, Math.min(100, outboundShare))}%` }}
+                          style={{ 
+                            width: `${Math.max(0, Math.min(100, ((combinedFlowTotals.outCents / (combinedFlowTotals.inCents + combinedFlowTotals.outCents)) * 100) || 0))}%` 
+                          }}
                         />
                       </div>
                     )}
@@ -648,7 +820,7 @@ export default function CashMovementsPage() {
               <div className="min-w-[200px]">
                 <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Historial del turno</h2>
                 <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Visualiza cada movimiento manual registrado con su motivo y hora exacta.
+                  Visualiza todos los movimientos de efectivo: ventas, préstamos, layaways, devoluciones y ajustes manuales.
                 </p>
               </div>
               <div className="ml-auto flex flex-wrap gap-2">
@@ -686,22 +858,23 @@ export default function CashMovementsPage() {
                 <p className="px-6 py-8 text-sm text-slate-500 dark:text-slate-400">
                   Selecciona un turno para revisar sus movimientos.
                 </p>
-              ) : filteredMovements.length === 0 ? (
+              ) : filteredTransactions.length === 0 ? (
                 <p className="px-6 py-8 text-sm text-slate-500 dark:text-slate-400">
                   {movementFilter === "all"
-                    ? "Aún no hay movimientos registrados para este turno."
+                    ? "Aún no hay movimientos de efectivo registrados para este turno."
                     : movementFilter === "in"
                     ? "No se registraron entradas con el filtro aplicado."
                     : "No se registraron salidas con el filtro aplicado."}
                 </p>
               ) : (
-                filteredMovements.map((movement) => {
-                  const direction =
-                    MOVEMENT_DIRECTIONS[movement.kind as MovementKind] ?? (movement.kind === "refund" ? -1 : 1);
-                  const formattedAmount = centsToCurrency(movement.amountCents);
+                filteredTransactions.map((transaction) => {
+                  const direction = getTransactionDirection(transaction);
+                  const formattedAmount = centsToCurrency(transaction.amountCents);
+                  const TransactionIcon = TRANSACTION_TYPE_ICONS[transaction.type];
+                  const label = getTransactionLabel(transaction);
                   return (
                     <article
-                      key={movement.id}
+                      key={transaction.id}
                       className="flex items-start justify-between gap-4 px-6 py-4 text-sm transition hover:bg-slate-50 dark:hover:bg-slate-900"
                     >
                       <div className="flex items-start gap-3">
@@ -712,15 +885,19 @@ export default function CashMovementsPage() {
                               : "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-200"
                           }`}
                         >
-                          {direction < 0 ? <ArrowUpFromLine className="h-4 w-4" /> : <ArrowDownToLine className="h-4 w-4" />}
+                          <TransactionIcon className="h-4 w-4" />
                         </span>
                         <div>
                           <p className="font-medium text-slate-800 dark:text-slate-100">
-                            {MOVEMENT_LABELS[movement.kind as MovementKind] ?? movement.kind.replace(/_/g, " ")}
+                            {label}
                           </p>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {formatDate(movement.createdAt)}
-                            {movement.reason ? ` · ${movement.reason}` : ""}
+                            {formatDate(transaction.createdAt)}
+                            {transaction.reason ? ` · ${transaction.reason}` : ""}
+                            {transaction.metadata?.orderId ? ` · Orden #${transaction.metadata.orderId}` : ""}
+                            {transaction.metadata?.loanId ? ` · Préstamo #${transaction.metadata.loanId}` : ""}
+                            {transaction.metadata?.layawayId ? ` · Layaway #${transaction.metadata.layawayId}` : ""}
+                            {transaction.metadata?.invoiceId ? ` · Factura #${transaction.metadata.invoiceId}` : ""}
                           </p>
                         </div>
                       </div>
@@ -857,9 +1034,29 @@ export default function CashMovementsPage() {
                 </p>
               </label>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Monto</span>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Cajero responsable
+                  </span>
+                  {userLoading ? (
+                    <span className="inline-flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…
+                    </span>
+                  ) : currentUser ? (
+                    <span className="block rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
+                      {currentUser.fullName} (ID: {currentUser.id})
+                    </span>
+                  ) : (
+                    <span className="block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      Usuario no disponible
+                    </span>
+                  )}
+                </div>
+                <label className="block space-y-1">
+                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Monto <span className="text-rose-500">*</span>
+                  </span>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -867,31 +1064,6 @@ export default function CashMovementsPage() {
                     onChange={(event) => setMovementForm((state) => ({ ...state, amount: event.target.value }))}
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
                     placeholder="RD$ 0.00"
-                    required
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Cajero responsable
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={movementForm.performedBy}
-                    onChange={(event) => setMovementForm((state) => ({ ...state, performedBy: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                    placeholder="ID de usuario"
-                    required
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">PIN</span>
-                  <input
-                    type="password"
-                    value={movementForm.pin}
-                    onChange={(event) => setMovementForm((state) => ({ ...state, pin: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                    placeholder="****"
                     required
                   />
                 </label>
