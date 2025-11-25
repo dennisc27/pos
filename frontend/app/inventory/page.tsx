@@ -602,12 +602,12 @@ function InventoryPage() {
     setFilters((previous) => ({ ...previous, page: previous.page + 1 }));
   };
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
+    <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-6 py-5">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Inventario</h1>
-            <p className="text-sm text-slate-500">
+            <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Inventario</h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Consulta existencias por sucursal, edita precios rápidamente y genera etiquetas QR.
             </p>
           </div>
@@ -615,7 +615,7 @@ function InventoryPage() {
             <button
               type="button"
               onClick={handleRefresh}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <RefreshCcw className="h-4 w-4" />
               Actualizar
@@ -623,7 +623,7 @@ function InventoryPage() {
             <button
               type="button"
               onClick={handleResetFilters}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <XCircle className="h-4 w-4" />
               Limpiar filtros
@@ -634,52 +634,52 @@ function InventoryPage() {
 
       <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-6 py-6">
         <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between text-sm text-slate-500">
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
               <span>SKUs únicos</span>
               <Boxes className="h-4 w-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">{numberFormatter.format(summary.totalSkus)}</p>
+            <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">{numberFormatter.format(summary.totalSkus)}</p>
           </article>
-          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between text-sm text-slate-500">
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
               <span>Existencia</span>
               <PackageCheck className="h-4 w-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">
+            <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">
               {numberFormatter.format(summary.totalQtyOnHand)}
             </p>
           </article>
-          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between text-sm text-slate-500">
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
               <span>Reservado</span>
               <PackageMinus className="h-4 w-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">
+            <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">
               {numberFormatter.format(summary.totalReserved)}
             </p>
           </article>
-          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between text-sm text-slate-500">
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
               <span>Disponible</span>
               <PackagePlus className="h-4 w-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">
+            <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">
               {numberFormatter.format(summary.totalAvailable)}
             </p>
           </article>
-          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between text-sm text-slate-500">
+          <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
               <span>Valor retail</span>
               <Tag className="h-4 w-4" />
             </div>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">
+            <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">
               {formatCurrencyFromCents(summary.totalRetailValueCents)}
             </p>
           </article>
         </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="flex flex-1 flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
               <div className="relative flex-1">
@@ -689,7 +689,7 @@ function InventoryPage() {
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
                   placeholder="Buscar por nombre, código o SKU"
-                  className="w-full rounded-md border border-slate-200 py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="w-full rounded-md border border-slate-200 py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                 />
               </div>
 
@@ -703,7 +703,7 @@ function InventoryPage() {
                     page: 1,
                   }));
                 }}
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-48"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-48"
               >
                 <option value="all">Todas las sucursales</option>
                 {branchOptions.map((branch) => (
@@ -723,7 +723,7 @@ function InventoryPage() {
                     page: 1,
                   }));
                 }}
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-48"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-48"
               >
                 <option value="all">Todas las categorías</option>
                 {categoryOptions.map((category) => (
@@ -742,7 +742,7 @@ function InventoryPage() {
                     page: 1,
                   }))
                 }
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-36"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-36"
               >
                 {statusOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -760,7 +760,7 @@ function InventoryPage() {
                     page: 1,
                   }))
                 }
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-40"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-40"
               >
                 {availabilityOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -781,7 +781,7 @@ function InventoryPage() {
                       page: 1,
                     }))
                   }
-                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-28"
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-28"
                   placeholder="Umbral"
                 />
               )}
@@ -797,7 +797,7 @@ function InventoryPage() {
                     page: 1,
                   }))
                 }
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-40"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-40"
               >
                 {sortFieldOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -815,7 +815,7 @@ function InventoryPage() {
                     page: 1,
                   }))
                 }
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-28"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-28"
               >
                 {sortDirectionOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -833,7 +833,7 @@ function InventoryPage() {
                     page: 1,
                   }))
                 }
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-28"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-28"
               >
                 {pageSizeOptions.map((size) => (
                   <option key={size} value={size}>
@@ -849,8 +849,8 @@ function InventoryPage() {
           <div
             className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
               flashMessage.tone === "success"
-                ? "border-green-200 bg-green-50 text-green-700"
-                : "border-red-200 bg-red-50 text-red-700"
+                ? "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200"
+                : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
             }`}
           >
             {flashMessage.tone === "success" ? (
@@ -863,69 +863,69 @@ function InventoryPage() {
         )}
 
         {error && (
-          <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
             <AlertCircle className="h-4 w-4" />
             <span>{error}</span>
           </div>
         )}
 
-        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="relative">
             {loading && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/70">
+              <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/70 dark:bg-slate-900/70">
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
                 <span className="text-sm font-medium text-blue-600">Actualizando inventario…</span>
               </div>
             )}
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50">
+            <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+              <thead className="bg-slate-50 dark:bg-slate-900/50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Etiquetas
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Producto
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Sucursal
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Precio
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Costo
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Existencia
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Reservado
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Disponible
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Estado
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Actualizado
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                     Acciones
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                 {items.map((item) => (
                   <tr
                     key={item.productCodeVersionId}
-                    className={!item.isActive ? "bg-slate-50" : undefined}
+                    className={!item.isActive ? "bg-slate-50 dark:bg-slate-900/60" : undefined}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
-                          className="h-4 w-4 rounded border-slate-300"
+                          className="h-4 w-4 rounded border-slate-300 dark:border-slate-700"
                           checked={Boolean(labelConfig[item.productCodeVersionId])}
                           onChange={() => handleToggleLabel(item.productCodeVersionId)}
                         />
@@ -938,58 +938,58 @@ function InventoryPage() {
                             onChange={(event) =>
                               handleLabelQuantityChange(item.productCodeVersionId, event.target.value)
                             }
-                            className="w-16 rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            className="w-16 rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                           />
                         )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-medium text-slate-900">{item.code}</div>
-                      <div className="text-sm text-slate-600">{item.name}</div>
-                      <div className="text-xs text-slate-400">
+                      <div className="font-medium text-slate-900 dark:text-slate-100">{item.code}</div>
+                      <div className="text-sm text-slate-600 dark:text-slate-300">{item.name}</div>
+                      <div className="text-xs text-slate-400 dark:text-slate-500">
                         SKU: {item.sku ?? "—"} · {item.categoryName ?? "Sin categoría"}
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-sm font-medium text-slate-900">
+                      <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
                         {item.branchName ?? `Sucursal ${item.branchId}`}
                       </div>
-                      <div className="text-xs text-slate-500">ID {item.branchId}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">ID {item.branchId}</div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-900">
+                    <td className="px-4 py-3 text-sm text-slate-900 dark:text-slate-100">
                       {item.priceCents != null ? formatCurrencyFromCents(item.priceCents) : "—"}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
+                    <td className="px-4 py-3 text-sm text-slate-700 dark:text-slate-200">
                       {item.costCents != null ? formatCurrencyFromCents(item.costCents) : "—"}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-900">
+                    <td className="px-4 py-3 text-sm text-slate-900 dark:text-slate-100">
                       {numberFormatter.format(item.qtyOnHand)}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
+                    <td className="px-4 py-3 text-sm text-slate-700 dark:text-slate-200">
                       {numberFormatter.format(item.qtyReserved)}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-900">
+                    <td className="px-4 py-3 text-sm text-slate-900 dark:text-slate-100">
                       {numberFormatter.format(item.availableQty)}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
                           item.isActive
-                            ? "bg-green-100 text-green-700"
-                            : "bg-slate-200 text-slate-600"
+                            ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200"
+                            : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-200"
                         }`}
                       >
                         {item.isActive ? "Activo" : "Inactivo"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
+                    <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
                       {item.updatedAt ? dateTimeFormatter.format(new Date(item.updatedAt)) : "—"}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         type="button"
                         onClick={() => handleStartEdit(item)}
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                       >
                         <Edit3 className="h-4 w-4" />
                         Editar
@@ -1000,12 +1000,12 @@ function InventoryPage() {
               </tbody>
             </table>
             {!loading && items.length === 0 && (
-              <div className="px-4 py-6 text-center text-sm text-slate-500">
+              <div className="px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-300">
                 No se encontraron productos con los filtros seleccionados.
               </div>
             )}
           </div>
-          <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300 md:flex-row md:items-center md:justify-between">
             <span>
               Mostrando {items.length} resultados · Página {currentPage}
             </span>
@@ -1014,16 +1014,16 @@ function InventoryPage() {
                 type="button"
                 onClick={handlePrevPage}
                 disabled={currentPage <= 1}
-                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Anterior
               </button>
-              <span className="px-2 text-slate-500">{currentPage}</span>
+              <span className="px-2 text-slate-500 dark:text-slate-300">{currentPage}</span>
               <button
                 type="button"
                 onClick={handleNextPage}
                 disabled={!hasMore}
-                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Siguiente
               </button>
@@ -1032,13 +1032,13 @@ function InventoryPage() {
         </section>
 
         {editingItem && editForm && (
-          <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
+          <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm dark:border-blue-900 dark:bg-blue-950/40">
             <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-blue-900">
+                <h2 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
                   Edición rápida: {editingItem.code}
                 </h2>
-                <p className="text-sm text-blue-700">
+                <p className="text-sm text-blue-700 dark:text-blue-200">
                   {editingItem.branchName ?? `Sucursal ${editingItem.branchId}`} · SKU {editingItem.sku ?? "—"}
                 </p>
               </div>
@@ -1046,7 +1046,7 @@ function InventoryPage() {
                 type="button"
                 onClick={handleCancelEdit}
                 disabled={savingEdit}
-                className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100 dark:hover:bg-slate-800"
               >
                 <XCircle className="h-4 w-4" />
                 Cancelar
@@ -1054,7 +1054,7 @@ function InventoryPage() {
             </div>
 
             <form onSubmit={handleSaveEdit} className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <label className="flex flex-col gap-1 text-sm text-blue-900 md:col-span-2">
+              <label className="flex flex-col gap-1 text-sm text-blue-900 dark:text-blue-100 md:col-span-2">
                 Nombre
                 <input
                   required
@@ -1064,11 +1064,11 @@ function InventoryPage() {
                       previous ? { ...previous, name: event.target.value } : previous
                     )
                   }
-                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100"
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-blue-900">
+              <label className="flex flex-col gap-1 text-sm text-blue-900 dark:text-blue-100">
                 SKU
                 <input
                   value={editForm.sku}
@@ -1077,11 +1077,11 @@ function InventoryPage() {
                       previous ? { ...previous, sku: event.target.value } : previous
                     )
                   }
-                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100"
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-blue-900 md:col-span-2">
+              <label className="flex flex-col gap-1 text-sm text-blue-900 dark:text-blue-100 md:col-span-2">
                 Descripción
                 <textarea
                   rows={3}
@@ -1091,11 +1091,11 @@ function InventoryPage() {
                       previous ? { ...previous, description: event.target.value } : previous
                     )
                   }
-                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100"
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-blue-900">
+              <label className="flex flex-col gap-1 text-sm text-blue-900 dark:text-blue-100">
                 Categoría
                 <select
                   value={editForm.categoryId}
@@ -1104,7 +1104,7 @@ function InventoryPage() {
                       previous ? { ...previous, categoryId: event.target.value } : previous
                     )
                   }
-                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100"
                 >
                   <option value="">Sin categoría</option>
                   {categoryOptions.map((category) => (
@@ -1127,11 +1127,11 @@ function InventoryPage() {
                       previous ? { ...previous, price: event.target.value } : previous
                     )
                   }
-                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100"
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-blue-900">
+              <label className="flex flex-col gap-1 text-sm text-blue-900 dark:text-blue-100">
                 Costo (RD$)
                 <input
                   type="number"
@@ -1143,11 +1143,11 @@ function InventoryPage() {
                       previous ? { ...previous, cost: event.target.value } : previous
                     )
                   }
-                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100"
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-blue-900">
+              <label className="flex flex-col gap-1 text-sm text-blue-900 dark:text-blue-100">
                 Existencia
                 <input
                   type="number"
@@ -1159,11 +1159,11 @@ function InventoryPage() {
                       previous ? { ...previous, qtyOnHand: event.target.value } : previous
                     )
                   }
-                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100"
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-blue-900">
+              <label className="flex flex-col gap-1 text-sm text-blue-900 dark:text-blue-100">
                 Reservado
                 <input
                   type="number"
@@ -1175,11 +1175,11 @@ function InventoryPage() {
                       previous ? { ...previous, qtyReserved: event.target.value } : previous
                     )
                   }
-                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  className="rounded-md border border-blue-200 px-3 py-2 text-sm text-blue-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-100"
                 />
               </label>
 
-              <label className="flex items-center gap-2 text-sm text-blue-900">
+              <label className="flex items-center gap-2 text-sm text-blue-900 dark:text-blue-100">
                 <input
                   type="checkbox"
                   checked={editForm.isActive}
@@ -1188,7 +1188,7 @@ function InventoryPage() {
                       previous ? { ...previous, isActive: event.target.checked } : previous
                     )
                   }
-                  className="h-4 w-4 rounded border-blue-200"
+                  className="h-4 w-4 rounded border-blue-200 dark:border-blue-800"
                 />
                 Activo en la sucursal
               </label>
@@ -1207,21 +1207,21 @@ function InventoryPage() {
           </section>
         )}
 
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">Etiquetas QR</h2>
-              <p className="text-sm text-slate-500">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Etiquetas QR</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-300">
                 Selecciona artículos en la tabla y genera etiquetas listas para impresión.
               </p>
             </div>
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
-              <label className="flex items-center gap-2 text-sm text-slate-600">
+              <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                 <input
                   type="checkbox"
                   checked={includePriceOnLabels}
                   onChange={(event) => setIncludePriceOnLabels(event.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300"
+                  className="h-4 w-4 rounded border-slate-300 dark:border-slate-700"
                 />
                 Incluir precio
               </label>
@@ -1230,9 +1230,9 @@ function InventoryPage() {
                 value={labelNote}
                 onChange={(event) => setLabelNote(event.target.value)}
                 placeholder="Nota opcional"
-                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 md:w-48"
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 md:w-48"
               />
-              <div className="text-sm font-medium text-slate-600">
+              <div className="text-sm font-medium text-slate-600 dark:text-slate-200">
                 Seleccionados: {selectedLabelCount}
               </div>
               <button
@@ -1247,7 +1247,7 @@ function InventoryPage() {
               <button
                 type="button"
                 onClick={handleClearLabelSelection}
-                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Limpiar selección
               </button>
@@ -1255,14 +1255,14 @@ function InventoryPage() {
           </div>
 
           {labelError && (
-            <div className="mt-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mt-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
               <AlertCircle className="h-4 w-4" />
               <span>{labelError}</span>
             </div>
           )}
 
           {labelPreview && (
-            <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
+            <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <span>Total etiquetas: {labelPreview.totalLabels}</span>
                 <span>Generado: {dateTimeFormatter.format(new Date(labelPreview.generatedAt))}</span>
@@ -1271,26 +1271,26 @@ function InventoryPage() {
                 {labelPreview.labels.slice(0, 6).map((label) => (
                   <div
                     key={`${label.productCodeVersionId}-${label.qrPayload}`}
-                    className="rounded-md bg-white p-3 shadow-sm"
+                    className="rounded-md bg-white p-3 shadow-sm dark:bg-slate-800"
                   >
-                    <p className="text-sm font-semibold text-slate-900">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                       {label.code} · {label.name}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-slate-500 dark:text-slate-300">
                       {label.branchName ?? `Sucursal ${label.branchId}`}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">QR: {label.qrPayload}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">QR: {label.qrPayload}</p>
                     {label.priceCents != null && (
-                      <p className="mt-1 text-sm font-medium text-slate-900">
+                      <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
                         {formatCurrencyFromCents(label.priceCents)}
                       </p>
                     )}
-                    {label.note && <p className="mt-1 text-xs text-slate-500">Nota: {label.note}</p>}
+                    {label.note && <p className="mt-1 text-xs text-slate-500 dark:text-slate-300">Nota: {label.note}</p>}
                   </div>
                 ))}
               </div>
               {labelPreview.labels.length > 6 && (
-                <p className="mt-3 text-xs text-slate-500">
+                <p className="mt-3 text-xs text-slate-500 dark:text-slate-300">
                   Se muestran 6 de {labelPreview.labels.length} etiquetas. Usa el JSON para tu flujo de impresión.
                 </p>
               )}

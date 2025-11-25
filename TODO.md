@@ -266,6 +266,6 @@ o Block id
 - [x] Inventory - Discrepancy Review (/frontend/app/inventory/ops/review) - FE - Comparison grid with filters, recount request action, per-line comments, and approval UI that posts adjustments and reflects reviewer/date from the backend.
 - [x] Inventory - Reporting & Analytics (/reports/inventory/ops) - BE - Reports for inventory valuation (branch/category/supplier), stock movements by date/type/location/user, count history (inv_count_sessions/lines), aged inventory (no stock_ledger movement for X days), and low stock using existing quantity fields.
 - [x] Inventory - Reporting & Analytics (/frontend/app/reports/inventory/ops) - FE - Report pages with filters/date ranges and tables/cards for valuation, movement logs, count history, aged inventory, and low-stock summaries using the OPS report endpoints.
-- [ ] the dark mode is not working properly on  loans/due, inventory,
-- [ ] on the top header bar add a plus button before the search bar that will show a dialog (menu style) with the title new and the following icons with text buttons in a two row: Pawn, Sale, Layaway, Purchase, Buy, Refund, Repair, Customer.
-- [ ] on the top header bar: when the search field is used a new page with a table will appear displaying matching (sales, refunds, sales, layaways, pawns, buys).
+- [x] the dark mode is not working properly on  loans/due, inventory,
+- [x] on the top header bar add a plus button before the search bar that will show a dialog (menu style) with the title new and the following icons with text buttons in a two row: Pawn, Sale, Layaway, Purchase, Buy, Refund, Repair, Customer.
+- [x] on the top header bar: when the search field is used a new page with a table will appear displaying matching (sales, refunds, sales, layaways, pawns, buys).

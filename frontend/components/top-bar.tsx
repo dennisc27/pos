@@ -1,8 +1,28 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Bell, Calculator, Loader2, MoonStar, Search, Store, SunMedium, X } from "lucide-react";
+import {
+  Bell,
+  Calculator,
+  Gavel,
+  Handshake,
+  Loader2,
+  MoonStar,
+  Package,
+  Plus,
+  RotateCcw,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  Store,
+  SunMedium,
+  UserRound,
+  Wrench,
+  X
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useActiveBranch } from "@/components/providers/active-branch-provider";
 import { useCurrentUser } from "@/components/providers/current-user-provider";
@@ -27,7 +47,9 @@ export function TopBar() {
   const { branch, loading: branchLoading, error: branchError } = useActiveBranch();
   const { user, loading: userLoading } = useCurrentUser();
   const { theme, setTheme } = useTheme();
+  const router = useRouter();
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
+  const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
   const [displayValue, setDisplayValue] = useState("0");
   const [accumulator, setAccumulator] = useState<number | null>(null);
   const [pendingOperator, setPendingOperator] = useState<"add" | "subtract" | "multiply" | "divide" | null>(null);
@@ -225,9 +247,47 @@ export function TopBar() {
     setIsClient(true);
   }, []);
 
+  useEffect(() => {
+    if (!isQuickCreateOpen) {
+      return;
+    }
+
+    const handleClose = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsQuickCreateOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleClose);
+    return () => window.removeEventListener("keydown", handleClose);
+  }, [isQuickCreateOpen]);
+
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
   };
+
+  const quickCreateItems = useMemo(
+    () => [
+      { label: "Pawn", href: "/loans/new", icon: Gavel },
+      { label: "Sale", href: "/pos/new", icon: ShoppingBag },
+      { label: "Layaway", href: "/layaway/new", icon: Package },
+      { label: "Purchase", href: "/purchases/new", icon: ShoppingCart },
+      { label: "Buy", href: "/pos/buy", icon: Handshake },
+      { label: "Refund", href: "/pos/refund", icon: RotateCcw },
+      { label: "Repair", href: "/repairs/intake", icon: Wrench },
+      { label: "Customer", href: "/crm/customers", icon: UserRound }
+    ],
+    []
+  );
+
+  const handleGlobalSearch = useCallback(() => {
+    const query = globalSearch.trim();
+    if (!query) {
+      return;
+    }
+    router.push(`/search?q=${encodeURIComponent(query)}`);
+  }, [globalSearch, router]);
 
   const calculatorButtons = useMemo<CalculatorButton[]>(
     () => [
@@ -274,6 +334,13 @@ export function TopBar() {
         </div>
       </div>
       <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
+        <button
+          type="button"
+          onClick={() => setIsQuickCreateOpen(true)}
+          className="hidden h-9 items-center justify-center rounded-full border border-slate-200/70 bg-white px-3 text-sm font-medium text-slate-600 transition hover:text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:text-white lg:flex"
+        >
+          <Plus className="mr-1.5 h-4 w-4" /> Nuevo
+        </button>
         <div className="hidden items-center gap-2 rounded-lg border border-slate-200/70 bg-white px-3 py-1.5 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 lg:flex">
           <Search className="h-4 w-4" />
           <input
@@ -285,6 +352,10 @@ export function TopBar() {
               if (event.key === "Escape") {
                 event.preventDefault();
                 setGlobalSearch("");
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleGlobalSearch();
               }
             }}
           />
@@ -320,6 +391,51 @@ export function TopBar() {
           <span className="font-medium">{userLoading ? "Cargando..." : user?.fullName ?? "Usuario"}</span>
         </div>
       </div>
+      {isClient && isQuickCreateOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[950] flex items-center justify-center bg-slate-950/60 px-4 py-8 backdrop-blur"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setIsQuickCreateOpen(false)}
+            >
+              <div
+                className="w-full max-w-lg rounded-2xl border border-slate-200/70 bg-white p-5 shadow-2xl outline-none dark:border-slate-800 dark:bg-slate-900"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">New</p>
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Quick create</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsQuickCreateOpen(false)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/70 text-slate-500 transition hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
+                    aria-label="Close quick create menu"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {quickCreateItems.map((item) => (
+                    <Link
+                      key={item.label}
+                      href={item.href}
+                      onClick={() => setIsQuickCreateOpen(false)}
+                      className="flex items-center gap-3 rounded-lg border border-slate-200/70 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                    >
+                      <item.icon className="h-4 w-4 text-slate-500" />
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+
       {isClient && isCalculatorOpen
         ? createPortal(
             <div
