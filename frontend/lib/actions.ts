@@ -217,3 +217,26 @@ export async function fetchEmployeeActivity() {
   };
 }
 
+export async function fetchTimeSeriesData() {
+  const response = await fetch(`${API_BASE_URL}/api/dashboard/time-series`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load time-series data");
+  }
+
+  return (await response.json()) as {
+    daily: {
+      sales: number[];
+      pawns: number[];
+      layaways: number[];
+    };
+    monthly: {
+      sales: number[];
+      pawns: number[];
+      layaways: number[];
+    };
+  };
+}
+

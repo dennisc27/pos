@@ -4,10 +4,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   AlertTriangle,
-  ArrowDownToLine,
   ArrowLeftRight,
   ArrowUpFromLine,
-  Building2,
   History,
   Loader2,
   PiggyBank,
@@ -253,18 +251,13 @@ export default function CashMovementsPage() {
   const { user: currentUser, loading: userLoading } = useCurrentUser();
 
   const [status, setStatus] = useState<StatusMessage>(null);
-  const [isLoading, setIsLoading] = useState({ load: false, submit: false });
+  const [isLoading, setIsLoading] = useState({ load: false });
   const [shiftLookup, setShiftLookup] = useState({
     shiftId: "",
   });
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [allTransactions, setAllTransactions] = useState<CashTransaction[]>([]);
-  const [movementForm, setMovementForm] = useState({
-    kind: "deposit" as MovementKind,
-    amount: "",
-    reason: "",
-  });
   const [movementFilter, setMovementFilter] = useState<"all" | "in" | "out">("all");
 
   const summary = useMemo(() => {
@@ -377,23 +370,6 @@ export default function CashMovementsPage() {
     [activeBranch, resetState],
   );
 
-  const handleLoadActiveShift = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (isLoading.load) {
-      return;
-    }
-
-    if (!activeBranch) {
-      setStatus({
-        tone: "error",
-        message: branchError ?? "Configura una sucursal activa en ajustes para cargar el turno.",
-      });
-      return;
-    }
-
-    await loadActiveShiftForBranch(activeBranch.id);
-  };
-
   const handleLoadShiftById = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isLoading.load) {
@@ -422,96 +398,52 @@ export default function CashMovementsPage() {
     void loadActiveShiftForBranch(activeBranch.id, { quiet: true });
   }, [activeBranch, branchLoading, loadActiveShiftForBranch, resetState]);
 
-  const handleMovementSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (isLoading.submit) {
-      return;
-    }
-
-    if (!activeShift) {
-      setStatus({ tone: "error", message: "Carga un turno activo antes de registrar movimientos." });
-      return;
-    }
-
-    if (!currentUser) {
-      setStatus({ tone: "error", message: "Usuario no disponible. Por favor, recarga la página." });
-      return;
-    }
-
-    if (!movementForm.amount) {
-      setStatus({ tone: "error", message: "El monto es obligatorio." });
-      return;
-    }
-
-    const amountCents = parseAmountToCents(movementForm.amount);
-    if (amountCents === null) {
-      setStatus({ tone: "error", message: "Ingresa un monto válido en RD$." });
-      return;
-    }
-
-    const direction = MOVEMENT_DIRECTIONS[movementForm.kind];
-    if (direction < 0 && !movementForm.reason.trim()) {
-      setStatus({ tone: "error", message: "Las salidas requieren un motivo documentado." });
-      return;
-    }
-
-    setIsLoading((state) => ({ ...state, submit: true }));
-    setStatus(null);
-
-    try {
-      const payload = {
-        shiftId: activeShift.id,
-        kind: movementForm.kind,
-        amountCents,
-        performedBy: currentUser.id,
-        pin: "1234", // Default PIN for current user
-        reason: movementForm.reason || null,
-      };
-
-      const data = await postJson<{ shift: Shift; movement: CashMovement }>("/api/cash-movements", payload);
-
-      setActiveShift(data.shift);
-      setMovements((state) => [data.movement, ...state]);
-      
-      // Reload all transactions to include the new movement
-      try {
-        const transactionsData = await getJson<CashTransactionsResponse>(`/api/shifts/${data.shift.id}/cash-transactions`);
-        setAllTransactions(transactionsData.transactions);
-      } catch {
-        // If transaction loading fails, just add the movement manually
-        setAllTransactions((state) => [
-          {
-            id: `cash_movement_${data.movement.id}`,
-            type: "adjustment" as const,
-            kind: data.movement.kind,
-            amountCents: data.movement.amountCents,
-            reason: data.movement.reason,
-            createdAt: data.movement.createdAt,
-            metadata: { cashMovementId: data.movement.id },
-          },
-          ...state,
-        ]);
-      }
-      
-      setMovementForm((state) => ({ ...state, amount: "", reason: "" }));
-      setStatus({
-        tone: "success",
-        message: `${MOVEMENT_LABELS[movementForm.kind]} registrado correctamente para el turno #${data.shift.id}.`,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo registrar el movimiento.";
-      setStatus({ tone: "error", message });
-    } finally {
-      setIsLoading((state) => ({ ...state, submit: false }));
-    }
-  };
-
   const orderedSummaryKeys = useMemo(() => {
     const existingKeys = Object.keys(summary.totalsByKind);
     const manualKeys = MOVEMENT_ORDER.filter((key) => existingKeys.includes(key));
     const remaining = existingKeys.filter((key) => !manualKeys.includes(key as MovementKind));
     return [...manualKeys, ...remaining];
   }, [summary.totalsByKind]);
+
+  // Calculate breakdown by type from all transactions (not just movements)
+  const breakdownByType = useMemo(() => {
+    const breakdown: Record<string, { totalCents: number; count: number; direction: number; label: string }> = {};
+    
+    allTransactions.forEach((transaction) => {
+      let key: string;
+      let label: string;
+      const direction = getTransactionDirection(transaction);
+      
+      if (transaction.type === 'adjustment') {
+        key = transaction.kind;
+        label = TRANSACTION_KIND_LABELS[transaction.kind] ?? transaction.kind.replace(/_/g, ' ');
+      } else if (transaction.type === 'sale') {
+        key = 'sale';
+        label = 'Venta';
+      } else if (transaction.type === 'loan') {
+        key = `loan_${transaction.kind}`;
+        label = TRANSACTION_KIND_LABELS[transaction.kind] ?? 'Pago de préstamo';
+      } else if (transaction.type === 'layaway') {
+        key = 'layaway_payment';
+        label = 'Pago de layaway';
+      } else if (transaction.type === 'refund') {
+        key = 'refund';
+        label = 'Devolución';
+      } else {
+        key = transaction.type;
+        label = transaction.type;
+      }
+      
+      if (!breakdown[key]) {
+        breakdown[key] = { totalCents: 0, count: 0, direction, label };
+      }
+      
+      breakdown[key].totalCents += Math.abs(Number(transaction.amountCents ?? 0));
+      breakdown[key].count += 1;
+    });
+    
+    return breakdown;
+  }, [allTransactions]);
 
   const flowTotals = useMemo(
     () =>
@@ -556,17 +488,24 @@ export default function CashMovementsPage() {
     );
   }, [allTransactions]);
 
-  // Combined totals including all cash transactions
-  const combinedFlowTotals = useMemo(() => {
-    const manual = flowTotals;
-    const transactions = transactionFlowTotals;
-    return {
-      inCents: manual.inCents + transactions.inCents,
-      inCount: manual.inCount + transactions.inCount,
-      outCents: manual.outCents + transactions.outCents,
-      outCount: manual.outCount + transactions.outCount,
-    };
-  }, [flowTotals, transactionFlowTotals]);
+  // Calculate expected cash from all transactions (including sales, loans, layaways, refunds)
+  // Formula: Expected Cash = Opening Cash + (Total Inflows - Total Outflows)
+  // This matches: Apertura + (Entradas - Salidas) = Apertura + Net Impact
+  const calculatedExpectedCash = useMemo(() => {
+    if (!activeShift) return null;
+
+    const openingCashCents = Number(activeShift.openingCashCents ?? 0);
+    
+    // Calculate net cash impact: Entradas - Salidas
+    // This is equivalent to summing (direction * amount) for all transactions
+    const netImpactCents = transactionFlowTotals.inCents - transactionFlowTotals.outCents;
+    
+    return openingCashCents + netImpactCents;
+  }, [activeShift, transactionFlowTotals]);
+
+  // Use transactionFlowTotals directly since it already includes all transactions (movements, sales, loans, layaways, refunds)
+  // Note: allTransactions includes cash movements as "adjustment" type, so we don't need to combine with flowTotals
+  const combinedFlowTotals = transactionFlowTotals;
 
   const filteredMovements = useMemo(() => {
     if (movementFilter === "all") {
@@ -644,10 +583,10 @@ export default function CashMovementsPage() {
 
       {renderStatusBanner()}
 
-      <section className="grid gap-8 lg:grid-cols-[1.6fr,1fr]">
-        <div className="space-y-8">
+      <section className="space-y-8">
           <div className="rounded-2xl border border-slate-200 bg-white/90 shadow-sm ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900/60">
-            <header className="flex items-center gap-3 border-b border-slate-200 px-6 py-4 dark:border-slate-700">
+          <header className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-4 dark:border-slate-700">
+            <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
                 <PiggyBank className="h-5 w-5" />
               </span>
@@ -657,6 +596,24 @@ export default function CashMovementsPage() {
                   Consulta el efectivo esperado y el impacto neto de los movimientos manuales registrados.
                 </p>
               </div>
+            </div>
+            <form onSubmit={handleLoadShiftById} className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                value={shiftLookup.shiftId}
+                onChange={(event) => setShiftLookup((state) => ({ ...state, shiftId: event.target.value }))}
+                className="w-24 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
+                placeholder="ID turno"
+              />
+              <button
+                type="submit"
+                disabled={isLoading.load}
+                className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
+              >
+                {isLoading.load ? "..." : "Cargar"}
+              </button>
+            </form>
             </header>
 
             {!activeShift ? (
@@ -689,9 +646,15 @@ export default function CashMovementsPage() {
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Efectivo esperado</p>
                     <p className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-                      {centsToCurrency(activeShift.expectedCashCents)}
+                      {calculatedExpectedCash !== null 
+                        ? centsToCurrency(calculatedExpectedCash)
+                        : centsToCurrency(activeShift.expectedCashCents)}
                     </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Incluye ventas, pagos y movimientos manuales.</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {calculatedExpectedCash !== null
+                        ? "Calculado desde todas las transacciones (ventas, préstamos, layaways, etc.)"
+                        : "Incluye ventas, pagos y movimientos manuales."}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Entradas totales</p>
@@ -771,35 +734,43 @@ export default function CashMovementsPage() {
                   <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Desglose por tipo
                   </p>
-                  {orderedSummaryKeys.length === 0 ? (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">Aún no hay movimientos manuales registrados.</p>
+                  {Object.keys(breakdownByType).length === 0 ? (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Aún no hay transacciones registradas.</p>
                   ) : (
                     <ul className="grid gap-3 sm:grid-cols-2">
-                      {orderedSummaryKeys.map((key) => {
-                        const totals = summary.totalsByKind[key];
-                        const direction =
-                          MOVEMENT_DIRECTIONS[key as MovementKind] ?? (key === "refund" ? -1 : 1);
-                        const displayLabel = MOVEMENT_LABELS[key as MovementKind] ?? key.replace(/_/g, " ");
-                        const amount = centsToCurrency(totals.totalCents);
+                      {Object.entries(breakdownByType)
+                        .sort(([a], [b]) => {
+                          // Sort: movements first (in MOVEMENT_ORDER), then others
+                          const aInOrder = MOVEMENT_ORDER.includes(a as MovementKind);
+                          const bInOrder = MOVEMENT_ORDER.includes(b as MovementKind);
+                          if (aInOrder && !bInOrder) return -1;
+                          if (!aInOrder && bInOrder) return 1;
+                          if (aInOrder && bInOrder) {
+                            return MOVEMENT_ORDER.indexOf(a as MovementKind) - MOVEMENT_ORDER.indexOf(b as MovementKind);
+                          }
+                          return a.localeCompare(b);
+                        })
+                        .map(([key, data]) => {
+                          const amount = centsToCurrency(data.totalCents);
                         return (
                           <li
                             key={key}
                             className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/60"
                           >
                             <div className="flex flex-col">
-                              <span className="font-medium text-slate-700 dark:text-slate-200">{displayLabel}</span>
+                                <span className="font-medium text-slate-700 dark:text-slate-200">{data.label}</span>
                               <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                                {totals.count} {totals.count === 1 ? "registro" : "registros"}
+                                  {data.count} {data.count === 1 ? "registro" : "registros"}
                               </span>
                             </div>
                             <span
                               className={`text-sm font-semibold ${
-                                direction < 0
+                                  data.direction < 0
                                   ? "text-rose-600 dark:text-rose-300"
                                   : "text-emerald-600 dark:text-emerald-300"
                               }`}
                             >
-                              {direction < 0 ? "- " : ""}
+                                {data.direction < 0 ? "- " : ""}
                               {amount}
                             </span>
                           </li>
@@ -917,188 +888,7 @@ export default function CashMovementsPage() {
               )}
             </div>
           </div>
-        </div>
-
-        <div className="space-y-8">
-          <section className="rounded-2xl border border-slate-200 bg-white/90 shadow-sm ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900/60">
-            <header className="flex items-center gap-3 border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                <Building2 className="h-5 w-5" />
-              </span>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Seleccionar turno</h2>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Localiza el turno activo por sucursal o carga uno específico por ID.
-                </p>
-              </div>
-            </header>
-
-            <div className="space-y-6 px-6 py-5 text-sm">
-              <form onSubmit={handleLoadActiveShift} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <div className="flex-1 space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      Sucursal activa
-                    </span>
-                    {branchLoading ? (
-                      <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Sincronizando configuración…
-                      </span>
-                    ) : branchError ? (
-                      <span className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
-                        {branchError}
-                      </span>
-                    ) : activeBranch ? (
-                      <span className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/50 dark:bg-indigo-500/10 dark:text-indigo-200">
-                        {activeBranch.name}
-                      </span>
-                    ) : (
-                      <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-600">
-                        Configura una sucursal activa en ajustes para operar caja.
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={isLoading.load || branchLoading || !activeBranch}
-                    className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
-                  >
-                    {isLoading.load ? "Buscando..." : "Cargar turno activo"}
-                  </button>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Busca automáticamente el turno abierto de la sucursal configurada en ajustes y sincroniza sus movimientos.
-                </p>
-              </form>
-
-              <form onSubmit={handleLoadShiftById} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-700 dark:bg-slate-900/40">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <label className="flex-1 space-y-1">
-                    <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      ID de turno
-                    </span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={shiftLookup.shiftId}
-                      onChange={(event) => setShiftLookup((state) => ({ ...state, shiftId: event.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                      placeholder="Ej. 104"
-                    />
-                  </label>
-                  <button
-                    type="submit"
-                    disabled={isLoading.load}
-                    className="inline-flex items-center justify-center rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                  >
-                    {isLoading.load ? "Cargando..." : "Buscar por ID"}
-                  </button>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Útil para auditar turnos anteriores y validar que los movimientos queden registrados en el historial.
-                </p>
-              </form>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white/90 shadow-sm ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900/60">
-            <header className="flex items-center gap-3 border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                <ArrowDownToLine className="h-5 w-5" />
-              </span>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Registrar movimiento</h2>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Cada registro actualiza el efectivo esperado del turno y queda disponible para el cierre de caja.
-                </p>
-              </div>
-            </header>
-            <form onSubmit={handleMovementSubmit} className="space-y-4 px-6 py-5 text-sm">
-              <label className="space-y-1">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Tipo de movimiento</span>
-                <select
-                  value={movementForm.kind}
-                  onChange={(event) =>
-                    setMovementForm((state) => ({ ...state, kind: event.target.value as MovementKind }))
-                  }
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                >
-                  {movementOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {MOVEMENT_HELPERS[movementForm.kind]}
-                </p>
-              </label>
-
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Cajero responsable
-                  </span>
-                  {userLoading ? (
-                    <span className="inline-flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…
-                    </span>
-                  ) : currentUser ? (
-                    <span className="block rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200">
-                      {currentUser.fullName} (ID: {currentUser.id})
-                    </span>
-                  ) : (
-                    <span className="block rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                      Usuario no disponible
-                    </span>
-                  )}
-                </div>
-                <label className="block space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Monto <span className="text-rose-500">*</span>
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={movementForm.amount}
-                    onChange={(event) => setMovementForm((state) => ({ ...state, amount: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                    placeholder="RD$ 0.00"
-                    required
-                  />
-                </label>
-              </div>
-
-              <label className="block space-y-1">
-                <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Motivo / nota</span>
-                <textarea
-                  value={movementForm.reason}
-                  onChange={(event) => setMovementForm((state) => ({ ...state, reason: event.target.value }))}
-                  rows={3}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-                  placeholder="Detalle interno, número de sobre, proveedor, etc."
-                />
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Obligatorio para salidas de efectivo. Ayuda al gerente a auditar drops y gastos.
-                </p>
-              </label>
-
-              <button
-                type="submit"
-                disabled={isLoading.submit || !activeShift}
-                className="inline-flex w-full items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700 dark:hover:bg-slate-600"
-              >
-                {isLoading.submit ? "Registrando..." : "Registrar movimiento"}
-              </button>
-              {!activeShift ? (
-                <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-                  Primero selecciona un turno activo para habilitar el formulario.
-                </p>
-              ) : null}
-            </form>
-          </section>
-        </div>
       </section>
     </main>
   );
-}
+};

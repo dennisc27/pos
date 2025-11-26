@@ -48,6 +48,21 @@ type CashMovement = {
   createdAt: string;
 };
 
+type CashTransaction = {
+  id: string;
+  type: 'adjustment' | 'sale' | 'loan' | 'layaway' | 'refund';
+  kind: string;
+  amountCents: number;
+  reason: string | null;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+};
+
+type CashTransactionsResponse = {
+  shift: Shift;
+  transactions: CashTransaction[];
+};
+
 type ShiftSnapshot = {
   computedAt: string;
   shift: {
@@ -136,6 +151,18 @@ const initialDenominationState = DENOMINATIONS.reduce<Record<string, string>>((a
   return acc;
 }, {});
 
+// Movement directions: positive = cash in, negative = cash out
+// Note: 'refund' is handled by transaction type, not movement kind
+const MOVEMENT_DIRECTIONS: Record<string, number> = {
+  'deposit': 1,
+  'cash_to_safe': -1,
+  'drop': -1,
+  'paid_in': 1,
+  'paid_out': -1,
+  'expense': -1,
+  'income': 1,
+};
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`);
   const data = (await response.json().catch(() => ({}))) as T & { error?: string };
@@ -194,6 +221,7 @@ export default function CashShiftPage() {
   const [status, setStatus] = useState<StatusMessage>(null);
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [movements, setMovements] = useState<CashMovement[]>([]);
+  const [allTransactions, setAllTransactions] = useState<CashTransaction[]>([]);
   const [reports, setReports] = useState<ShiftSnapshot[]>([]);
   const [denominations, setDenominations] = useState(initialDenominationState);
   const [isLoading, setIsLoading] = useState({ open: false, close: false, movement: false, load: false });
@@ -227,7 +255,59 @@ export default function CashShiftPage() {
     }, 0);
   }, [denominations]);
 
-  const expectedCash = activeShift ? Number(activeShift.expectedCashCents ?? 0) / 100 : 0;
+  // Helper function to determine transaction direction (matching movements page)
+  const getTransactionDirection = (transaction: CashTransaction): 1 | -1 => {
+    if (transaction.type === "refund") {
+      return -1; // Refunds are always out
+    }
+    if (transaction.type === "sale" || transaction.type === "loan" || transaction.type === "layaway") {
+      return 1; // Sales and payments are always in
+    }
+    // For adjustments, use the movement direction
+    return MOVEMENT_DIRECTIONS[transaction.kind] ?? 1;
+  };
+
+  // Calculate transaction flow totals (matching movements page exactly)
+  const transactionFlowTotals = useMemo(() => {
+    return allTransactions.reduce(
+      (acc, transaction) => {
+        const direction = getTransactionDirection(transaction);
+        const amount = Math.max(0, Number(transaction.amountCents ?? 0));
+
+        if (direction >= 0) {
+          acc.inCents += amount;
+          acc.inCount += 1;
+        } else {
+          acc.outCents += amount;
+          acc.outCount += 1;
+        }
+
+        return acc;
+      },
+      { inCents: 0, inCount: 0, outCents: 0, outCount: 0 },
+    );
+  }, [allTransactions]);
+
+  // Calculate expected cash from all transactions (matching movements page exactly)
+  // Formula: Expected Cash = Opening Cash + (Total Inflows - Total Outflows)
+  // Returns value in CENTS (matching movements page)
+  const calculatedExpectedCash = useMemo(() => {
+    if (!activeShift) return null;
+
+    const openingCashCents = Number(activeShift.openingCashCents ?? 0);
+    
+    // Calculate net cash impact: Entradas - Salidas (same as movements page)
+    const netImpactCents = transactionFlowTotals.inCents - transactionFlowTotals.outCents;
+    
+    return openingCashCents + netImpactCents;
+  }, [activeShift, transactionFlowTotals]);
+
+  // Use calculated expected cash if we have transactions, otherwise fall back to shift's expectedCashCents
+  // calculatedExpectedCash is in cents, so divide by 100 for display (matching movements page)
+  const expectedCash = calculatedExpectedCash !== null 
+    ? calculatedExpectedCash / 100
+    : (activeShift ? Number(activeShift.expectedCashCents ?? 0) / 100 : 0);
+  
   const variance = countedTotal - expectedCash;
 
   const mapReportToSnapshot = useCallback((report: ShiftEndReportResponse): ShiftSnapshot => {
@@ -316,21 +396,32 @@ export default function CashShiftPage() {
       }
 
       try {
-        const data = await getJson<ShiftMovementsResponse>(`/api/shifts/active?branchId=${branchId}`);
-        setActiveShift(data.shift);
-        setMovements(data.movements);
+        const movementsData = await getJson<ShiftMovementsResponse>(`/api/shifts/active?branchId=${branchId}`);
+        setActiveShift(movementsData.shift);
+        setMovements(movementsData.movements);
+        
+        // Load all cash transactions (sales, pawns, layaways, refunds, etc.)
+        try {
+          const transactionsData = await getJson<CashTransactionsResponse>(`/api/shifts/${movementsData.shift.id}/cash-transactions`);
+          setAllTransactions(transactionsData.transactions);
+        } catch {
+          // If transactions endpoint fails, just use empty array
+          setAllTransactions([]);
+        }
+        
         await loadShiftReportsForBranch(branchId, { quiet: true });
 
         if (!quiet) {
           setStatus({
             tone: "success",
-            message: `Turno activo #${data.shift.id} cargado para la sucursal ${branchId}.`,
+            message: `Turno activo #${movementsData.shift.id} cargado para la sucursal ${branchId}.`,
           });
         }
       } catch (error) {
         if ((error as ApiError)?.status === 404) {
           setActiveShift(null);
           setMovements([]);
+          setAllTransactions([]);
           await loadShiftReportsForBranch(branchId, { quiet: true });
           if (!quiet) {
             setStatus({ tone: "error", message: "No hay un turno abierto para esta sucursal." });
@@ -628,16 +719,21 @@ export default function CashShiftPage() {
   }, [reports, activeShift]);
 
   const totalExpectedCash = useMemo(() => {
-    // Sum expected cash from active shift
+    // Use calculated expected cash from all transactions if available (matches movements page)
+    // calculatedExpectedCash is in cents, so divide by 100 for display
+    if (activeShift && !activeShift.closedAt && allTransactions.length > 0) {
+      return calculatedExpectedCash / 100;
+    }
+    // Fall back to database value if no transactions loaded yet (already in cents, divide by 100)
     if (activeShift && !activeShift.closedAt) {
       return Number(activeShift.expectedCashCents ?? 0) / 100;
     }
-    // Also sum from any open shifts in reports
+    // Also sum from any open shifts in reports (already in cents, divide by 100)
     const fromReports = reports
       .filter((report) => !report.shift.closedAt)
       .reduce((sum, report) => sum + (report.expectedCashCents ?? 0), 0);
     return fromReports / 100;
-  }, [reports, activeShift]);
+  }, [reports, activeShift, allTransactions, calculatedExpectedCash]);
 
   const vaultAvailable = useMemo(() => {
     // Calculate vault from drops (movements where kind is "drop")
@@ -851,6 +947,10 @@ export default function CashShiftPage() {
               ) : (
                 movements.map((movement) => {
                   const amount = centsToCurrency(movement.amountCents);
+                  // Determine direction: negative movements (paid_out, drop, etc.) should be red
+                  const direction = MOVEMENT_DIRECTIONS[movement.kind] ?? 1;
+                  const isNegative = direction < 0;
+                  
                   return (
                     <div key={movement.id} className="flex items-center justify-between px-6 py-4 text-sm">
                       <div>
@@ -862,9 +962,9 @@ export default function CashShiftPage() {
                       </div>
                       <span
                         className={`text-sm font-semibold ${
-                          movement.amountCents >= 0
-                            ? "text-emerald-600 dark:text-emerald-300"
-                            : "text-rose-600 dark:text-rose-300"
+                          isNegative
+                            ? "text-rose-600 dark:text-rose-300"
+                            : "text-emerald-600 dark:text-emerald-300"
                         }`}
                       >
                         {amount}
@@ -983,7 +1083,7 @@ export default function CashShiftPage() {
                     <div>
                       <dt className="uppercase tracking-wide text-[10px] text-slate-400">Esperado</dt>
                       <dd className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                        {centsToCurrency(activeShift.expectedCashCents)}
+                        {formatCurrency(expectedCash)}
                       </dd>
                     </div>
                     <div>

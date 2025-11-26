@@ -11404,6 +11404,188 @@ app.get('/api/dashboard/summary', async (req, res, next) => {
   }
 });
 
+app.get('/api/dashboard/time-series', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const tomorrowStart = startOfTomorrow(now);
+    const thirtyDaysAgo = new Date(todayStart);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+    
+    // Daily data: last 30 days (including today) - use GROUP BY DATE for efficiency
+    const [dailySalesRows, dailyPawnsRows, dailyLayawaysRows] = await Promise.all([
+      db
+        .select({
+          date: sql`DATE(${orders.createdAt}) as date`,
+          count: sql`COUNT(*) as count`
+        })
+        .from(orderItems)
+        .innerJoin(orders, eq(orderItems.orderId, orders.id))
+        .where(
+          and(
+            eq(orders.status, 'completed'),
+            gte(orders.createdAt, thirtyDaysAgo),
+            lt(orders.createdAt, tomorrowStart)
+          )
+        )
+        .groupBy(sql`DATE(${orders.createdAt})`),
+      db
+        .select({
+          date: sql`DATE(${loans.createdAt}) as date`,
+          count: sql`COUNT(*) as count`
+        })
+        .from(loans)
+        .where(
+          and(
+            gte(loans.createdAt, thirtyDaysAgo),
+            lt(loans.createdAt, tomorrowStart)
+          )
+        )
+        .groupBy(sql`DATE(${loans.createdAt})`),
+      db
+        .select({
+          date: sql`DATE(${layawayPayments.createdAt}) as date`,
+          count: sql`COUNT(*) as count`
+        })
+        .from(layawayPayments)
+        .where(
+          and(
+            gte(layawayPayments.createdAt, thirtyDaysAgo),
+            lt(layawayPayments.createdAt, tomorrowStart)
+          )
+        )
+        .groupBy(sql`DATE(${layawayPayments.createdAt})`)
+    ]);
+    
+    // Create maps for quick lookup
+    const dailySalesMap = new Map();
+    dailySalesRows.forEach(row => {
+      const dateStr = row.date instanceof Date ? row.date.toISOString().split('T')[0] : String(row.date).split('T')[0];
+      dailySalesMap.set(dateStr, Number(row.count ?? 0));
+    });
+    
+    const dailyPawnsMap = new Map();
+    dailyPawnsRows.forEach(row => {
+      const dateStr = row.date instanceof Date ? row.date.toISOString().split('T')[0] : String(row.date).split('T')[0];
+      dailyPawnsMap.set(dateStr, Number(row.count ?? 0));
+    });
+    
+    const dailyLayawaysMap = new Map();
+    dailyLayawaysRows.forEach(row => {
+      const dateStr = row.date instanceof Date ? row.date.toISOString().split('T')[0] : String(row.date).split('T')[0];
+      dailyLayawaysMap.set(dateStr, Number(row.count ?? 0));
+    });
+    
+    // Build daily arrays for last 30 days
+    const dailySales = [];
+    const dailyPawns = [];
+    const dailyLayaways = [];
+    for (let i = 29; i >= 0; i--) {
+      const date = new Date(todayStart);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      dailySales.push(dailySalesMap.get(dateStr) ?? 0);
+      dailyPawns.push(dailyPawnsMap.get(dateStr) ?? 0);
+      dailyLayaways.push(dailyLayawaysMap.get(dateStr) ?? 0);
+    }
+    
+    // Monthly data: last 12 months
+    const [monthlySalesRows, monthlyPawnsRows, monthlyLayawaysRows] = await Promise.all([
+      db
+        .select({
+          year: sql`YEAR(${orders.createdAt}) as year`,
+          month: sql`MONTH(${orders.createdAt}) as month`,
+          count: sql`COUNT(*) as count`
+        })
+        .from(orderItems)
+        .innerJoin(orders, eq(orderItems.orderId, orders.id))
+        .where(
+          and(
+            eq(orders.status, 'completed'),
+            gte(orders.createdAt, twelveMonthsAgo),
+            lt(orders.createdAt, tomorrowStart)
+          )
+        )
+        .groupBy(sql`YEAR(${orders.createdAt})`, sql`MONTH(${orders.createdAt})`),
+      db
+        .select({
+          year: sql`YEAR(${loans.createdAt}) as year`,
+          month: sql`MONTH(${loans.createdAt}) as month`,
+          count: sql`COUNT(*) as count`
+        })
+        .from(loans)
+        .where(
+          and(
+            gte(loans.createdAt, twelveMonthsAgo),
+            lt(loans.createdAt, tomorrowStart)
+          )
+        )
+        .groupBy(sql`YEAR(${loans.createdAt})`, sql`MONTH(${loans.createdAt})`),
+      db
+        .select({
+          year: sql`YEAR(${layawayPayments.createdAt}) as year`,
+          month: sql`MONTH(${layawayPayments.createdAt}) as month`,
+          count: sql`COUNT(*) as count`
+        })
+        .from(layawayPayments)
+        .where(
+          and(
+            gte(layawayPayments.createdAt, twelveMonthsAgo),
+            lt(layawayPayments.createdAt, tomorrowStart)
+          )
+        )
+        .groupBy(sql`YEAR(${layawayPayments.createdAt})`, sql`MONTH(${layawayPayments.createdAt})`)
+    ]);
+    
+    // Create maps for monthly data
+    const monthlySalesMap = new Map();
+    monthlySalesRows.forEach(row => {
+      const key = `${row.year}-${String(row.month).padStart(2, '0')}`;
+      monthlySalesMap.set(key, Number(row.count ?? 0));
+    });
+    
+    const monthlyPawnsMap = new Map();
+    monthlyPawnsRows.forEach(row => {
+      const key = `${row.year}-${String(row.month).padStart(2, '0')}`;
+      monthlyPawnsMap.set(key, Number(row.count ?? 0));
+    });
+    
+    const monthlyLayawaysMap = new Map();
+    monthlyLayawaysRows.forEach(row => {
+      const key = `${row.year}-${String(row.month).padStart(2, '0')}`;
+      monthlyLayawaysMap.set(key, Number(row.count ?? 0));
+    });
+    
+    // Build monthly arrays for last 12 months
+    const monthlySales = [];
+    const monthlyPawns = [];
+    const monthlyLayaways = [];
+    for (let i = 11; i >= 0; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      monthlySales.push(monthlySalesMap.get(key) ?? 0);
+      monthlyPawns.push(monthlyPawnsMap.get(key) ?? 0);
+      monthlyLayaways.push(monthlyLayawaysMap.get(key) ?? 0);
+    }
+    
+    res.json({
+      daily: {
+        sales: dailySales,
+        pawns: dailyPawns,
+        layaways: dailyLayaways
+      },
+      monthly: {
+        sales: monthlySales,
+        pawns: monthlyPawns,
+        layaways: monthlyLayaways
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/purchases/overview', async (req, res, next) => {
   try {
     const branchCandidate = req.query?.branchId ?? req.query?.branch_id;

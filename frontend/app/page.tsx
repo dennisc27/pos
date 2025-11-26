@@ -11,6 +11,7 @@ import {
   Wrench
 } from "lucide-react";
 import { InsightCard, InsightStat, SparkBar } from "@/components/dashboard/insight-card";
+import { MiniSparkline } from "@/components/dashboard/mini-sparkline";
 import { MultiSeriesLineChart } from "@/components/dashboard/multi-series-line-chart";
 import { DashboardSectionSkeleton } from "@/components/dashboard/skeleton";
 import { InventoryHealthCard } from "@/components/dashboard/inventory-health-card";
@@ -23,9 +24,10 @@ import {
   fetchLayawayMetrics,
   fetchLoansOverview,
   fetchRepairsAndFabrications,
-  fetchSalesAndPurchases
+  fetchSalesAndPurchases,
+  fetchTimeSeriesData
 } from "@/lib/actions";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCurrencyCompact } from "@/lib/utils";
 
 async function loadInsight<T>(loader: () => Promise<T>): Promise<{ data?: T; error?: string }> {
   try {
@@ -65,57 +67,112 @@ function buildMonthLabels(months: number) {
 }
 
 export default async function DashboardPage() {
-  const [salesState, loansState, layawayState, repairsState] = await Promise.all([
+  const [salesState, loansState, layawayState, repairsState, timeSeriesState] = await Promise.all([
     loadInsight(fetchSalesAndPurchases),
     loadInsight(fetchLoansOverview),
     loadInsight(fetchLayawayMetrics),
-    loadInsight(fetchRepairsAndFabrications)
+    loadInsight(fetchRepairsAndFabrications),
+    loadInsight(fetchTimeSeriesData)
   ]);
 
   const sales = salesState.data;
   const loans = loansState.data;
   const layaways = layawayState.data;
   const repairs = repairsState.data;
+  const timeSeries = timeSeriesState.data;
 
+  // Extract 7-day trends from time series data (last 7 days)
+  const get7DayTrend = (dailyData: number[] | undefined) => {
+    if (!dailyData || dailyData.length < 7) return [];
+    return dailyData.slice(-7);
+  };
+
+  const sales7Day = get7DayTrend(timeSeries?.daily.sales);
+  const pawns7Day = get7DayTrend(timeSeries?.daily.pawns);
+  const layaways7Day = get7DayTrend(timeSeries?.daily.layaways);
+
+  // Get yesterday's values for comparison (second to last day in 7-day trend, or use summary data)
+  const getYesterdayValue = (trend: number[]) => {
+    if (trend.length >= 2) return trend[trend.length - 2];
+    return undefined;
+  };
+
+  // Use actual database values - allow zeros to show properly
   const salesBars = sales
-    ? [sales.salesQtyToday || 1, Math.max(sales.salesTotalToday.amount, 1), Math.max(sales.purchasesToday.amount, 1)]
-    : [1, 1, 1];
+    ? [
+        sales.salesQtyToday ?? 0,
+        Math.round(sales.salesTotalToday.amount) || 0,
+        Math.round(sales.purchasesToday.amount) || 0
+      ]
+    : [0, 0, 0];
+  
+  // Previous values for comparison (yesterday or last available)
+  const salesBarsPrevious = sales7Day.length >= 2 
+    ? [
+        getYesterdayValue(sales7Day) ?? 0,
+        getYesterdayValue(sales7Day) ?? 0, // Approximate - would need separate API for sales amount
+        getYesterdayValue(sales7Day) ?? 0  // Approximate - would need separate API for purchases
+      ]
+    : undefined;
+
   const pawnBars = loans
-    ? [Math.max(loans.loansToday, 1), Math.max(loans.pawnsPastDue, 1), Math.max(loans.renewalsToday, 1)]
-    : [1, 1, 1];
+    ? [loans.loansToday ?? 0, loans.pawnsPastDue ?? 0, loans.renewalsToday ?? 0]
+    : [0, 0, 0];
+  const pawnBarsPrevious = pawns7Day.length >= 2
+    ? [
+        getYesterdayValue(pawns7Day) ?? 0,
+        loans?.pawnsPastDue ?? 0, // Past due doesn't change day-to-day the same way
+        loans?.renewalsToday ?? 0  // Would need historical renewals data
+      ]
+    : undefined;
+
   const layawayBars = layaways
-    ? [Math.max(layaways.newToday, 1), Math.max(layaways.paymentsCount, 1), Math.max(layaways.paymentsToday.amount, 1)]
-    : [1, 1, 1];
+    ? [
+        layaways.newToday ?? 0,
+        layaways.paymentsCount ?? 0,
+        Math.round(layaways.paymentsToday.amount) || 0
+      ]
+    : [0, 0, 0];
+  const layawayBarsPrevious = layaways7Day.length >= 2
+    ? [
+        getYesterdayValue(layaways7Day) ?? 0,
+        getYesterdayValue(layaways7Day) ?? 0,
+        getYesterdayValue(layaways7Day) ?? 0  // Approximate
+      ]
+    : undefined;
+
   const repairBars = repairs
-    ? [Math.max(repairs.inProgress, 1), Math.max(repairs.readyForPickup, 1), Math.max(repairs.diagnosticsToday, 1)]
-    : [1, 1, 1];
+    ? [repairs.inProgress ?? 0, repairs.readyForPickup ?? 0, repairs.diagnosticsToday ?? 0]
+    : [0, 0, 0];
+  // Repairs don't have 7-day trend data yet, so no previous values
 
   const TrendIcon = sales?.salesTrend.direction === "down" ? TrendingDown : TrendingUp;
 
   const dailyLabels = buildDayLabels(30);
   const monthlyLabels = buildMonthLabels(12);
 
+  // Use real database data if available, otherwise fall back to generated series
   const chartSeries = [
     {
       name: "Sales",
       color: "bg-emerald-500",
       stroke: "#10b981",
-      daily: generateSeries(sales?.salesQtyToday ?? 28, 30, 0.12),
-      monthly: generateSeries((sales?.salesQtyToday ?? 28) * 6, 12, 0.1)
+      daily: timeSeries?.daily.sales ?? generateSeries(sales?.salesQtyToday ?? 28, 30, 0.12),
+      monthly: timeSeries?.monthly.sales ?? generateSeries((sales?.salesQtyToday ?? 28) * 6, 12, 0.1)
     },
     {
       name: "Pawns",
       color: "bg-amber-500",
       stroke: "#f59e0b",
-      daily: generateSeries(loans?.loansToday ?? 14, 30, 0.1),
-      monthly: generateSeries((loans?.loansToday ?? 14) * 5, 12, 0.08)
+      daily: timeSeries?.daily.pawns ?? generateSeries(loans?.loansToday ?? 14, 30, 0.1),
+      monthly: timeSeries?.monthly.pawns ?? generateSeries((loans?.loansToday ?? 14) * 5, 12, 0.08)
     },
     {
       name: "Layaways",
       color: "bg-sky-500",
       stroke: "#0ea5e9",
-      daily: generateSeries(layaways?.paymentsCount ?? 18, 30, 0.1),
-      monthly: generateSeries((layaways?.paymentsCount ?? 18) * 4, 12, 0.08)
+      daily: timeSeries?.daily.layaways ?? generateSeries(layaways?.paymentsCount ?? 18, 30, 0.1),
+      monthly: timeSeries?.monthly.layaways ?? generateSeries((layaways?.paymentsCount ?? 18) * 4, 12, 0.08)
     }
   ];
 
@@ -148,9 +205,9 @@ export default async function DashboardPage() {
               emphasis
             />
             <InsightStat
-              label="Pawn principal out"
-              value={loans ? formatCurrency(loans.principalOut) : "—"}
-              helper={loans ? `${loans.loansToday} new loans · ${loans.renewalsToday} renewals` : loansState.error}
+              label="Pawned today"
+              value={loans ? loans.loansToday.toString() : "—"}
+              helper={loans ? `${formatCurrency(loans.principalOut)} principal out · ${loans.renewalsToday} renewals` : loansState.error}
               icon={HandCoins}
             />
             <InsightStat
@@ -191,8 +248,24 @@ export default async function DashboardPage() {
           className="xl:col-span-2"
         >
           <div className="grid gap-4 md:grid-cols-3 md:items-center">
-            <div className="md:col-span-2">
-              <SparkBar values={salesBars} labels={["Qty", "Sales", "Purchases"]} />
+            <div className="md:col-span-2 space-y-3">
+              {/* 7-day trend sparkline */}
+              {sales7Day.length > 0 && (
+                <div className="flex items-center justify-between gap-2 rounded-xl bg-white/60 p-2 ring-1 ring-slate-200/50 dark:bg-slate-800/40 dark:ring-slate-700/50">
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-400">7-day trend</span>
+                  <MiniSparkline values={sales7Day} color="#10b981" width={100} height={32} />
+                </div>
+              )}
+              <SparkBar 
+                values={salesBars} 
+                labels={["Qty", "Sales", "Purchases"]}
+                previousValues={salesBarsPrevious}
+                formatValue={(value, index) => {
+                  if (index === 0) return value.toString(); // Qty
+                  if (index === 1 || index === 2) return formatCurrencyCompact({ amount: value, currency: "DOP" }); // Sales/Purchases
+                  return value.toString();
+                }}
+              />
             </div>
             <div className="space-y-3 rounded-2xl bg-white/80 p-4 text-sm text-slate-700 shadow-inner ring-1 ring-slate-200/70 dark:bg-slate-900/70 dark:text-slate-200 dark:ring-slate-800/70">
               <p className="text-base font-semibold text-slate-900 dark:text-white">Pace vs yesterday</p>
@@ -217,7 +290,20 @@ export default async function DashboardPage() {
           adornment={<HandCoins className="h-5 w-5 text-amber-600 dark:text-amber-400" aria-hidden />}
         >
           <div className="grid gap-4 md:grid-cols-2 md:items-center">
-            <SparkBar values={pawnBars} labels={["New", "Past Due", "Renewals"]} />
+            <div className="space-y-3">
+              {/* 7-day trend sparkline */}
+              {pawns7Day.length > 0 && (
+                <div className="flex items-center justify-between gap-2 rounded-xl bg-white/60 p-2 ring-1 ring-slate-200/50 dark:bg-slate-800/40 dark:ring-slate-700/50">
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-400">7-day trend</span>
+                  <MiniSparkline values={pawns7Day} color="#f59e0b" width={100} height={32} />
+                </div>
+              )}
+              <SparkBar 
+                values={pawnBars} 
+                labels={["New", "Past Due", "Renewals"]}
+                previousValues={pawnBarsPrevious}
+              />
+            </div>
             <div className="space-y-2 text-sm text-slate-700 dark:text-slate-200">
               <p className="text-base font-semibold text-slate-900 dark:text-white">Customer commitments</p>
               <p>
@@ -238,7 +324,24 @@ export default async function DashboardPage() {
           adornment={<ActivitySquare className="h-5 w-5 text-sky-600 dark:text-sky-400" aria-hidden />}
         >
           <div className="grid gap-4 md:grid-cols-2 md:items-center">
-            <SparkBar values={layawayBars} labels={["New", "Payments", "Value"]} />
+            <div className="space-y-3">
+              {/* 7-day trend sparkline */}
+              {layaways7Day.length > 0 && (
+                <div className="flex items-center justify-between gap-2 rounded-xl bg-white/60 p-2 ring-1 ring-slate-200/50 dark:bg-slate-800/40 dark:ring-slate-700/50">
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-400">7-day trend</span>
+                  <MiniSparkline values={layaways7Day} color="#0ea5e9" width={100} height={32} />
+                </div>
+              )}
+              <SparkBar 
+                values={layawayBars} 
+                labels={["New", "Payments", "Value"]}
+                previousValues={layawayBarsPrevious}
+                formatValue={(value, index) => {
+                  if (index === 2) return formatCurrencyCompact({ amount: value, currency: "DOP" }); // Value
+                  return value.toString();
+                }}
+              />
+            </div>
             <div className="space-y-2 text-sm text-slate-700 dark:text-slate-200">
               <p className="text-base font-semibold text-slate-900 dark:text-white">Momentum on holds</p>
               <p>
@@ -259,7 +362,11 @@ export default async function DashboardPage() {
           adornment={<Wrench className="h-5 w-5 text-indigo-600 dark:text-indigo-400" aria-hidden />}
         >
           <div className="grid gap-4 md:grid-cols-2 md:items-center">
-            <SparkBar values={repairBars} labels={["In Progress", "Ready", "Diagnostics"]} />
+            <SparkBar 
+              values={repairBars} 
+              labels={["In Progress", "Ready", "Diagnostics"]}
+              showTrends={false}
+            />
             <div className="space-y-2 text-sm text-slate-700 dark:text-slate-200">
               <p className="text-base font-semibold text-slate-900 dark:text-white">Bench utilization</p>
               <p>

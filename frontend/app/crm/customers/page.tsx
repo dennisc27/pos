@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 
 import {
   AlertTriangle,
@@ -154,6 +155,8 @@ function formatDateTime(value?: string | null) {
 }
 
 export default function CrmCustomersPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [loadingList, setLoadingList] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -316,6 +319,13 @@ export default function CrmCustomersPage() {
     fetchCustomers();
   }, [fetchCustomers]);
 
+  // Open add dialog if 'add' query parameter is present
+  useEffect(() => {
+    if (searchParams.get("add") === "true") {
+      setIsAddDialogOpen(true);
+    }
+  }, [searchParams]);
+
   // Fetch ID images path setting
   useEffect(() => {
     const fetchIdImagesPath = async () => {
@@ -428,6 +438,10 @@ export default function CrmCustomersPage() {
   const handleCloseAddDialog = () => {
     setIsAddDialogOpen(false);
     setDetailError(null);
+    // Remove the 'add' query parameter when closing
+    if (searchParams.get("add") === "true") {
+      router.replace("/crm/customers");
+    }
   };
 
   const handleCustomerCreated = async (customer: { id: number; firstName: string; lastName: string; cedulaNo: string | null; email: string | null; phone: string | null; address: string | null }) => {

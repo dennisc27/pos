@@ -24,6 +24,27 @@ export function formatCurrency(metric: MonetaryMetric) {
 }
 
 /**
+ * Format currency in compact notation (e.g., $130.0K instead of $130,000)
+ */
+export function formatCurrencyCompact(metric: MonetaryMetric): string {
+  const amount = metric.amount;
+  const absAmount = Math.abs(amount);
+  
+  if (absAmount >= 1_000_000) {
+    // Millions: $1.2M
+    const millions = amount / 1_000_000;
+    return `$${millions.toFixed(1)}M`;
+  } else if (absAmount >= 1_000) {
+    // Thousands: $130.0K
+    const thousands = amount / 1_000;
+    return `$${thousands.toFixed(1)}K`;
+  } else {
+    // Less than 1000: use regular format
+    return formatCurrency(metric);
+  }
+}
+
+/**
  * Convert cents to display format (divide by 100)
  */
 export function centsToDisplay(cents: number): number {

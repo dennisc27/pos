@@ -2,7 +2,7 @@ import { DashboardCard } from "@/components/dashboard/dashboard-card";
 import { DashboardErrorState } from "@/components/dashboard/error-state";
 import { MetricList } from "@/components/dashboard/metric";
 import { fetchSalesAndPurchases } from "@/lib/actions";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCurrencyCompact } from "@/lib/utils";
 
 export async function SalesPurchasesCard() {
   try {
@@ -16,10 +16,10 @@ export async function SalesPurchasesCard() {
           metrics={[
             { label: "Sales Qty Today", value: data.salesQtyToday.toString(), emphasis: true },
             {
-              label: "Sales Total Today",
-              value: formatCurrency(data.salesTotalToday)
+              label: "Sales Today",
+              value: formatCurrencyCompact(data.salesTotalToday)
             },
-            { label: "Purchases Today", value: formatCurrency(data.purchasesToday) }
+            { label: "Purchases Today", value: formatCurrencyCompact(data.purchasesToday) }
           ]}
         />
       </DashboardCard>
