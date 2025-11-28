@@ -846,38 +846,65 @@ CREATE TABLE IF NOT EXISTS ecom_channels (
   provider ENUM('shopify','woocommerce','amazon','ebay','custom') NOT NULL,
   status ENUM('disconnected','connected','error') DEFAULT 'disconnected',
   config JSON,
+  branch_id BIGINT NULL,
+  last_sync_at TIMESTAMP NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (branch_id) REFERENCES branches(id)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_channel_logs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   channel_id BIGINT NOT NULL,
-  event VARCHAR(160) NOT NULL,
-  payload JSON,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id)
+  operation ENUM('sync_listings','sync_orders','sync_inventory','webhook') NOT NULL,
+  status ENUM('success','error','partial') NOT NULL,
+  records_processed INT DEFAULT 0,
+  records_failed INT DEFAULT 0,
+  error_message TEXT,
+  metadata JSON,
+  started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMP NULL,
+  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id),
+  INDEX idx_channel_operation (channel_id, operation, started_at)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_webhook_logs (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   channel_id BIGINT NOT NULL,
-  event VARCHAR(160) NOT NULL,
-  payload JSON,
-  received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id)
+  event_type VARCHAR(60) NOT NULL,
+  payload JSON NOT NULL,
+  processed BOOLEAN DEFAULT FALSE,
+  error_message TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id),
+  INDEX idx_processed (processed, created_at)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_listings (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   product_code_id BIGINT NOT NULL,
+  channel_id BIGINT NOT NULL,
+  external_id VARCHAR(160),
   title VARCHAR(240) NOT NULL,
   description TEXT,
-  price_cents BIGINT NOT NULL,
-  status ENUM('draft','active','inactive') DEFAULT 'draft',
+  price_cents BIGINT NULL,
+  status ENUM('draft','active','inactive','archived') DEFAULT 'draft',
+  seo_slug VARCHAR(200),
+  meta_description TEXT,
+  primary_image_url VARCHAR(500),
+  image_urls JSON,
+  category_mapping JSON,
+  attributes JSON,
+  sync_status ENUM('pending','synced','error') DEFAULT 'pending',
+  last_synced_at TIMESTAMP NULL,
+  sync_error TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (product_code_id) REFERENCES product_codes(id)
+  FOREIGN KEY (product_code_id) REFERENCES product_codes(id),
+  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id),
+  UNIQUE KEY uniq_listing (product_code_id, channel_id),
+  INDEX idx_external_id (external_id),
+  INDEX idx_status (status, sync_status)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_listing_channels (
@@ -898,47 +925,76 @@ CREATE TABLE IF NOT EXISTS ecom_orders (
   channel_id BIGINT NOT NULL,
   external_id VARCHAR(160) NOT NULL,
   customer_name VARCHAR(160) NOT NULL,
-  status ENUM('pending','paid','fulfilled','cancelled') DEFAULT 'pending',
+  customer_email VARCHAR(255),
+  status ENUM('pending','paid','fulfilled','cancelled','refunded') DEFAULT 'pending',
+  payment_status ENUM('unpaid','partial','paid','refunded') DEFAULT 'unpaid',
   shipping_address JSON,
+  billing_address JSON,
+  subtotal_cents BIGINT NOT NULL,
+  tax_cents BIGINT DEFAULT 0,
+  shipping_cents BIGINT DEFAULT 0,
   total_cents BIGINT NOT NULL,
   currency CHAR(3) DEFAULT 'DOP',
+  internal_order_id BIGINT NULL,
+  tracking_number VARCHAR(120),
+  shipping_carrier VARCHAR(60),
+  fulfillment_status ENUM('unfulfilled','picking','packed','shipped') DEFAULT 'unfulfilled',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id)
+  FOREIGN KEY (channel_id) REFERENCES ecom_channels(id),
+  FOREIGN KEY (internal_order_id) REFERENCES orders(id),
+  UNIQUE KEY uniq_external_order (channel_id, external_id),
+  INDEX idx_status (status, fulfillment_status),
+  INDEX idx_created_at (created_at)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_order_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  order_id BIGINT NOT NULL,
-  listing_id BIGINT,
-  product_code_id BIGINT,
+  ecom_order_id BIGINT NOT NULL,
+  listing_id BIGINT NULL,
+  product_code_id BIGINT NULL,
+  external_item_id VARCHAR(160),
   quantity INT NOT NULL,
   price_cents BIGINT NOT NULL,
+  sku VARCHAR(64),
+  title VARCHAR(240),
+  allocated_branch_id BIGINT NULL,
+  allocated_version_id BIGINT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (order_id) REFERENCES ecom_orders(id),
+  FOREIGN KEY (ecom_order_id) REFERENCES ecom_orders(id) ON DELETE CASCADE,
   FOREIGN KEY (listing_id) REFERENCES ecom_listings(id),
-  FOREIGN KEY (product_code_id) REFERENCES product_codes(id)
+  FOREIGN KEY (product_code_id) REFERENCES product_codes(id),
+  FOREIGN KEY (allocated_branch_id) REFERENCES branches(id),
+  FOREIGN KEY (allocated_version_id) REFERENCES product_code_versions(id)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_returns (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  order_id BIGINT NOT NULL,
-  status ENUM('requested','approved','received','refunded','denied') DEFAULT 'requested',
+  ecom_order_id BIGINT NOT NULL,
+  external_rma_id VARCHAR(160),
+  status ENUM('requested','approved','denied','received','refunded') DEFAULT 'requested',
   reason TEXT,
+  refund_method ENUM('original','store_credit','manual') DEFAULT 'original',
+  refund_cents BIGINT,
+  restock_condition ENUM('new','used','damaged','not_restockable') NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (order_id) REFERENCES ecom_orders(id)
+  FOREIGN KEY (ecom_order_id) REFERENCES ecom_orders(id),
+  INDEX idx_status (status)
 );
 
 CREATE TABLE IF NOT EXISTS ecom_return_items (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  return_id BIGINT NOT NULL,
-  order_item_id BIGINT NOT NULL,
-  `condition` ENUM('new','used','damaged') DEFAULT 'new',
-  restock BOOLEAN DEFAULT TRUE,
+  ecom_return_id BIGINT NOT NULL,
+  ecom_order_item_id BIGINT NOT NULL,
+  quantity INT NOT NULL,
+  `condition` ENUM('new','used','damaged','not_restockable') NULL,
+  restocked BOOLEAN DEFAULT FALSE,
+  restock_version_id BIGINT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (return_id) REFERENCES ecom_returns(id),
-  FOREIGN KEY (order_item_id) REFERENCES ecom_order_items(id)
+  FOREIGN KEY (ecom_return_id) REFERENCES ecom_returns(id) ON DELETE CASCADE,
+  FOREIGN KEY (ecom_order_item_id) REFERENCES ecom_order_items(id),
+  FOREIGN KEY (restock_version_id) REFERENCES product_code_versions(id)
 );
 
 -- ========= NOTIFICATIONS & COMPLIANCE =========

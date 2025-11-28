@@ -13,7 +13,13 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  Edit,
+  Trash2,
+  ExternalLink,
 } from "lucide-react";
+import { ChannelStatusBadge } from "@/components/ecom/channel-status-badge";
+import { SyncStatusIndicator } from "@/components/ecom/sync-status-indicator";
+import { WebhookEventViewer } from "@/components/ecom/webhook-event-viewer";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -57,6 +63,8 @@ type Channel = {
   provider: string;
   status: string;
   config: Record<string, unknown>;
+  branchId?: number | null;
+  lastSyncAt?: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -110,18 +118,26 @@ export default function EcommerceChannelsPage() {
   const [recentLogs, setRecentLogs] = useState<ChannelLog[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
   const [channelLogs, setChannelLogs] = useState<ChannelLog[]>([]);
+  const [webhookLogs, setWebhookLogs] = useState<any[]>([]);
+  const [showWebhookViewer, setShowWebhookViewer] = useState(false);
   const [loading, setLoading] = useState({
     fetch: false,
     create: false,
     logs: false,
+    webhooks: false,
     test: false,
     sync: false,
+    delete: false,
+    oauth: false,
   });
   const [status, setStatus] = useState<StatusMessage>(null);
+  const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [form, setForm] = useState({
     name: "",
     provider: providerOptions[0].value,
     config: defaultConfigTemplates[providerOptions[0].value],
+    branchId: "",
     testConnection: true,
   });
 
@@ -185,8 +201,47 @@ export default function EcommerceChannelsPage() {
       loadLogs(selectedChannelId).catch(() => {
         /* handled above */
       });
+      loadWebhookLogs(selectedChannelId).catch(() => {
+        /* handled below */
+      });
     }
   }, [selectedChannelId, loadLogs]);
+
+  // Polling for real-time sync status updates
+  useEffect(() => {
+    if (!selectedChannelId) return;
+
+    const pollInterval = setInterval(() => {
+      loadChannels().catch(() => {
+        /* handled above */
+      });
+      if (showWebhookViewer) {
+        loadWebhookLogs(selectedChannelId).catch(() => {
+          /* handled below */
+        });
+      }
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [selectedChannelId, showWebhookViewer, loadChannels]);
+
+  const loadWebhookLogs = useCallback(async (channelId: number) => {
+    setLoading((state) => ({ ...state, webhooks: true }));
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/ecom/channels/${channelId}/webhook-logs?limit=100`);
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Unable to load webhook logs");
+      }
+
+      setWebhookLogs(data.logs ?? []);
+    } catch (error) {
+      setStatus({ tone: "error", message: error instanceof Error ? error.message : "Failed to load webhook logs" });
+      setWebhookLogs([]);
+    } finally {
+      setLoading((state) => ({ ...state, webhooks: false }));
+    }
+  }, []);
 
   const handleProviderChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const nextProvider = event.target.value;
@@ -279,6 +334,113 @@ export default function EcommerceChannelsPage() {
     await executeChannelAction(channelId, `/api/ecom/channels/${channelId}/sync`, "sync", "Sincronización lanzada");
   };
 
+  const handleOAuthFlow = async (channelId: number) => {
+    setStatus(null);
+    setLoading((state) => ({ ...state, oauth: true }));
+
+    try {
+      // Get OAuth URL
+      const response = await fetch(`${API_BASE_URL}/api/ecom/channels/${channelId}/oauth-url`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Failed to get OAuth URL");
+      }
+
+      // Open OAuth URL in new window
+      const authWindow = window.open(data.authUrl, "eBay OAuth", "width=600,height=700");
+
+      // Listen for OAuth callback (you'd typically use a callback page)
+      // For now, we'll show the URL and let user complete manually
+      setStatus({
+        tone: "success",
+        message: "OAuth URL generated. Complete authorization and use the callback endpoint to save tokens.",
+      });
+    } catch (error) {
+      setStatus({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Failed to initiate OAuth flow",
+      });
+    } finally {
+      setLoading((state) => ({ ...state, oauth: false }));
+    }
+  };
+
+  const handleEditChannel = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingChannel) return;
+
+    setStatus(null);
+
+    let parsedConfig: Record<string, unknown> = {};
+    try {
+      parsedConfig = form.config.trim() ? (JSON.parse(form.config) as Record<string, unknown>) : {};
+    } catch (error) {
+      setStatus({ tone: "error", message: "El JSON de configuración no es válido" });
+      return;
+    }
+
+    setLoading((state) => ({ ...state, create: true }));
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/ecom/channels/${editingChannel.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          config: parsedConfig,
+          branchId: form.branchId ? Number.parseInt(form.branchId, 10) : null,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error ?? "No fue posible actualizar el canal");
+      }
+
+      setStatus({ tone: "success", message: "Canal actualizado correctamente" });
+      setEditingChannel(null);
+      setForm({
+        name: "",
+        provider: providerOptions[0].value,
+        config: defaultConfigTemplates[providerOptions[0].value],
+        branchId: "",
+        testConnection: true,
+      });
+      await loadChannels();
+    } catch (error) {
+      setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error al actualizar el canal" });
+    } finally {
+      setLoading((state) => ({ ...state, create: false }));
+    }
+  };
+
+  const handleDeleteChannel = async (channelId: number) => {
+    setStatus(null);
+    setLoading((state) => ({ ...state, delete: true }));
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/ecom/channels/${channelId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data?.error ?? "No fue posible eliminar el canal");
+      }
+
+      setStatus({ tone: "success", message: "Canal eliminado correctamente" });
+      setDeleteConfirm(null);
+      if (selectedChannelId === channelId) {
+        setSelectedChannelId(null);
+      }
+      await loadChannels();
+    } catch (error) {
+      setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error al eliminar el canal" });
+    } finally {
+      setLoading((state) => ({ ...state, delete: false }));
+    }
+  };
+
   const statusBadge = (status: string) => {
     const tone = statusTone[status] ?? statusTone.disconnected;
     return (
@@ -355,14 +517,53 @@ export default function EcommerceChannelsPage() {
                       <Server className="h-4 w-4 text-muted-foreground dark:text-slate-400" />
                       <span className="font-medium">{channel.name}</span>
                     </div>
-                    {statusBadge(channel.status)}
+                    <div className="flex items-center gap-2">
+                      <ChannelStatusBadge status={channel.status as "connected" | "disconnected" | "error"} />
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingChannel(channel);
+                            setForm({
+                              name: channel.name,
+                              provider: channel.provider,
+                              config: JSON.stringify(channel.config, null, 2),
+                              branchId: channel.branchId ? String(channel.branchId) : "",
+                              testConnection: false,
+                            });
+                          }}
+                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          title="Edit channel"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirm(channel.id);
+                          }}
+                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-rose-600"
+                          title="Delete channel"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground dark:text-slate-400">
                     <span className="inline-flex items-center gap-1">
                       <Settings className="h-3 w-3" /> {channel.provider}
                     </span>
+                    {channel.lastSyncAt && (
+                      <SyncStatusIndicator
+                        status="synced"
+                        lastSyncedAt={channel.lastSyncAt}
+                      />
+                    )}
                     <span className="inline-flex items-center gap-1">
-                      <DatabaseZap className="h-3 w-3" /> Última actualización: {formatDate(channel.updatedAt)}
+                      <DatabaseZap className="h-3 w-3" /> Updated: {formatDate(channel.updatedAt)}
                     </span>
                   </div>
                 </button>
@@ -372,12 +573,16 @@ export default function EcommerceChannelsPage() {
         </section>
 
         <section className={panelClassName}>
-          <h2 className="text-lg font-semibold text-foreground dark:text-white">Registrar nuevo canal</h2>
+          <h2 className="text-lg font-semibold text-foreground dark:text-white">
+            {editingChannel ? "Editar canal" : "Registrar nuevo canal"}
+          </h2>
           <p className="mt-1 text-xs text-muted-foreground dark:text-slate-400">
-            Valida credenciales y guarda la configuración cifrada en el backend.
+            {editingChannel
+              ? "Actualiza la configuración del canal."
+              : "Valida credenciales y guarda la configuración cifrada en el backend."}
           </p>
 
-          <form className="mt-4 space-y-4" onSubmit={handleCreateChannel}>
+          <form className="mt-4 space-y-4" onSubmit={editingChannel ? handleEditChannel : handleCreateChannel}>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground" htmlFor="channel-name">
                 Nombre interno
@@ -433,13 +638,56 @@ export default function EcommerceChannelsPage() {
               Probar conexión inmediatamente
             </label>
 
-            <button
-              type="submit"
-              disabled={loading.create}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading.create ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />} Registrar canal
-            </button>
+            {!editingChannel && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="channel-branch-id">
+                  Branch ID (opcional)
+                </label>
+                <input
+                  id="channel-branch-id"
+                  type="number"
+                  className={inputClassName}
+                  placeholder="1"
+                  value={form.branchId}
+                  onChange={(event) => setForm((state) => ({ ...state, branchId: event.target.value }))}
+                />
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={loading.create}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading.create ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : editingChannel ? (
+                  <Edit className="h-4 w-4" />
+                ) : (
+                  <Link2 className="h-4 w-4" />
+                )}
+                {editingChannel ? "Actualizar canal" : "Registrar canal"}
+              </button>
+              {editingChannel && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingChannel(null);
+                    setForm({
+                      name: "",
+                      provider: providerOptions[0].value,
+                      config: defaultConfigTemplates[providerOptions[0].value],
+                      branchId: "",
+                      testConnection: true,
+                    });
+                  }}
+                  className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+              )}
+            </div>
           </form>
         </section>
       </div>
@@ -517,6 +765,21 @@ export default function EcommerceChannelsPage() {
                 >
                   {loading.test ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Probar conexión
                 </button>
+                {selectedChannel.provider === "ebay" && (
+                  <button
+                    type="button"
+                    onClick={() => handleOAuthFlow(selectedChannel.id)}
+                    disabled={loading.oauth}
+                    className={secondaryButtonLargeClassName}
+                  >
+                    {loading.oauth ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-4 w-4" />
+                    )}{" "}
+                    Iniciar OAuth
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleSyncNow(selectedChannel.id)}
@@ -529,8 +792,24 @@ export default function EcommerceChannelsPage() {
             </div>
 
             <div className={panelClassName}>
-              <h3 className="text-base font-semibold text-foreground dark:text-white">Actividad global</h3>
-              <p className="text-xs text-muted-foreground dark:text-slate-400">Últimos eventos recibidos en todos los canales.</p>
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-foreground dark:text-white">Actividad global</h3>
+                  <p className="text-xs text-muted-foreground dark:text-slate-400">Últimos eventos recibidos en todos los canales.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowWebhookViewer(!showWebhookViewer);
+                    if (!showWebhookViewer && selectedChannelId) {
+                      loadWebhookLogs(selectedChannelId).catch(() => {});
+                    }
+                  }}
+                  className={secondaryButtonClassName}
+                >
+                  {showWebhookViewer ? "Ocultar" : "Ver"} Webhooks
+                </button>
+              </div>
               <div className="mt-3 space-y-3 text-xs text-muted-foreground dark:text-slate-300">
                 {recentLogs.length === 0 && <p className="text-muted-foreground dark:text-slate-500">Sin actividad registrada.</p>}
                 {recentLogs.slice(0, 5).map((entry) => (
@@ -561,8 +840,79 @@ export default function EcommerceChannelsPage() {
                 ))}
               </div>
             </div>
+
+            {showWebhookViewer && (
+              <div className={panelClassName}>
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-base font-semibold text-foreground dark:text-white">Webhook Events</h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedChannelId) {
+                        loadWebhookLogs(selectedChannelId).catch(() => {});
+                      }
+                    }}
+                    disabled={loading.webhooks}
+                    className={secondaryButtonClassName}
+                  >
+                    {loading.webhooks ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />} Actualizar
+                  </button>
+                </div>
+                {loading.webhooks ? (
+                  <div className="flex items-center gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Cargando webhooks…
+                  </div>
+                ) : (
+                  <WebhookEventViewer
+                    events={webhookLogs.map((log) => ({
+                      id: log.id,
+                      channelId: log.channelId,
+                      eventType: log.eventType,
+                      payload: log.payload,
+                      processed: log.processed,
+                      errorMessage: log.errorMessage,
+                      createdAt: log.createdAt,
+                    }))}
+                    onFilterChange={(filters) => {
+                      // Filter is handled client-side by the component
+                    }}
+                  />
+                )}
+              </div>
+            )}
           </div>
         </section>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-lg border border-border bg-card p-6 shadow-lg">
+            <h3 className="text-lg font-semibold text-foreground">Confirmar eliminación</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              ¿Estás seguro de que deseas eliminar este canal? Esta acción no se puede deshacer.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleDeleteChannel(deleteConfirm)}
+                disabled={loading.delete}
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-rose-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading.delete ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Eliminar
+              </button>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                disabled={loading.delete}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition hover:bg-muted"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

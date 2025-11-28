@@ -7,12 +7,17 @@ import {
   ArrowRightLeft,
   CheckCircle2,
   ClipboardCheck,
+  Download,
+  FileText,
   Loader2,
   PackageCheck,
+  Plus,
   RefreshCcw,
   ShieldCheck,
   XCircle,
 } from "lucide-react";
+import { ReturnConditionSelector } from "@/components/ecom/return-condition-selector";
+import { formatCurrencyFromCents } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
@@ -49,6 +54,8 @@ type ReturnRecord = {
   externalOrderId: string | null;
   status: string;
   reason: string | null;
+  refundAmountCents: number | null;
+  refundMethod: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   items: ReturnItem[];
@@ -97,6 +104,21 @@ export default function EcommerceReturnsPage() {
   );
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<StatusMessage>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [selectedReturn, setSelectedReturn] = useState<ReturnRecord | null>(null);
+  const [createForm, setCreateForm] = useState({
+    orderId: "",
+    reason: "",
+    items: [] as Array<{ orderItemId: number; quantity: number; condition: string | null }>,
+  });
+  const [availableOrders, setAvailableOrders] = useState<any[]>([]);
+  const [selectedOrderItems, setSelectedOrderItems] = useState<any[]>([]);
+  const [showApprovalModal, setShowApprovalModal] = useState<number | null>(null);
+  const [approvalComment, setApprovalComment] = useState("");
+  const [showReceiveModal, setShowReceiveModal] = useState<number | null>(null);
+  const [receiveData, setReceiveData] = useState<Record<number, { condition: string; restock: boolean }>>({});
+  const [showRefundModal, setShowRefundModal] = useState<number | null>(null);
+  const [refundData, setRefundData] = useState({ amount: "", method: "original" });
 
   const buildQueryString = useCallback((state: FiltersState) => {
     const params = new URLSearchParams();
@@ -138,6 +160,22 @@ export default function EcommerceReturnsPage() {
       /* handled */
     });
   }, [fetchReturns, filters]);
+
+  useEffect(() => {
+    // Load available orders for return creation
+    if (showCreateForm) {
+      fetch(`${API_BASE_URL}/api/ecom/orders?limit=100`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.orders) {
+            setAvailableOrders(data.orders);
+          }
+        })
+        .catch(() => {
+          /* handled */
+        });
+    }
+  }, [showCreateForm]);
 
   useEffect(() => {
     // reuse channels from orders endpoint to avoid extra fetch
@@ -269,13 +307,47 @@ export default function EcommerceReturnsPage() {
               </select>
             </div>
           </div>
-          <button
-            className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
-            onClick={() => fetchReturns(filters)}
-            disabled={loading}
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />} Actualizar
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+              onClick={() => setShowCreateForm(true)}
+            >
+              <Plus className="h-4 w-4" /> Crear Devolución
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+              onClick={() => {
+                const csv = [
+                  ["RMA", "Orden", "Estado", "Motivo", "Fecha"].join(","),
+                  ...returns.map((r) =>
+                    [
+                      r.id,
+                      r.externalOrderId || r.orderId,
+                      r.status,
+                      `"${r.reason || ""}"`,
+                      r.createdAt || "",
+                    ].join(",")
+                  ),
+                ].join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `returns-${new Date().toISOString().split("T")[0]}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download className="h-4 w-4" /> Exportar
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+              onClick={() => fetchReturns(filters)}
+              disabled={loading}
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />} Actualizar
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 overflow-hidden rounded-md border border-border dark:border-slate-800">
@@ -325,6 +397,12 @@ export default function EcommerceReturnsPage() {
                   </td>
                   <td className="px-3 py-3 align-top">
                     <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-2.5 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+                        onClick={() => setSelectedReturn(record)}
+                      >
+                        <FileText className="h-3 w-3" /> Ver
+                      </button>
                       {actionOrder.map((action) => {
                         const meta = actionLabels[action];
                         const Icon = meta.icon;
@@ -332,7 +410,23 @@ export default function EcommerceReturnsPage() {
                           <button
                             key={action}
                             className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-2.5 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                            onClick={() => runReturnAction(record, action)}
+                            onClick={() => {
+                              if (action === "approve" || action === "deny") {
+                                setShowApprovalModal(record.id);
+                              } else if (action === "receive") {
+                                setShowReceiveModal(record.id);
+                                // Initialize receive data with item conditions
+                                const initialData: Record<number, { condition: string; restock: boolean }> = {};
+                                record.items.forEach((item) => {
+                                  initialData[item.id] = { condition: item.condition, restock: item.restock };
+                                });
+                                setReceiveData(initialData);
+                              } else if (action === "refund") {
+                                setShowRefundModal(record.id);
+                              } else {
+                                runReturnAction(record, action);
+                              }
+                            }}
                             disabled={loading}
                           >
                             <Icon className="h-3 w-3" /> {meta.label}
@@ -347,6 +441,601 @@ export default function EcommerceReturnsPage() {
           </table>
         </div>
       </section>
+
+      {/* Create Return Modal */}
+      {showCreateForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Crear Devolución</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setCreateForm({ orderId: "", reason: "", items: [] });
+                  setSelectedOrderItems([]);
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!createForm.orderId || createForm.items.length === 0) {
+                  setStatus({ tone: "error", message: "Selecciona una orden y al menos un artículo" });
+                  return;
+                }
+
+                setLoading(true);
+                try {
+                  const response = await fetch(`${API_BASE_URL}/api/ecom/returns`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      ecomOrderId: Number.parseInt(createForm.orderId, 10),
+                      reason: createForm.reason,
+                      items: createForm.items.map((item) => ({
+                        orderItemId: item.orderItemId,
+                        quantity: item.quantity,
+                        condition: item.condition,
+                      })),
+                    }),
+                  });
+
+                  const data = await response.json();
+                  if (!response.ok) {
+                    throw new Error(data?.error ?? "Error al crear devolución");
+                  }
+
+                  setStatus({ tone: "success", message: "Devolución creada correctamente" });
+                  setShowCreateForm(false);
+                  setCreateForm({ orderId: "", reason: "", items: [] });
+                  setSelectedOrderItems([]);
+                  await fetchReturns(filters);
+                } catch (error) {
+                  setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error" });
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              className="space-y-4"
+            >
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Orden *</label>
+                <select
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={createForm.orderId}
+                  onChange={async (e) => {
+                    const orderId = e.target.value;
+                    setCreateForm((state) => ({ ...state, orderId, items: [] }));
+                    if (orderId) {
+                      try {
+                        const response = await fetch(`${API_BASE_URL}/api/ecom/orders/${orderId}`);
+                        const data = await response.json();
+                        if (response.ok && data.order) {
+                          setSelectedOrderItems(data.order.items || []);
+                        }
+                      } catch (error) {
+                        // Handle error
+                      }
+                    } else {
+                      setSelectedOrderItems([]);
+                    }
+                  }}
+                  required
+                >
+                  <option value="">Seleccionar orden...</option>
+                  {availableOrders.map((order) => (
+                    <option key={order.id} value={order.id}>
+                      {order.externalId} - {order.customerName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedOrderItems.length > 0 && (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">Artículos a Devolver *</label>
+                  {selectedOrderItems.map((item) => {
+                    const returnItem = createForm.items.find((i) => i.orderItemId === item.id);
+                    return (
+                      <div key={item.id} className="rounded-md border border-border bg-muted/40 p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <div className="font-medium text-sm">{item.title || `Item ${item.id}`}</div>
+                            {item.sku && <div className="text-xs text-muted-foreground">SKU: {item.sku}</div>}
+                          </div>
+                          <div className="text-sm font-medium">
+                            {formatCurrencyFromCents((item.priceCents || 0) * (returnItem?.quantity || 0))}
+                          </div>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <div>
+                            <label className="text-xs text-muted-foreground">Cantidad</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max={item.quantity}
+                              className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                              value={returnItem?.quantity || 0}
+                              onChange={(e) => {
+                                const qty = Number.parseInt(e.target.value, 10) || 0;
+                                if (qty > 0 && qty <= item.quantity) {
+                                  setCreateForm((state) => {
+                                    const existing = state.items.findIndex((i) => i.orderItemId === item.id);
+                                    if (existing >= 0) {
+                                      const newItems = [...state.items];
+                                      newItems[existing] = { ...newItems[existing], quantity: qty };
+                                      return { ...state, items: newItems };
+                                    } else {
+                                      return {
+                                        ...state,
+                                        items: [...state.items, { orderItemId: item.id, quantity: qty, condition: null }],
+                                      };
+                                    }
+                                  });
+                                } else if (qty === 0) {
+                                  setCreateForm((state) => ({
+                                    ...state,
+                                    items: state.items.filter((i) => i.orderItemId !== item.id),
+                                  }));
+                                }
+                              }}
+                            />
+                          </div>
+                          {returnItem && returnItem.quantity > 0 && (
+                            <div>
+                              <ReturnConditionSelector
+                                value={returnItem.condition as any}
+                                onChange={(condition) => {
+                                  setCreateForm((state) => {
+                                    const existing = state.items.findIndex((i) => i.orderItemId === item.id);
+                                    if (existing >= 0) {
+                                      const newItems = [...state.items];
+                                      newItems[existing] = { ...newItems[existing], condition };
+                                      return { ...state, items: newItems };
+                                    }
+                                    return state;
+                                  });
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Motivo *</label>
+                <textarea
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  rows={3}
+                  value={createForm.reason}
+                  onChange={(e) => setCreateForm((state) => ({ ...state, reason: e.target.value }))}
+                  required
+                  placeholder="Describe el motivo de la devolución..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setCreateForm({ orderId: "", reason: "", items: [] });
+                    setSelectedOrderItems([]);
+                  }}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+                >
+                  {loading ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Plus className="mr-2 inline h-4 w-4" />}
+                  Crear Devolución
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Return Detail Modal */}
+      {selectedReturn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-foreground">Devolución #{selectedReturn.id}</h2>
+              <button
+                type="button"
+                onClick={() => setSelectedReturn(null)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border border-border bg-muted/40 p-4">
+                  <h3 className="mb-2 text-sm font-semibold text-foreground">Información</h3>
+                  <div className="space-y-1 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Orden:</span>{" "}
+                      <span className="font-medium">{selectedReturn.externalOrderId || selectedReturn.orderId}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Estado:</span> {statusBadge(selectedReturn.status)}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Canal:</span>{" "}
+                      <span className="font-medium">{selectedReturn.channelName || `#${selectedReturn.channelId}`}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Fecha:</span>{" "}
+                      <span className="font-medium">
+                        {selectedReturn.createdAt ? new Date(selectedReturn.createdAt).toLocaleString() : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-muted/40 p-4">
+                  <h3 className="mb-2 text-sm font-semibold text-foreground">Reembolso</h3>
+                  <div className="space-y-1 text-sm">
+                    {selectedReturn.refundAmountCents ? (
+                      <>
+                        <div>
+                          <span className="text-muted-foreground">Monto:</span>{" "}
+                          <span className="font-medium">{formatCurrencyFromCents(selectedReturn.refundAmountCents)}</span>
+                        </div>
+                        {selectedReturn.refundMethod && (
+                          <div>
+                            <span className="text-muted-foreground">Método:</span>{" "}
+                            <span className="font-medium">{selectedReturn.refundMethod}</span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-muted-foreground">No procesado</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-muted/40 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-foreground">Motivo</h3>
+                <p className="text-sm text-muted-foreground">{selectedReturn.reason || "—"}</p>
+              </div>
+
+              <div className="rounded-lg border border-border bg-muted/40 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-foreground">Artículos</h3>
+                <div className="space-y-2">
+                  {selectedReturn.items.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between rounded border border-border bg-background p-2 text-sm">
+                      <div>
+                        <div className="font-medium">Item #{item.orderItemId}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Condición: {item.condition} • {item.restock ? "Restock" : "No restock"}
+                        </div>
+                      </div>
+                      {item.priceCents && (
+                        <div className="font-medium">{formatCurrencyFromCents(item.priceCents * (item.quantity || 1))}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedReturn(null)}
+                className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approval Modal */}
+      {showApprovalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Aprobar/Rechazar Devolución</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowApprovalModal(null);
+                  setApprovalComment("");
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const action = (e.nativeEvent as any).submitter?.name || "approve";
+                try {
+                  const response = await fetch(`${API_BASE_URL}/api/ecom/returns/${showApprovalModal}/${action}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ comment: approvalComment }),
+                  });
+                  if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data?.error ?? "Error");
+                  }
+                  setStatus({ tone: "success", message: `Devolución ${action === "approve" ? "aprobada" : "rechazada"}` });
+                  setShowApprovalModal(null);
+                  setApprovalComment("");
+                  await fetchReturns(filters);
+                } catch (error) {
+                  setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error" });
+                }
+              }}
+              className="space-y-4"
+            >
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Comentario</label>
+                <textarea
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  rows={3}
+                  value={approvalComment}
+                  onChange={(e) => setApprovalComment(e.target.value)}
+                  placeholder="Agregar comentario (opcional)..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowApprovalModal(null);
+                    setApprovalComment("");
+                  }}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  name="deny"
+                  className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700"
+                >
+                  Rechazar
+                </button>
+                <button
+                  type="submit"
+                  name="approve"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Aprobar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Receive Modal */}
+      {showReceiveModal && selectedReturn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Recibir Devolución</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReceiveModal(null);
+                  setReceiveData({});
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const response = await fetch(`${API_BASE_URL}/api/ecom/returns/${showReceiveModal}/receive`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      items: Object.entries(receiveData).map(([itemId, data]) => ({
+                        itemId: Number.parseInt(itemId, 10),
+                        condition: data.condition,
+                        restock: data.restock,
+                      })),
+                    }),
+                  });
+                  if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data?.error ?? "Error");
+                  }
+                  setStatus({ tone: "success", message: "Devolución recibida" });
+                  setShowReceiveModal(null);
+                  setReceiveData({});
+                  await fetchReturns(filters);
+                } catch (error) {
+                  setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error" });
+                }
+              }}
+              className="space-y-4"
+            >
+              {selectedReturn.items.map((item) => (
+                <div key={item.id} className="rounded-md border border-border bg-muted/40 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <div className="font-medium text-sm">Item #{item.orderItemId}</div>
+                      {item.sku && <div className="text-xs text-muted-foreground">SKU: {item.sku}</div>}
+                    </div>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <ReturnConditionSelector
+                      value={(receiveData[item.id]?.condition || item.condition) as any}
+                      onChange={(condition) => {
+                        setReceiveData((state) => ({
+                          ...state,
+                          [item.id]: { ...state[item.id], condition },
+                        }));
+                      }}
+                    />
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Restock</label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={receiveData[item.id]?.restock ?? item.restock}
+                          onChange={(e) => {
+                            setReceiveData((state) => ({
+                              ...state,
+                              [item.id]: { ...state[item.id], restock: e.target.checked },
+                            }));
+                          }}
+                          className="rounded border border-input"
+                        />
+                        <span className="text-sm">Restockear este artículo</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReceiveModal(null);
+                    setReceiveData({});
+                  }}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Recibir
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Refund Modal */}
+      {showRefundModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Procesar Reembolso</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRefundModal(null);
+                  setRefundData({ amount: "", method: "original" });
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const response = await fetch(`${API_BASE_URL}/api/ecom/returns/${showRefundModal}/refund`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      refundCents: refundData.amount ? Math.round(Number.parseFloat(refundData.amount) * 100) : null,
+                      refundMethod: refundData.method,
+                    }),
+                  });
+                  if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data?.error ?? "Error");
+                  }
+                  setStatus({ tone: "success", message: "Reembolso procesado" });
+                  setShowRefundModal(null);
+                  setRefundData({ amount: "", method: "original" });
+                  await fetchReturns(filters);
+                } catch (error) {
+                  setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error" });
+                }
+              }}
+              className="space-y-4"
+            >
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Monto (RD$)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={refundData.amount}
+                  onChange={(e) => setRefundData((state) => ({ ...state, amount: e.target.value }))}
+                  placeholder="Dejar vacío para reembolso completo"
+                />
+                <p className="text-xs text-muted-foreground">Dejar vacío para reembolso completo</p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Método</label>
+                <select
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={refundData.method}
+                  onChange={(e) => setRefundData((state) => ({ ...state, method: e.target.value }))}
+                >
+                  <option value="original">Método Original</option>
+                  <option value="store_credit">Crédito de Tienda</option>
+                  <option value="cash">Efectivo</option>
+                  <option value="check">Cheque</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRefundModal(null);
+                    setRefundData({ amount: "", method: "original" });
+                  }}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Procesar Reembolso
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,11 +8,13 @@ import {
   Edit3,
   Loader2,
   PackageSearch,
+  Plus,
   RefreshCcw,
   ShieldCheck,
   Store,
   Tags,
 } from "lucide-react";
+import { SyncStatusIndicator, SyncStatusIndicatorWithLoading } from "@/components/ecom/sync-status-indicator";
 
 import { formatCurrencyFromCents } from "@/lib/utils";
 
@@ -101,6 +103,30 @@ export default function EcommerceListingsPage() {
   const [bulkChannelId, setBulkChannelId] = useState<number | "">("");
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ title: "", price: "", status: "draft", description: "" });
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    productCodeId: "",
+    channelId: "",
+    title: "",
+    description: "",
+    price: "",
+    status: "draft",
+    seoSlug: "",
+    metaDescription: "",
+    primaryImageUrl: "",
+    imageUrls: [] as string[],
+    categoryMapping: "",
+    attributes: {
+      brand: "",
+      material: "",
+      condition: "new",
+      color: "",
+      size: "",
+    },
+  });
+  const [categories, setCategories] = useState<{ id: number; name: string; parentId: number | null }[]>([]);
+  const [newImageUrl, setNewImageUrl] = useState("");
+  const [syncingListingId, setSyncingListingId] = useState<number | null>(null);
 
   const focusedListing = useMemo(
     () => listings.find((listing) => listing.id === focusedId) ?? null,
@@ -154,6 +180,20 @@ export default function EcommerceListingsPage() {
       /* handled */
     });
   }, [fetchListings, filters]);
+
+  useEffect(() => {
+    // Load categories
+    fetch(`${API_BASE_URL}/api/categories`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.categories) {
+          setCategories(data.categories);
+        }
+      })
+      .catch(() => {
+        /* handled */
+      });
+  }, []);
 
   useEffect(() => {
     if (focusedListing) {
@@ -266,6 +306,80 @@ export default function EcommerceListingsPage() {
     }
   };
 
+  const handleCreateListing = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoading(true);
+    setStatus(null);
+
+    try {
+      if (!createForm.productCodeId || !createForm.channelId || !createForm.title) {
+        throw new Error("Producto, canal y título son requeridos");
+      }
+
+      const payload: Record<string, unknown> = {
+        productCodeId: Number.parseInt(createForm.productCodeId, 10),
+        channelId: Number.parseInt(createForm.channelId, 10),
+        title: createForm.title.trim(),
+        description: createForm.description.trim() || null,
+        status: createForm.status,
+        seoSlug: createForm.seoSlug.trim() || null,
+        metaDescription: createForm.metaDescription.trim() || null,
+        primaryImageUrl: createForm.primaryImageUrl.trim() || null,
+        imageUrls: createForm.imageUrls.length > 0 ? createForm.imageUrls : null,
+        categoryMapping: createForm.categoryMapping ? { categoryId: Number.parseInt(createForm.categoryMapping, 10) } : null,
+        attributes: Object.values(createForm.attributes).some((v) => v) ? createForm.attributes : null,
+      };
+
+      if (createForm.price.trim()) {
+        const numeric = Number(createForm.price.replace(/,/g, "."));
+        if (!Number.isFinite(numeric) || numeric < 0) {
+          throw new Error("Precio inválido");
+        }
+        payload.priceCents = Math.round(numeric * 100);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/ecom/listings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error ?? "No se pudo crear el listado");
+      }
+
+      setStatus({ tone: "success", message: "Listado creado correctamente" });
+      setShowCreateForm(false);
+      setCreateForm({
+        productCodeId: "",
+        channelId: "",
+        title: "",
+        description: "",
+        price: "",
+        status: "draft",
+        seoSlug: "",
+        metaDescription: "",
+        primaryImageUrl: "",
+        imageUrls: [],
+        categoryMapping: "",
+        attributes: {
+          brand: "",
+          material: "",
+          condition: "new",
+          color: "",
+          size: "",
+        },
+      });
+      setNewImageUrl("");
+      await fetchListings(filters);
+    } catch (error) {
+      setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error al crear el listado" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const statusBadge = (statusValue: string) => {
     const tone = statusTone[statusValue] ?? statusTone.draft;
     return (
@@ -369,13 +483,21 @@ export default function EcommerceListingsPage() {
               </select>
             </div>
           </div>
-          <button
-            className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
-            onClick={() => fetchListings(filters)}
-            disabled={loading}
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />} Actualizar
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+              onClick={() => fetchListings(filters)}
+              disabled={loading}
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />} Actualizar
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
+              onClick={() => setShowCreateForm(true)}
+            >
+              <Plus className="h-4 w-4" /> Crear listado
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 overflow-hidden rounded-md border border-border dark:border-slate-800">
@@ -432,25 +554,62 @@ export default function EcommerceListingsPage() {
                   </td>
                   <td className="px-3 py-3 align-top">{statusBadge(listing.status)}</td>
                   <td className="px-3 py-3 align-top">
-                    <div className="flex flex-wrap gap-2">
+                    <div className="space-y-1.5">
                       {listing.channels.length === 0 && <span className="text-xs text-muted-foreground dark:text-slate-500">Sin publicar</span>}
                       {listing.channels.map((channel) => (
-                        <span
-                          key={`${listing.id}-${channel.channelId}`}
-                          className="inline-flex items-center gap-1 rounded-full border border-input dark:border-slate-700 bg-card dark:bg-slate-900/80 px-2 py-1 text-[11px] text-muted-foreground dark:text-slate-300"
-                        >
-                          <Store className="h-3 w-3" /> {channel.channelName ?? `#${channel.channelId}`}
-                        </span>
+                        <div key={`${listing.id}-${channel.channelId}`} className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-input dark:border-slate-700 bg-card dark:bg-slate-900/80 px-2 py-1 text-[11px] text-muted-foreground dark:text-slate-300">
+                            <Store className="h-3 w-3" /> {channel.channelName ?? `#${channel.channelId}`}
+                          </span>
+                          <SyncStatusIndicatorWithLoading
+                            status={channel.status === "connected" ? "synced" : "pending"}
+                            lastSyncedAt={channel.lastSyncedAt}
+                            isSyncing={syncingListingId === listing.id}
+                          />
+                        </div>
                       ))}
                     </div>
                   </td>
                   <td className="px-3 py-3 text-right align-top">
-                    <button
-                      className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-3 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
-                      onClick={() => setFocusedId(listing.id)}
-                    >
-                      <Edit3 className="h-3 w-3" /> Editar
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-2 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+                        onClick={async () => {
+                          setSyncingListingId(listing.id);
+                          try {
+                            const response = await fetch(`${API_BASE_URL}/api/ecom/listings/sync`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ listingIds: [listing.id] }),
+                            });
+                            if (!response.ok) {
+                              const data = await response.json();
+                              throw new Error(data?.error ?? "Error al sincronizar");
+                            }
+                            setStatus({ tone: "success", message: "Sincronización iniciada" });
+                            await fetchListings(filters);
+                          } catch (error) {
+                            setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error al sincronizar" });
+                          } finally {
+                            setSyncingListingId(null);
+                          }
+                        }}
+                        disabled={syncingListingId === listing.id}
+                        title="Sincronizar ahora"
+                      >
+                        {syncingListingId === listing.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <RefreshCcw className="h-3 w-3" />
+                        )}
+                      </button>
+                      <button
+                        className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-3 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+                        onClick={() => setFocusedId(listing.id)}
+                      >
+                        <Edit3 className="h-3 w-3" /> Editar
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -585,6 +744,392 @@ export default function EcommerceListingsPage() {
             </div>
           </form>
         </section>
+      )}
+
+      {/* Create Listing Modal */}
+      {showCreateForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Crear nuevo listado</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateForm(false);
+                  setCreateForm({
+                    productCodeId: "",
+                    channelId: "",
+                    title: "",
+                    description: "",
+                    price: "",
+                    status: "draft",
+                    seoSlug: "",
+                    metaDescription: "",
+                    primaryImageUrl: "",
+                    imageUrls: [],
+                    categoryMapping: "",
+                    attributes: {
+                      brand: "",
+                      material: "",
+                      condition: "new",
+                      color: "",
+                      size: "",
+                    },
+                  });
+                  setNewImageUrl("");
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateListing} className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-product-code">
+                    Código de producto *
+                  </label>
+                  <input
+                    id="create-product-code"
+                    type="text"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="Buscar por código o nombre..."
+                    value={createForm.productCodeId}
+                    onChange={async (e) => {
+                      const search = e.target.value;
+                      if (search.length >= 2) {
+                        try {
+                          const response = await fetch(`${API_BASE_URL}/api/products?q=${encodeURIComponent(search)}`);
+                          const data = await response.json();
+                          // For now, just set the ID - in production, use a proper autocomplete component
+                          if (data.results?.[0]) {
+                            setCreateForm((state) => ({ ...state, productCodeId: String(data.results[0].id) }));
+                          }
+                        } catch (error) {
+                          // Handle error
+                        }
+                      }
+                    }}
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">Ingresa el ID del código de producto</p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-channel">
+                    Canal *
+                  </label>
+                  <select
+                    id="create-channel"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.channelId}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, channelId: e.target.value }))}
+                    required
+                  >
+                    <option value="">Seleccionar canal...</option>
+                    {channels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.name} ({channel.provider})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-title">
+                    Título *
+                  </label>
+                  <input
+                    id="create-title"
+                    type="text"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.title}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, title: e.target.value }))}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-price">
+                    Precio (RD$)
+                  </label>
+                  <input
+                    id="create-price"
+                    type="number"
+                    step="0.01"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.price}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, price: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-status">
+                    Estado
+                  </label>
+                  <select
+                    id="create-status"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.status}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, status: e.target.value }))}
+                  >
+                    <option value="draft">Borrador</option>
+                    <option value="active">Activo</option>
+                    <option value="inactive">Inactivo</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-description">
+                    Descripción
+                  </label>
+                  <textarea
+                    id="create-description"
+                    className="min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.description}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, description: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-seo-slug">
+                    Slug SEO
+                  </label>
+                  <input
+                    id="create-seo-slug"
+                    type="text"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.seoSlug}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, seoSlug: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-category">
+                    Categoría
+                  </label>
+                  <select
+                    id="create-category"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.categoryMapping}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, categoryMapping: e.target.value }))}
+                  >
+                    <option value="">Seleccionar categoría...</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-image">
+                    URL Imagen principal
+                  </label>
+                  <input
+                    id="create-image"
+                    type="url"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.primaryImageUrl}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, primaryImageUrl: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground">Galería de imágenes</label>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="url"
+                        className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        placeholder="URL de imagen adicional..."
+                        value={newImageUrl}
+                        onChange={(e) => setNewImageUrl(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && newImageUrl.trim()) {
+                            e.preventDefault();
+                            setCreateForm((state) => ({
+                              ...state,
+                              imageUrls: [...state.imageUrls, newImageUrl.trim()],
+                            }));
+                            setNewImageUrl("");
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (newImageUrl.trim()) {
+                            setCreateForm((state) => ({
+                              ...state,
+                              imageUrls: [...state.imageUrls, newImageUrl.trim()],
+                            }));
+                            setNewImageUrl("");
+                          }
+                        }}
+                        className="rounded-md border border-border bg-background px-3 py-2 text-sm hover:bg-muted"
+                      >
+                        Agregar
+                      </button>
+                    </div>
+                    {createForm.imageUrls.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {createForm.imageUrls.map((url, idx) => (
+                          <div key={idx} className="relative group">
+                            <img
+                              src={url}
+                              alt={`Imagen ${idx + 1}`}
+                              className="h-16 w-16 rounded border border-border object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCreateForm((state) => ({
+                                  ...state,
+                                  imageUrls: state.imageUrls.filter((_, i) => i !== idx),
+                                }));
+                              }}
+                              className="absolute -right-1 -top-1 rounded-full bg-rose-600 p-1 text-white opacity-0 transition group-hover:opacity-100"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground">Atributos</label>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground">Marca</label>
+                      <input
+                        type="text"
+                        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        value={createForm.attributes.brand}
+                        onChange={(e) =>
+                          setCreateForm((state) => ({
+                            ...state,
+                            attributes: { ...state.attributes, brand: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Material</label>
+                      <input
+                        type="text"
+                        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        value={createForm.attributes.material}
+                        onChange={(e) =>
+                          setCreateForm((state) => ({
+                            ...state,
+                            attributes: { ...state.attributes, material: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Condición</label>
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        value={createForm.attributes.condition}
+                        onChange={(e) =>
+                          setCreateForm((state) => ({
+                            ...state,
+                            attributes: { ...state.attributes, condition: e.target.value },
+                          }))
+                        }
+                      >
+                        <option value="new">Nuevo</option>
+                        <option value="used">Usado</option>
+                        <option value="refurbished">Reacondicionado</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Color</label>
+                      <input
+                        type="text"
+                        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        value={createForm.attributes.color}
+                        onChange={(e) =>
+                          setCreateForm((state) => ({
+                            ...state,
+                            attributes: { ...state.attributes, color: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Talla</label>
+                      <input
+                        type="text"
+                        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                        value={createForm.attributes.size}
+                        onChange={(e) =>
+                          setCreateForm((state) => ({
+                            ...state,
+                            attributes: { ...state.attributes, size: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="create-meta">
+                    Meta descripción
+                  </label>
+                  <textarea
+                    id="create-meta"
+                    className="min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={createForm.metaDescription}
+                    onChange={(e) => setCreateForm((state) => ({ ...state, metaDescription: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setCreateForm({
+                      productCodeId: "",
+                      channelId: "",
+                      title: "",
+                      description: "",
+                      price: "",
+                      status: "draft",
+                      seoSlug: "",
+                      metaDescription: "",
+                      primaryImageUrl: "",
+                    });
+                  }}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Crear listado
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

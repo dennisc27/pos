@@ -102,6 +102,8 @@ import {
   sql,
 } from 'drizzle-orm';
 import backupRouter from './routes/backup.js';
+import ecomRouter from './routes/ecom.js';
+import ecomWebhooksRouter from './routes/ecom-webhooks.js';
 
 // Load environment variables
 dotenv.config();
@@ -129,6 +131,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Mount backup routes
 app.use('/api/backup', backupRouter);
+app.use('/api/ecom', ecomRouter);
+app.use('/api/ecom/webhooks', ecomWebhooksRouter);
 
 const hexRegex = /^[0-9a-f]+$/i;
 

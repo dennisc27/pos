@@ -37,6 +37,7 @@ import {
   X,
   Folder,
   FolderOpen,
+  ShoppingCart,
 } from "lucide-react";
 import { useTheme } from "@/components/providers/theme-provider";
 
@@ -1102,6 +1103,11 @@ type ComplianceSettings = {
   idImagesPath: string;
 };
 
+type EcommerceSettings = {
+  inventorySyncMinutes: number;
+  orderSyncMinutes: number;
+};
+
 type ProviderForm = {
   values: Record<string, string>;
   masked: boolean;
@@ -1281,6 +1287,11 @@ const defaultComplianceSettings: ComplianceSettings = {
   idImagesPath: "",
 };
 
+const defaultEcommerceSettings: EcommerceSettings = {
+  inventorySyncMinutes: 15,
+  orderSyncMinutes: 5,
+};
+
 const prefixValues = ["POS-", "INV-", "PAWN-", "LAY-", "CRM-"];
 
 const notificationEventOptions = [
@@ -1418,6 +1429,12 @@ const NAV_SECTIONS = [
         label: "Expense & Income Categories",
         description: "Categorías contables usadas al generar movimientos automáticos.",
         icon: Wallet,
+      },
+      {
+        id: "pos-ecommerce",
+        label: "E-Commerce",
+        description: "Configura intervalos de sincronización de inventario y órdenes.",
+        icon: ShoppingCart,
       },
     ],
   },
@@ -1569,6 +1586,9 @@ export default function SettingsSystemPage() {
   const [complianceSettings, setComplianceSettings] = useState<ComplianceSettings>(
     defaultComplianceSettings
   );
+  const [ecommerceSettings, setEcommerceSettings] = useState<EcommerceSettings>(
+    defaultEcommerceSettings
+  );
   const [activeNav, setActiveNav] = useState<string>(NAV_SECTIONS[0].items[0].id);
   const allNavItems = useMemo(() => NAV_SECTIONS.flatMap((section) => section.items), []);
   const activeNavItem = useMemo(
@@ -1703,6 +1723,7 @@ export default function SettingsSystemPage() {
         setNotificationSettings(defaultNotificationSettings);
         setMaintenanceSettings(defaultMaintenanceSettings);
         setComplianceSettings(defaultComplianceSettings);
+        setEcommerceSettings(defaultEcommerceSettings);
       }
     } finally {
       setLoading(false);
@@ -1990,6 +2011,12 @@ export default function SettingsSystemPage() {
           blockId: Boolean(raw.blockId ?? defaultComplianceSettings.blockId),
           idImagesPath: String(raw.idImagesPath ?? defaultComplianceSettings.idImagesPath),
         });
+      } else if (entry.key === "ecommerce.settings" && entry.value && typeof entry.value === "object") {
+        const raw = entry.value as Partial<EcommerceSettings>;
+        setEcommerceSettings({
+          inventorySyncMinutes: Number(raw.inventorySyncMinutes ?? defaultEcommerceSettings.inventorySyncMinutes),
+          orderSyncMinutes: Number(raw.orderSyncMinutes ?? defaultEcommerceSettings.orderSyncMinutes),
+        });
       } else if (entry.key === "pos.tenders" && Array.isArray(entry.value)) {
         setTenders(
           entry.value.map((raw) => ({
@@ -2147,6 +2174,7 @@ export default function SettingsSystemPage() {
         { key: "notifications.settings", value: notificationSettings },
         { key: "maintenance.settings", value: maintenanceSettings },
         { key: "compliance.settings", value: complianceSettings },
+        { key: "ecommerce.settings", value: ecommerceSettings },
       ];
 
       (Object.keys(providerKeys) as ProviderKey[]).forEach((provider) => {
@@ -3595,6 +3623,60 @@ export default function SettingsSystemPage() {
                 }
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
+            </div>
+          </div>
+        );
+      case "pos-ecommerce":
+        return (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Configura los intervalos de sincronización automática con canales de e-commerce (eBay, Shopify, etc.).
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="inventory-sync-minutes">
+                  Sincronización de inventario (minutos)
+                </label>
+                <input
+                  id="inventory-sync-minutes"
+                  type="number"
+                  min="1"
+                  max="1440"
+                  value={ecommerceSettings.inventorySyncMinutes}
+                  onChange={(event) =>
+                    setEcommerceSettings((state) => ({
+                      ...state,
+                      inventorySyncMinutes: Math.max(1, Math.min(1440, Number(event.target.value) || 15)),
+                    }))
+                  }
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Frecuencia con la que se sincroniza el inventario con los marketplaces (1-1440 minutos)
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="order-sync-minutes">
+                  Sincronización de órdenes (minutos)
+                </label>
+                <input
+                  id="order-sync-minutes"
+                  type="number"
+                  min="1"
+                  max="1440"
+                  value={ecommerceSettings.orderSyncMinutes}
+                  onChange={(event) =>
+                    setEcommerceSettings((state) => ({
+                      ...state,
+                      orderSyncMinutes: Math.max(1, Math.min(1440, Number(event.target.value) || 5)),
+                    }))
+                  }
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Frecuencia con la que se importan nuevas órdenes desde los marketplaces (1-1440 minutos)
+                </p>
+              </div>
             </div>
           </div>
         );

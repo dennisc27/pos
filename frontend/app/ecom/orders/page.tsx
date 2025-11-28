@@ -6,14 +6,21 @@ import {
   AlertCircle,
   CheckCircle2,
   ClipboardList,
+  Download,
+  Edit,
+  FileText,
   Loader2,
+  MapPin,
   Package,
+  Plus,
   RefreshCcw,
   ShieldCheck,
   Truck,
   Undo2,
+  User,
 } from "lucide-react";
-
+import { OrderTimeline } from "@/components/ecom/order-timeline";
+import { InventoryAllocationView } from "@/components/ecom/inventory-allocation-view";
 import { formatCurrencyFromCents } from "@/lib/utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -48,12 +55,22 @@ type OrderRecord = {
   provider: string | null;
   externalId: string;
   customerName: string;
+  customerEmail: string | null;
   status: string;
+  paymentStatus: string | null;
+  fulfillmentStatus: string | null;
   totalCents: number;
+  subtotalCents: number | null;
+  taxCents: number | null;
+  shippingCents: number | null;
   currency: string;
   createdAt: string | null;
   updatedAt: string | null;
   shippingAddress: unknown;
+  billingAddress: unknown;
+  trackingNumber: string | null;
+  shippingCarrier: string | null;
+  internalOrderId: number | null;
   items: OrderItem[];
 };
 
@@ -104,6 +121,18 @@ export default function EcommerceOrdersPage() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<StatusMessage>(null);
   const [importForm, setImportForm] = useState({ channelId: "", payload: "" });
+  const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ importing: boolean; progress: number }>({ importing: false, progress: 0 });
+  const [importFilters, setImportFilters] = useState({
+    channelId: "",
+    startDate: "",
+    endDate: "",
+    status: "all",
+  });
+  const [orderNotes, setOrderNotes] = useState<Record<number, string>>({});
+  const [showShippingModal, setShowShippingModal] = useState<number | null>(null);
+  const [shippingData, setShippingData] = useState({ trackingNumber: "", carrier: "" });
 
   const orderSummary = useMemo(() => {
     const summary: Record<string, number> = { pending: 0, paid: 0, fulfilled: 0, cancelled: 0 };
@@ -333,13 +362,49 @@ export default function EcommerceOrdersPage() {
               </select>
             </div>
           </div>
-          <button
-            className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
-            onClick={() => fetchOrders(filters)}
-            disabled={loading}
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />} Actualizar
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+              onClick={() => setShowImportModal(true)}
+            >
+              <Plus className="h-4 w-4" /> Importar
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+              onClick={() => {
+                // Export orders as CSV
+                const csv = [
+                  ["Pedido", "Cliente", "Email", "Estado", "Total", "Fecha"].join(","),
+                  ...orders.map((o) =>
+                    [
+                      o.externalId,
+                      `"${o.customerName}"`,
+                      `"${o.customerEmail || ""}"`,
+                      o.status,
+                      o.totalCents / 100,
+                      o.createdAt || "",
+                    ].join(",")
+                  ),
+                ].join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `orders-${new Date().toISOString().split("T")[0]}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download className="h-4 w-4" /> Exportar
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-input dark:border-slate-700 px-3 py-2 text-sm text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+              onClick={() => fetchOrders(filters)}
+              disabled={loading}
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />} Actualizar
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 overflow-hidden rounded-md border border-border dark:border-slate-800">
@@ -390,6 +455,12 @@ export default function EcommerceOrdersPage() {
                   </td>
                   <td className="px-3 py-3 align-top">
                     <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-2.5 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800"
+                        onClick={() => setSelectedOrder(order)}
+                      >
+                        <FileText className="h-3 w-3" /> Ver
+                      </button>
                       {actionOrder.map((action) => {
                         const meta = actionLabels[action];
                         const Icon = meta.icon;
@@ -398,7 +469,13 @@ export default function EcommerceOrdersPage() {
                           <button
                             key={action}
                             className="inline-flex items-center gap-1 rounded-md border border-input dark:border-slate-700 px-2.5 py-1 text-xs text-foreground dark:text-slate-200 hover:bg-muted/80 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                            onClick={() => runOrderAction(order, action)}
+                            onClick={() => {
+                              if (action === "ship") {
+                                setShowShippingModal(order.id);
+                              } else {
+                                runOrderAction(order, action);
+                              }
+                            }}
                             disabled={disabled}
                           >
                             <Icon className="h-3 w-3" /> {meta.label}
@@ -414,57 +491,435 @@ export default function EcommerceOrdersPage() {
         </div>
       </section>
 
-      <section className="rounded-lg border border-border dark:border-slate-800 bg-card dark:bg-slate-900/70 p-5">
-        <h2 className="text-lg font-semibold text-foreground dark:text-white">Importar órdenes desde marketplace</h2>
-        <p className="text-xs text-muted-foreground dark:text-slate-400">
-          Pega el payload recibido del marketplace (array JSON) y asigna el canal correspondiente. El backend deduplica por
-          externalId.
-        </p>
+      {/* Order Detail Modal */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-foreground">Detalles de Orden: {selectedOrder.externalId}</h2>
+              <button
+                type="button"
+                onClick={() => setSelectedOrder(null)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
 
-        <form className="mt-4 grid gap-4 md:grid-cols-2" onSubmit={submitImport}>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="import-channel">
-              Canal destino
-            </label>
-            <select
-              id="import-channel"
-              className="w-full rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-white focus:border-sky-500 focus:outline-none"
-              value={importForm.channelId}
-              onChange={(event) => setImportForm((state) => ({ ...state, channelId: event.target.value }))}
-              required
+            <div className="space-y-6">
+              {/* Customer Information */}
+              <div className="rounded-lg border border-border bg-muted/40 p-4">
+                <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <User className="h-4 w-4" /> Información del Cliente
+                </h3>
+                <div className="grid gap-2 md:grid-cols-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Nombre:</span>{" "}
+                    <span className="font-medium">{selectedOrder.customerName}</span>
+                  </div>
+                  {selectedOrder.customerEmail && (
+                    <div>
+                      <span className="text-muted-foreground">Email:</span>{" "}
+                      <span className="font-medium">{selectedOrder.customerEmail}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-muted-foreground">Estado:</span> {statusBadge(selectedOrder.status)}
+                  </div>
+                  {selectedOrder.paymentStatus && (
+                    <div>
+                      <span className="text-muted-foreground">Pago:</span>{" "}
+                      <span className="font-medium">{selectedOrder.paymentStatus}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Addresses */}
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border border-border bg-muted/40 p-4">
+                  <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <MapPin className="h-4 w-4" /> Dirección de Envío
+                  </h3>
+                  <pre className="whitespace-pre-wrap text-xs text-muted-foreground">
+                    {formatAddress(selectedOrder.shippingAddress)}
+                  </pre>
+                </div>
+                {selectedOrder.billingAddress && (
+                  <div className="rounded-lg border border-border bg-muted/40 p-4">
+                    <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <MapPin className="h-4 w-4" /> Dirección de Facturación
+                    </h3>
+                    <pre className="whitespace-pre-wrap text-xs text-muted-foreground">
+                      {formatAddress(selectedOrder.billingAddress)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+
+              {/* Order Timeline */}
+              <div className="rounded-lg border border-border bg-muted/40 p-4">
+                <OrderTimeline
+                  status={selectedOrder.status as any}
+                  fulfillmentStatus={selectedOrder.fulfillmentStatus as any}
+                  createdAt={selectedOrder.createdAt || ""}
+                  updatedAt={selectedOrder.updatedAt || ""}
+                />
+              </div>
+
+              {/* Inventory Allocation */}
+              {selectedOrder.items.length > 0 && (
+                <div className="rounded-lg border border-border bg-muted/40 p-4">
+                  <InventoryAllocationView
+                    allocations={selectedOrder.items.map((item) => ({
+                      branchId: item.allocatedBranchId,
+                      versionId: item.allocatedVersionId,
+                      productCode: item.sku || null,
+                      quantity: item.quantity,
+                    }))}
+                  />
+                </div>
+              )}
+
+              {/* Order Items */}
+              <div className="rounded-lg border border-border bg-muted/40 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-foreground">Artículos</h3>
+                <div className="space-y-2">
+                  {selectedOrder.items.map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between rounded border border-border bg-background p-2 text-sm">
+                      <div>
+                        <span className="font-medium">{item.title || `Item ${idx + 1}`}</span>
+                        {item.sku && <span className="text-muted-foreground"> ({item.sku})</span>}
+                      </div>
+                      <div className="text-right">
+                        <div>{item.quantity} × {formatCurrencyFromCents(item.priceCents)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          = {formatCurrencyFromCents(item.quantity * item.priceCents)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex justify-end gap-4 border-t border-border pt-4 text-sm">
+                  {selectedOrder.subtotalCents && (
+                    <div>
+                      <span className="text-muted-foreground">Subtotal:</span>{" "}
+                      <span className="font-medium">{formatCurrencyFromCents(selectedOrder.subtotalCents)}</span>
+                    </div>
+                  )}
+                  {selectedOrder.taxCents && (
+                    <div>
+                      <span className="text-muted-foreground">Impuestos:</span>{" "}
+                      <span className="font-medium">{formatCurrencyFromCents(selectedOrder.taxCents)}</span>
+                    </div>
+                  )}
+                  {selectedOrder.shippingCents && (
+                    <div>
+                      <span className="text-muted-foreground">Envío:</span>{" "}
+                      <span className="font-medium">{formatCurrencyFromCents(selectedOrder.shippingCents)}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-muted-foreground">Total:</span>{" "}
+                    <span className="font-semibold text-lg">{formatCurrencyFromCents(selectedOrder.totalCents)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Order Notes */}
+              <div className="rounded-lg border border-border bg-muted/40 p-4">
+                <h3 className="mb-3 text-sm font-semibold text-foreground">Notas</h3>
+                <textarea
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  rows={3}
+                  value={orderNotes[selectedOrder.id] || ""}
+                  onChange={(e) => setOrderNotes((prev) => ({ ...prev, [selectedOrder.id]: e.target.value }))}
+                  placeholder="Agregar notas sobre esta orden..."
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedOrder(null)}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  Cerrar
+                </button>
+                {!selectedOrder.internalOrderId && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Convert to internal order
+                      try {
+                        const response = await fetch(`${API_BASE_URL}/api/ecom/orders/${selectedOrder.id}/convert`, {
+                          method: "POST",
+                        });
+                        if (!response.ok) {
+                          const data = await response.json();
+                          throw new Error(data?.error ?? "Error al convertir");
+                        }
+                        setStatus({ tone: "success", message: "Orden convertida a orden interna" });
+                        await fetchOrders(filters);
+                        setSelectedOrder(null);
+                      } catch (error) {
+                        setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error" });
+                      }
+                    }}
+                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    Convertir a Orden Interna
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Orders Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Importar Órdenes</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportForm({ channelId: "", payload: "" });
+                  setImportFilters({ channelId: "", startDate: "", endDate: "", status: "all" });
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!importFilters.channelId) {
+                  setStatus({ tone: "error", message: "Selecciona el canal" });
+                  return;
+                }
+
+                setImportProgress({ importing: true, progress: 0 });
+                try {
+                  // Fetch orders from marketplace
+                  const response = await fetch(
+                    `${API_BASE_URL}/api/ecom/channels/${importFilters.channelId}/orders?` +
+                      new URLSearchParams({
+                        startDate: importFilters.startDate || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+                        endDate: importFilters.endDate || new Date().toISOString().split("T")[0],
+                        status: importFilters.status !== "all" ? importFilters.status : "",
+                      })
+                  );
+                  const data = await response.json();
+                  if (!response.ok) {
+                    throw new Error(data?.error ?? "Error al importar");
+                  }
+
+                  setStatus({ tone: "success", message: `Órdenes importadas: ${data.imported || 0}` });
+                  setShowImportModal(false);
+                  await fetchOrders(filters);
+                } catch (error) {
+                  setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error" });
+                } finally {
+                  setImportProgress({ importing: false, progress: 0 });
+                }
+              }}
+              className="space-y-4"
             >
-              <option value="">Selecciona…</option>
-              {channels.map((channel) => (
-                <option key={channel.id} value={channel.id}>
-                  {channel.name} ({channel.provider})
-                </option>
-              ))}
-            </select>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Canal *</label>
+                  <select
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importFilters.channelId}
+                    onChange={(e) => setImportFilters((state) => ({ ...state, channelId: e.target.value }))}
+                    required
+                  >
+                    <option value="">Seleccionar...</option>
+                    {channels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.name} ({channel.provider})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Estado</label>
+                  <select
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importFilters.status}
+                    onChange={(e) => setImportFilters((state) => ({ ...state, status: e.target.value }))}
+                  >
+                    <option value="all">Todos</option>
+                    <option value="pending">Pendiente</option>
+                    <option value="paid">Pagado</option>
+                    <option value="fulfilled">Despachado</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Fecha Inicio</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importFilters.startDate}
+                    onChange={(e) => setImportFilters((state) => ({ ...state, startDate: e.target.value }))}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Fecha Fin</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    value={importFilters.endDate}
+                    onChange={(e) => setImportFilters((state) => ({ ...state, endDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {importProgress.importing && (
+                <div className="rounded-md border border-border bg-muted/40 p-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Importando órdenes...</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setImportFilters({ channelId: "", startDate: "", endDate: "", status: "all" });
+                  }}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={importProgress.importing}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+                >
+                  {importProgress.importing ? (
+                    <>
+                      <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Importando...
+                    </>
+                  ) : (
+                    <>
+                      <ClipboardList className="mr-2 inline h-4 w-4" /> Importar
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
-          <div className="space-y-1 md:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground dark:text-slate-300" htmlFor="import-json">
-              Payload JSON
-            </label>
-            <textarea
-              id="import-json"
-              className="min-h-[180px] w-full rounded-md border border-input dark:border-slate-700 bg-background dark:bg-slate-950 px-3 py-2 text-sm text-foreground dark:text-slate-100 focus:border-sky-500 focus:outline-none"
-              placeholder='[{ "externalId": "1001", "customerName": "Cliente", "total": 1500, "items": [...] }]'
-              value={importForm.payload}
-              onChange={(event) => setImportForm((state) => ({ ...state, payload: event.target.value }))}
-              required
-            />
-          </div>
-          <div className="md:col-span-2 flex justify-end gap-3">
-            <button
-              type="submit"
-              className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground dark:text-white hover:bg-primary/90"
-              disabled={loading}
+        </div>
+      )}
+
+      {/* Shipping Label Modal */}
+      {showShippingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-foreground">Agregar Información de Envío</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowShippingModal(null);
+                  setShippingData({ trackingNumber: "", carrier: "" });
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const response = await fetch(`${API_BASE_URL}/api/ecom/orders/${showShippingModal}/ship`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      trackingNumber: shippingData.trackingNumber,
+                      carrier: shippingData.carrier,
+                    }),
+                  });
+                  if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data?.error ?? "Error");
+                  }
+                  setStatus({ tone: "success", message: "Información de envío actualizada" });
+                  setShowShippingModal(null);
+                  setShippingData({ trackingNumber: "", carrier: "" });
+                  await fetchOrders(filters);
+                } catch (error) {
+                  setStatus({ tone: "error", message: error instanceof Error ? error.message : "Error" });
+                }
+              }}
+              className="space-y-4"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />} Importar órdenes
-            </button>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Número de Rastreo</label>
+                <input
+                  type="text"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={shippingData.trackingNumber}
+                  onChange={(e) => setShippingData((state) => ({ ...state, trackingNumber: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Transportista</label>
+                <select
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  value={shippingData.carrier}
+                  onChange={(e) => setShippingData((state) => ({ ...state, carrier: e.target.value }))}
+                  required
+                >
+                  <option value="">Seleccionar...</option>
+                  <option value="fedex">FedEx</option>
+                  <option value="ups">UPS</option>
+                  <option value="usps">USPS</option>
+                  <option value="dhl">DHL</option>
+                  <option value="other">Otro</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowShippingModal(null);
+                    setShippingData({ trackingNumber: "", carrier: "" });
+                  }}
+                  className="rounded-md border border-border bg-background px-4 py-2 text-sm font-medium hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Guardar
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
-      </section>
+        </div>
+      )}
     </div>
   );
 }
