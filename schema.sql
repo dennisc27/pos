@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS customers (
   email VARCHAR(190),
   phone VARCHAR(40),
   address TEXT,
+  date_of_birth DATE,
   is_blacklisted BOOLEAN DEFAULT FALSE,
   loyalty_points INT DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -124,6 +125,7 @@ CREATE TABLE IF NOT EXISTS categories (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   parent_id BIGINT NULL,
   name VARCHAR(120) NOT NULL,
+  caracter VARCHAR(1) NULL,
   FOREIGN KEY (parent_id) REFERENCES categories(id)
 );
 
@@ -526,6 +528,16 @@ CREATE TABLE IF NOT EXISTS interest_models (
   default_term_count INT NOT NULL DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interest_model_categories (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  interest_model_id BIGINT NOT NULL,
+  category_id BIGINT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_interest_model_category (interest_model_id, category_id),
+  FOREIGN KEY (interest_model_id) REFERENCES interest_models(id) ON DELETE CASCADE,
+  FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS loan_collateral (

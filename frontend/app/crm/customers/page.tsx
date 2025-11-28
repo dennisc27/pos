@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 
 import {
   AlertTriangle,
+  Calendar,
   CreditCard,
   Edit,
   Flag,
@@ -41,6 +42,7 @@ type CustomerSummary = {
   email: string | null;
   phone: string | null;
   address: string | null;
+  dateOfBirth: string | null;
   isBlacklisted: boolean;
   loyaltyPoints: number;
   createdAt: string | null;
@@ -802,6 +804,11 @@ export default function CrmCustomersPage() {
                     {detail.customer.email ? (
                       <span className="inline-flex items-center gap-2">
                         <Mail className="h-4 w-4" /> {detail.customer.email}
+                      </span>
+                    ) : null}
+                    {detail.customer.dateOfBirth ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Calendar className="h-4 w-4" /> {formatDate(detail.customer.dateOfBirth)}
                       </span>
                     ) : null}
                     {detail.customer.address ? (

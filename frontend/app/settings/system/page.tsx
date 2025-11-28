@@ -56,6 +56,14 @@ type InterestModel = {
   maxPrincipalCents: number | null;
   lateFeeBps: number;
   defaultTermCount: number;
+  categoryIds?: number[];
+};
+
+type Category = {
+  id: number;
+  name: string;
+  parentId: number | null;
+  caracter: string | null;
 };
 
 function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: number; onGraceDaysChange: (days: number) => void }) {
@@ -64,6 +72,8 @@ function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: nu
   const [error, setError] = useState<string | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<InterestModel | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -99,8 +109,39 @@ function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: nu
     loadModels();
   }, [loadModels]);
 
+  const loadCategories = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/categories`);
+      if (response.ok) {
+        const data = await response.json();
+        setCategories(data.categories ?? []);
+      }
+    } catch (err) {
+      // Silently fail - categories are optional
+      console.error("Failed to load categories:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
+  const getCategoryPath = (category: Category, visited = new Set<number>()): string => {
+    if (visited.has(category.id)) {
+      return category.name; // Prevent infinite recursion
+    }
+    visited.add(category.id);
+    
+    const parent = categories.find((c) => c.id === category.parentId);
+    if (parent) {
+      return `${getCategoryPath(parent, visited)} > ${category.name}`;
+    }
+    return category.name;
+  };
+
   const openCreateDialog = () => {
     setEditingModel(null);
+    setSelectedCategoryIds([]);
     setFormData({
       name: "",
       description: "",
@@ -117,6 +158,7 @@ function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: nu
 
   const openEditDialog = (model: InterestModel) => {
     setEditingModel(model);
+    setSelectedCategoryIds(model.categoryIds ?? []);
     setFormData({
       name: model.name,
       description: model.description ?? "",
@@ -134,6 +176,7 @@ function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: nu
   const closeDialog = () => {
     setIsDialogOpen(false);
     setEditingModel(null);
+    setSelectedCategoryIds([]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -152,6 +195,7 @@ function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: nu
         maxPrincipalCents: formData.maxPrincipalCents ? Math.round(Number(formData.maxPrincipalCents) * 100) : null,
         lateFeeBps: Math.round(Number(formData.lateFeeBps) * 100), // Convert percentage to basis points
         defaultTermCount: Number(formData.defaultTermCount),
+        categoryIds: selectedCategoryIds,
       };
 
       const url = editingModel
@@ -455,6 +499,46 @@ function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: nu
                 />
               </div>
 
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Categorías Aplicables</label>
+                <div className="mt-1 max-h-48 overflow-y-auto rounded-md border border-border bg-background p-2">
+                  {categories.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No hay categorías disponibles</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {categories.map((category) => (
+                        <label
+                          key={category.id}
+                          className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted/50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedCategoryIds.includes(category.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedCategoryIds([...selectedCategoryIds, category.id]);
+                              } else {
+                                setSelectedCategoryIds(selectedCategoryIds.filter((id) => id !== category.id));
+                              }
+                            }}
+                            className="h-4 w-4 rounded border-border"
+                          />
+                          <span className="flex-1">
+                            {getCategoryPath(category)}
+                            {category.caracter && (
+                              <span className="ml-2 text-xs text-muted-foreground">({category.caracter})</span>
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Selecciona las categorías a las que se aplicará este modelo de interés. Si no se selecciona ninguna, se aplicará a todas las categorías.
+                </p>
+              </div>
+
               <div className="flex justify-end gap-2 pt-4">
                 <button
                   type="button"
@@ -473,6 +557,356 @@ function InterestModelsSection({ graceDays, onGraceDaysChange }: { graceDays: nu
                       <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Guardando...
                     </>
                   ) : editingModel ? (
+                    "Actualizar"
+                  ) : (
+                    "Crear"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoriesSection() {
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [formData, setFormData] = useState({
+    name: "",
+    parentId: "",
+    caracter: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+
+  const loadCategories = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/categories`);
+      if (!response.ok) {
+        throw new Error(`Failed to load categories: ${response.status}`);
+      }
+      const data = await response.json();
+      setCategories(data.categories ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load categories");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
+  const getFirstUnusedCharacter = useCallback((name: string, excludeCategoryId?: number): string | null => {
+    if (!name || name.trim().length === 0) return null;
+    
+    const usedCharacters = new Set(
+      categories
+        .filter((c) => c.caracter && (!excludeCategoryId || c.id !== excludeCategoryId))
+        .map((c) => c.caracter?.toUpperCase())
+        .filter((c): c is string => c !== null)
+    );
+
+    const nameUpper = name.toUpperCase().trim();
+    for (let i = 0; i < nameUpper.length; i++) {
+      const char = nameUpper[i];
+      if (char && /[A-Z0-9]/.test(char) && !usedCharacters.has(char)) {
+        return char;
+      }
+    }
+    return null;
+  }, [categories]);
+
+  const openCreateDialog = () => {
+    setEditingCategory(null);
+    setFormData({
+      name: "",
+      parentId: "",
+      caracter: "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const openEditDialog = (category: Category) => {
+    setEditingCategory(category);
+    setFormData({
+      name: category.name,
+      parentId: category.parentId ? String(category.parentId) : "",
+      caracter: category.caracter || "",
+    });
+    setIsDialogOpen(true);
+  };
+
+  const closeDialog = () => {
+    setIsDialogOpen(false);
+    setEditingCategory(null);
+  };
+
+  // Auto-fill caracter when name changes (only if caracter is empty)
+  useEffect(() => {
+    if (isDialogOpen && formData.name && !formData.caracter) {
+      const suggestedChar = getFirstUnusedCharacter(formData.name, editingCategory?.id);
+      if (suggestedChar) {
+        setFormData((prev) => ({ ...prev, caracter: suggestedChar }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.name, isDialogOpen, editingCategory?.id]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const payload = {
+        name: formData.name.trim(),
+        parentId: formData.parentId ? Number(formData.parentId) : null,
+        caracter: formData.caracter.trim() || null,
+      };
+
+      const url = editingCategory
+        ? `${API_BASE_URL}/api/categories/${editingCategory.id}`
+        : `${API_BASE_URL}/api/categories`;
+      const method = editingCategory ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to ${editingCategory ? "update" : "create"} category`);
+      }
+
+      await loadCategories();
+      closeDialog();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to ${editingCategory ? "update" : "create"} category`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/categories/${id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to delete category");
+      }
+
+      await loadCategories();
+      setDeleteConfirm(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete category");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const getCategoryPath = (category: Category, visited = new Set<number>()): string => {
+    if (visited.has(category.id)) {
+      return category.name; // Prevent infinite recursion
+    }
+    visited.add(category.id);
+    
+    const parent = categories.find((c) => c.id === category.parentId);
+    if (parent) {
+      return `${getCategoryPath(parent, visited)} > ${category.name}`;
+    }
+    return category.name;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Categorías de Productos</h3>
+          <p className="text-xs text-muted-foreground">Gestiona las categorías para organizar productos</p>
+        </div>
+        <button
+          type="button"
+          onClick={openCreateDialog}
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary/90"
+        >
+          <Plus className="h-3.5 w-3.5" /> Nueva categoría
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : categories.length === 0 ? (
+        <div className="rounded-md border border-border bg-muted/50 px-4 py-8 text-center text-xs text-muted-foreground">
+          No hay categorías. Crea una nueva para comenzar.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {categories.map((category) => (
+            <div
+              key={category.id}
+              className="flex items-start justify-between rounded-md border border-border bg-background p-3"
+            >
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <Folder className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-medium">{category.name}</p>
+                  {category.parentId && (
+                    <span className="text-xs text-muted-foreground">
+                      ({getCategoryPath(category)})
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openEditDialog(category)}
+                  className="rounded-md border border-border px-2 py-1 text-xs transition hover:bg-muted"
+                >
+                  Editar
+                </button>
+                {deleteConfirm === category.id ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(category.id)}
+                      disabled={submitting}
+                      className="rounded-md bg-destructive px-2 py-1 text-xs text-destructive-foreground transition hover:bg-destructive/90 disabled:opacity-50"
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirm(null)}
+                      className="rounded-md border border-border px-2 py-1 text-xs transition hover:bg-muted"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirm(category.id)}
+                    className="rounded-md border border-destructive/50 px-2 py-1 text-xs text-destructive transition hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg border border-border bg-background p-6 shadow-lg">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">
+                {editingCategory ? "Editar Categoría" : "Nueva Categoría"}
+              </h3>
+              <button
+                type="button"
+                onClick={closeDialog}
+                className="rounded-md p-1 transition hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Nombre *</label>
+                <input
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                  maxLength={120}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="Ej. Electrónica"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Carácter</label>
+                <input
+                  value={formData.caracter}
+                  onChange={(e) => {
+                    const value = e.target.value.toUpperCase().slice(0, 1);
+                    setFormData({ ...formData, caracter: value });
+                  }}
+                  maxLength={1}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="E"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Se auto-completa con el primer carácter disponible del nombre. Debe ser único.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Categoría Padre</label>
+                <select
+                  value={formData.parentId}
+                  onChange={(e) => setFormData({ ...formData, parentId: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">Ninguna (categoría raíz)</option>
+                  {categories
+                    .filter((c) => !editingCategory || c.id !== editingCategory.id)
+                    .map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {getCategoryPath(category)}
+                      </option>
+                    ))}
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Opcional: selecciona una categoría padre para crear una subcategoría
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={closeDialog}
+                  className="rounded-md border border-border px-4 py-2 text-sm transition hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Guardando...
+                    </>
+                  ) : editingCategory ? (
                     "Actualizar"
                   ) : (
                     "Crear"
@@ -638,6 +1072,7 @@ type PawnSettings = {
   interestModelCode: string;
   graceDays?: number; // Optional for backward compatibility, managed in Interest Models section
   alertRule: string;
+  mobileApiKey?: string;
 };
 
 type NotificationSettings = {
@@ -816,6 +1251,7 @@ const defaultInventorySettings: InventorySettings = {
 const defaultPawnSettings: PawnSettings = {
   interestModelCode: "STD",
   alertRule: "Artículos sobre RD$50k requieren alerta",
+  mobileApiKey: "",
 };
 
 const defaultNotificationSettings: NotificationSettings = {
@@ -993,6 +1429,12 @@ const NAV_SECTIONS = [
         label: "Inventory",
         description: "Umbrales de inventario, SKU automáticos y cuarentena.",
         icon: Store,
+      },
+      {
+        id: "inventory-categories",
+        label: "Categories",
+        description: "Administra las categorías de productos.",
+        icon: Folder,
       },
     ],
   },
@@ -1497,6 +1939,8 @@ export default function SettingsSystemPage() {
           graceDays: raw.graceDays !== undefined ? Number(raw.graceDays) : 5, // Default to 5 if not set
           alertRule:
             typeof raw.alertRule === "string" ? raw.alertRule : defaultPawnSettings.alertRule,
+          mobileApiKey:
+            typeof raw.mobileApiKey === "string" ? raw.mobileApiKey : defaultPawnSettings.mobileApiKey ?? "",
         });
       } else if (entry.key === "notifications.settings" && entry.value && typeof entry.value === "object") {
         const raw = entry.value as Partial<NotificationSettings>;
@@ -3206,23 +3650,45 @@ export default function SettingsSystemPage() {
             </div>
           </div>
         );
+      case "inventory-categories":
+        return <CategoriesSection />;
       case "pawn-interest":
         return <InterestModelsSection graceDays={pawnSettings.graceDays ?? 5} onGraceDaysChange={(days) => setPawnSettings((state) => ({ ...state, graceDays: days }))} />;
       case "pawn-alerts":
         return (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="pawn-alert">
-              Regla de alerta
-            </label>
-            <textarea
-              id="pawn-alert"
-              value={pawnSettings.alertRule}
-              onChange={(event) =>
-                setPawnSettings((state) => ({ ...state, alertRule: event.target.value }))
-              }
-              className="min-h-[100px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-              placeholder="Ej. Artículos > RD$50k requieren aprobación"
-            />
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="pawn-alert">
+                Regla de alerta
+              </label>
+              <textarea
+                id="pawn-alert"
+                value={pawnSettings.alertRule}
+                onChange={(event) =>
+                  setPawnSettings((state) => ({ ...state, alertRule: event.target.value }))
+                }
+                className="min-h-[100px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="Ej. Artículos > RD$50k requieren aprobación"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="mobile-api-key">
+                MOBILE API
+              </label>
+              <input
+                id="mobile-api-key"
+                type="text"
+                value={pawnSettings.mobileApiKey ?? ""}
+                onChange={(event) =>
+                  setPawnSettings((state) => ({ ...state, mobileApiKey: event.target.value }))
+                }
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="TCB-X3M-00N-FPV-GNJ-8F5-OAK-MS8"
+              />
+              <p className="text-xs text-muted-foreground">
+                API key para SickW (verificación de IMEI de celulares)
+              </p>
+            </div>
           </div>
         );
       case "notifications-events":

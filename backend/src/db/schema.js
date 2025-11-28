@@ -61,6 +61,7 @@ export const productCategories = mysqlTable('categories', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
   name: varchar('name', { length: 120 }).notNull(),
   parentId: bigint('parent_id', { mode: 'number' }),
+  caracter: varchar('caracter', { length: 1 }),
 });
 
 export const products = mysqlTable('products', {
@@ -312,6 +313,7 @@ export const customers = mysqlTable('customers', {
   email: varchar('email', { length: 190 }),
   phone: varchar('phone', { length: 40 }),
   address: text('address'),
+  dateOfBirth: date('date_of_birth'),
   isBlacklisted: boolean('is_blacklisted').default(false),
   loyaltyPoints: int('loyalty_points').default(0),
   createdAt: timestamp('created_at').defaultNow(),
@@ -400,6 +402,19 @@ export const interestModels = mysqlTable('interest_models', {
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
+
+export const interestModelCategories = mysqlTable(
+  'interest_model_categories',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),
+    interestModelId: bigint('interest_model_id', { mode: 'number' }).notNull(),
+    categoryId: bigint('category_id', { mode: 'number' }).notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (table) => ({
+    uniqInterestModelCategory: uniqueIndex('uniq_interest_model_category').on(table.interestModelId, table.categoryId),
+  })
+);
 
 export const loanCollateral = mysqlTable('loan_collateral', {
   id: bigint('id', { mode: 'number' }).primaryKey().autoincrement(),

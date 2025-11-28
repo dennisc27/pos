@@ -23,6 +23,7 @@ import {
   inventoryTransferLines,
   inventoryTransfers,
   interestModels,
+  interestModelCategories,
   invoices,
   idImages,
   idImageUploadTokens,
@@ -6616,7 +6617,24 @@ app.get('/api/interest-models', async (req, res, next) => {
       .from(interestModels)
       .orderBy(asc(interestModels.name));
 
-    res.json({ interestModels: models });
+    // Get category associations for each model
+    const modelsWithCategories = await Promise.all(
+      models.map(async (model) => {
+        const categoryAssociations = await db
+          .select({
+            categoryId: interestModelCategories.categoryId,
+          })
+          .from(interestModelCategories)
+          .where(eq(interestModelCategories.interestModelId, model.id));
+
+        return {
+          ...model,
+          categoryIds: categoryAssociations.map((ca) => ca.categoryId),
+        };
+      })
+    );
+
+    res.json({ interestModels: modelsWithCategories });
   } catch (error) {
     next(error);
   }
@@ -6673,7 +6691,9 @@ app.post('/api/interest-models', async (req, res, next) => {
       return res.status(400).json({ error: 'maxPrincipalCents cannot be less than minPrincipalCents' });
     }
 
-    await db
+    const categoryIds = Array.isArray(req.body?.categoryIds) ? req.body.categoryIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0) : [];
+
+    const [created] = await db
       .insert(interestModels)
       .values({
         name: normalizedName,
@@ -6688,7 +6708,19 @@ app.post('/api/interest-models', async (req, res, next) => {
         defaultTermCount: normalizedDefaultTermCount,
       });
 
-    // Get the newly created model by name and most recent ID
+    const modelId = created.insertId;
+
+    // Insert category associations
+    if (categoryIds.length > 0) {
+      await db.insert(interestModelCategories).values(
+        categoryIds.map((categoryId) => ({
+          interestModelId: modelId,
+          categoryId,
+        }))
+      );
+    }
+
+    // Get the newly created model
     const [model] = await db
       .select({
         id: interestModels.id,
@@ -6704,15 +6736,27 @@ app.post('/api/interest-models', async (req, res, next) => {
         defaultTermCount: interestModels.defaultTermCount,
       })
       .from(interestModels)
-      .where(eq(interestModels.name, normalizedName))
-      .orderBy(desc(interestModels.id))
+      .where(eq(interestModels.id, modelId))
       .limit(1);
 
     if (!model) {
       throw new HttpError(500, 'Failed to retrieve created interest model');
     }
 
-    res.status(201).json({ interestModel: model });
+    // Get category associations
+    const categoryAssociations = await db
+      .select({
+        categoryId: interestModelCategories.categoryId,
+      })
+      .from(interestModelCategories)
+      .where(eq(interestModelCategories.interestModelId, modelId));
+
+    res.status(201).json({
+      interestModel: {
+        ...model,
+        categoryIds: categoryAssociations.map((ca) => ca.categoryId),
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -6813,14 +6857,38 @@ app.put('/api/interest-models/:id', async (req, res, next) => {
       return res.status(400).json({ error: 'maxPrincipalCents cannot be less than minPrincipalCents' });
     }
 
-    if (Object.keys(updateData).length === 0) {
+    const categoryIds = req.body?.categoryIds !== undefined
+      ? (Array.isArray(req.body.categoryIds) ? req.body.categoryIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0) : [])
+      : undefined;
+
+    if (Object.keys(updateData).length === 0 && categoryIds === undefined) {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    await db
-      .update(interestModels)
-      .set(updateData)
-      .where(eq(interestModels.id, modelId));
+    if (Object.keys(updateData).length > 0) {
+      await db
+        .update(interestModels)
+        .set(updateData)
+        .where(eq(interestModels.id, modelId));
+    }
+
+    // Update category associations if provided
+    if (categoryIds !== undefined) {
+      // Delete existing associations
+      await db
+        .delete(interestModelCategories)
+        .where(eq(interestModelCategories.interestModelId, modelId));
+
+      // Insert new associations
+      if (categoryIds.length > 0) {
+        await db.insert(interestModelCategories).values(
+          categoryIds.map((categoryId) => ({
+            interestModelId: modelId,
+            categoryId,
+          }))
+        );
+      }
+    }
 
     const [updated] = await db
       .select({
@@ -6840,7 +6908,20 @@ app.put('/api/interest-models/:id', async (req, res, next) => {
       .where(eq(interestModels.id, modelId))
       .limit(1);
 
-    res.json({ interestModel: updated });
+    // Get category associations
+    const categoryAssociations = await db
+      .select({
+        categoryId: interestModelCategories.categoryId,
+      })
+      .from(interestModelCategories)
+      .where(eq(interestModelCategories.interestModelId, modelId));
+
+    res.json({
+      interestModel: {
+        ...updated,
+        categoryIds: categoryAssociations.map((ca) => ca.categoryId),
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -6881,6 +6962,318 @@ app.delete('/api/interest-models/:id', async (req, res, next) => {
 
     res.status(204).send();
   } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/categories', async (req, res, next) => {
+  try {
+    const categories = await db
+      .select({
+        id: productCategories.id,
+        name: productCategories.name,
+        parentId: productCategories.parentId,
+        caracter: productCategories.caracter,
+      })
+      .from(productCategories)
+      .orderBy(asc(productCategories.name));
+
+    res.json({ categories });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/categories', async (req, res, next) => {
+  try {
+    const { name, parentId = null, caracter = null } = req.body ?? {};
+
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    if (name.length > 120) {
+      return res.status(400).json({ error: 'name must be 120 characters or less' });
+    }
+
+    const normalizedName = name.trim();
+    let normalizedParentId = null;
+    let normalizedCharacter = null;
+
+    if (parentId != null) {
+      const parsedParentId = Number(parentId);
+      if (!Number.isInteger(parsedParentId) || parsedParentId <= 0) {
+        return res.status(400).json({ error: 'parentId must be a positive integer when provided' });
+      }
+
+      // Verify parent category exists
+      const [parent] = await db
+        .select({ id: productCategories.id })
+        .from(productCategories)
+        .where(eq(productCategories.id, parsedParentId))
+        .limit(1);
+
+      if (!parent) {
+        return res.status(404).json({ error: 'Parent category not found' });
+      }
+
+      normalizedParentId = parsedParentId;
+    }
+
+    if (caracter != null) {
+      if (typeof caracter !== 'string' || caracter.length !== 1) {
+        return res.status(400).json({ error: 'caracter must be a single character' });
+      }
+
+      const normalizedChar = caracter.toUpperCase().trim();
+      if (!normalizedChar) {
+        return res.status(400).json({ error: 'caracter cannot be empty' });
+      }
+
+      // Check for duplicate caracter
+      const [existingChar] = await db
+        .select({ id: productCategories.id })
+        .from(productCategories)
+        .where(eq(productCategories.caracter, normalizedChar))
+        .limit(1);
+
+      if (existingChar) {
+        return res.status(409).json({ error: 'A category with this caracter already exists' });
+      }
+
+      normalizedCharacter = normalizedChar;
+    }
+
+    // Check for duplicate name (case-insensitive)
+    const [existing] = await db
+      .select({ id: productCategories.id })
+      .from(productCategories)
+      .where(eq(productCategories.name, normalizedName))
+      .limit(1);
+
+    if (existing) {
+      return res.status(409).json({ error: 'A category with this name already exists' });
+    }
+
+    const [created] = await db
+      .insert(productCategories)
+      .values({
+        name: normalizedName,
+        parentId: normalizedParentId,
+        caracter: normalizedCharacter,
+      });
+
+    const [newCategory] = await db
+      .select({
+        id: productCategories.id,
+        name: productCategories.name,
+        parentId: productCategories.parentId,
+        caracter: productCategories.caracter,
+      })
+      .from(productCategories)
+      .where(eq(productCategories.id, created.insertId))
+      .limit(1);
+
+    res.status(201).json({ category: newCategory });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+app.put('/api/categories/:id', async (req, res, next) => {
+  try {
+    const categoryId = Number(req.params.id);
+
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      return res.status(400).json({ error: 'Invalid category ID' });
+    }
+
+    const { name, parentId, caracter } = req.body ?? {};
+
+    const [existing] = await db
+      .select({ id: productCategories.id, name: productCategories.name, parentId: productCategories.parentId, caracter: productCategories.caracter })
+      .from(productCategories)
+      .where(eq(productCategories.id, categoryId))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    const updateData = {};
+
+    if (name !== undefined) {
+      if (typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: 'name must be a non-empty string' });
+      }
+      if (name.length > 120) {
+        return res.status(400).json({ error: 'name must be 120 characters or less' });
+      }
+
+      const normalizedName = name.trim();
+
+      // Check for duplicate name (excluding current category)
+      const [duplicate] = await db
+        .select({ id: productCategories.id })
+        .from(productCategories)
+        .where(and(eq(productCategories.name, normalizedName), sql`${productCategories.id} != ${categoryId}`))
+        .limit(1);
+
+      if (duplicate) {
+        return res.status(409).json({ error: 'A category with this name already exists' });
+      }
+
+      updateData.name = normalizedName;
+    }
+
+    if (parentId !== undefined) {
+      if (parentId === null || parentId === '') {
+        updateData.parentId = null;
+      } else {
+        const parsedParentId = Number(parentId);
+        if (!Number.isInteger(parsedParentId) || parsedParentId <= 0) {
+          return res.status(400).json({ error: 'parentId must be a positive integer when provided' });
+        }
+
+        // Prevent setting parent to self
+        if (parsedParentId === categoryId) {
+          return res.status(400).json({ error: 'Category cannot be its own parent' });
+        }
+
+        // Verify parent category exists
+        const [parent] = await db
+          .select({ id: productCategories.id })
+          .from(productCategories)
+          .where(eq(productCategories.id, parsedParentId))
+          .limit(1);
+
+        if (!parent) {
+          return res.status(404).json({ error: 'Parent category not found' });
+        }
+
+        updateData.parentId = parsedParentId;
+      }
+    }
+
+    if (caracter !== undefined) {
+      if (caracter === null || caracter === '') {
+        updateData.caracter = null;
+      } else {
+        if (typeof caracter !== 'string' || caracter.length !== 1) {
+          return res.status(400).json({ error: 'caracter must be a single character' });
+        }
+
+        const normalizedChar = caracter.toUpperCase().trim();
+        if (!normalizedChar) {
+          return res.status(400).json({ error: 'caracter cannot be empty' });
+        }
+
+        // Check for duplicate caracter (excluding current category)
+        const [existingChar] = await db
+          .select({ id: productCategories.id })
+          .from(productCategories)
+          .where(and(eq(productCategories.caracter, normalizedChar), sql`${productCategories.id} != ${categoryId}`))
+          .limit(1);
+
+        if (existingChar) {
+          return res.status(409).json({ error: 'A category with this caracter already exists' });
+        }
+
+        updateData.caracter = normalizedChar;
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: 'At least one field must be provided for update' });
+    }
+
+    await db
+      .update(productCategories)
+      .set(updateData)
+      .where(eq(productCategories.id, categoryId));
+
+    const [updated] = await db
+      .select({
+        id: productCategories.id,
+        name: productCategories.name,
+        parentId: productCategories.parentId,
+        caracter: productCategories.caracter,
+      })
+      .from(productCategories)
+      .where(eq(productCategories.id, categoryId))
+      .limit(1);
+
+    res.json({ category: updated });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+app.delete('/api/categories/:id', async (req, res, next) => {
+  try {
+    const categoryId = Number(req.params.id);
+
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      return res.status(400).json({ error: 'Invalid category ID' });
+    }
+
+    const [existing] = await db
+      .select({ id: productCategories.id })
+      .from(productCategories)
+      .where(eq(productCategories.id, categoryId))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    // Check if category has child categories
+    const [hasChildren] = await db
+      .select({ id: productCategories.id })
+      .from(productCategories)
+      .where(eq(productCategories.parentId, categoryId))
+      .limit(1);
+
+    if (hasChildren) {
+      return res.status(409).json({ error: 'Cannot delete category that has child categories' });
+    }
+
+    // Check if category is being used by any products or product codes
+    const [productUsingCategory] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.categoryId, categoryId))
+      .limit(1);
+
+    if (productUsingCategory) {
+      return res.status(409).json({ error: 'Cannot delete category that is in use by products' });
+    }
+
+    const [productCodeUsingCategory] = await db
+      .select({ id: productCodes.id })
+      .from(productCodes)
+      .where(eq(productCodes.categoryId, categoryId))
+      .limit(1);
+
+    if (productCodeUsingCategory) {
+      return res.status(409).json({ error: 'Cannot delete category that is in use by product codes' });
+    }
+
+    await db
+      .delete(productCategories)
+      .where(eq(productCategories.id, categoryId));
+
+    res.status(204).send();
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     next(error);
   }
 });
@@ -6975,6 +7368,7 @@ app.get('/api/loans/search', async (req, res, next) => {
       cedulaNo = null,
       principalCents = null,
       description = null,
+      ticketNumber = null,
       branchId = null,
       limit = 100,
     } = req.query ?? {};
@@ -7013,6 +7407,11 @@ app.get('/api/loans/search', async (req, res, next) => {
       if (Number.isFinite(numericPrincipal) && numericPrincipal > 0) {
         filters.push(eq(loans.principalCents, Math.round(numericPrincipal)));
       }
+    }
+
+    // Ticket number filter (exact match)
+    if (ticketNumber && typeof ticketNumber === 'string' && ticketNumber.trim().length > 0) {
+      filters.push(eq(loans.ticketNumber, ticketNumber.trim()));
     }
 
     // Description filter (searches in collateral descriptions)
@@ -17142,6 +17541,7 @@ const customerSelection = {
   email: customers.email,
   phone: customers.phone,
   address: customers.address,
+  dateOfBirth: customers.dateOfBirth,
   isBlacklisted: customers.isBlacklisted,
   loyaltyPoints: customers.loyaltyPoints,
   createdAt: customers.createdAt,
@@ -17176,6 +17576,7 @@ function serializeCustomer(row) {
     email: row.email,
     phone: row.phone,
     address: row.address,
+    dateOfBirth: row.dateOfBirth ? (row.dateOfBirth instanceof Date ? row.dateOfBirth.toISOString().split('T')[0] : row.dateOfBirth) : null,
     isBlacklisted: !!row.isBlacklisted,
     loyaltyPoints: Number(row.loyaltyPoints ?? 0),
     createdAt: row.createdAt?.toISOString?.() ?? row.createdAt,
@@ -17208,6 +17609,7 @@ function buildCustomerWhereClause({ search, branchId, blacklisted }) {
       sql`LOWER(${customers.lastName}) LIKE ${sql.raw(`'${likeValue.replace(/'/g, "''")}'`)}`,
       sql`LOWER(${customers.email}) LIKE ${sql.raw(`'${likeValue.replace(/'/g, "''")}'`)}`,
       like(customers.phone, `%${escapedSearch}%`), // Phone numbers usually don't need case conversion
+      like(customers.cedulaNo, `%${escapedSearch}%`), // Search by cedula number
     ];
 
     // Also search by customer ID if the search term is numeric
@@ -17241,6 +17643,7 @@ async function loadCustomerDetail(customerId) {
       email: customers.email,
       phone: customers.phone,
       address: customers.address,
+      dateOfBirth: customers.dateOfBirth,
       isBlacklisted: customers.isBlacklisted,
       loyaltyPoints: customers.loyaltyPoints,
       createdAt: customers.createdAt,
@@ -19328,6 +19731,48 @@ app.get('/api/settings', async (req, res, next) => {
   }
 });
 
+app.get('/api/imei-lookup', async (req, res, next) => {
+  try {
+    const { imei, service = '54' } = req.query;
+
+    if (!imei || typeof imei !== 'string' || !imei.trim()) {
+      return res.status(400).json({ error: 'imei is required' });
+    }
+
+    // Load mobile API key from settings
+    const settingsEntries = await loadSettingsEntries(
+      { scope: 'global', branchId: null, userId: null },
+      ['pawn.settings']
+    );
+    const pawnSettings = settingsEntries.find((entry) => entry.key === 'pawn.settings');
+    const mobileApiKey = pawnSettings?.value?.mobileApiKey;
+
+    if (!mobileApiKey || typeof mobileApiKey !== 'string' || !mobileApiKey.trim()) {
+      return res.status(400).json({ error: 'Mobile API key is not configured. Please configure it in Settings → System → Pawn → Alerts' });
+    }
+
+    // Proxy request to SickW API
+    const serviceParam = String(service).trim();
+    const sickwUrl = `https://sickw.com/api.php?format=json&key=${encodeURIComponent(mobileApiKey.trim())}&imei=${encodeURIComponent(imei.trim())}&service=${serviceParam}`;
+    
+    const response = await fetch(sickwUrl);
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: 'Failed to lookup IMEI' });
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+
+    console.error('IMEI lookup error:', error);
+    res.status(500).json({ error: 'Internal server error during IMEI lookup' });
+  }
+});
+
 app.get('/api/settings/active-branch', async (req, res, next) => {
   try {
     const branch = await loadActiveBranch();
@@ -19755,6 +20200,7 @@ app.post('/api/customers', async (req, res, next) => {
       email = null,
       phone = null,
       address = null,
+      dateOfBirth = null,
       loyaltyPoints = 0,
     } = req.body ?? {};
 
@@ -19770,6 +20216,9 @@ app.post('/api/customers', async (req, res, next) => {
     const normalizedEmail = normalizeOptionalString(email, { maxLength: 190 });
     const normalizedPhone = normalizeOptionalString(phone, { maxLength: 40 });
     const normalizedAddress = normalizeNullableText(address, 2000);
+    const normalizedDateOfBirth = dateOfBirth && typeof dateOfBirth === 'string' && dateOfBirth.trim() 
+      ? dateOfBirth.trim() 
+      : null;
     const normalizedPoints = Number(loyaltyPoints) || 0;
 
     if (!normalizedFirst) {
@@ -19789,6 +20238,7 @@ app.post('/api/customers', async (req, res, next) => {
         email: normalizedEmail,
         phone: normalizedPhone,
         address: normalizedAddress,
+        dateOfBirth: normalizedDateOfBirth,
         loyaltyPoints: normalizedPoints,
       });
 
@@ -19802,6 +20252,7 @@ app.post('/api/customers', async (req, res, next) => {
           email: customers.email,
           phone: customers.phone,
           address: customers.address,
+          dateOfBirth: customers.dateOfBirth,
           isBlacklisted: customers.isBlacklisted,
           loyaltyPoints: customers.loyaltyPoints,
           createdAt: customers.createdAt,
@@ -19889,6 +20340,12 @@ app.patch('/api/customers/:id', async (req, res, next) => {
 
     if ('address' in req.body) {
       updates.address = normalizeNullableText(req.body.address, 2000);
+    }
+
+    if ('dateOfBirth' in req.body) {
+      updates.dateOfBirth = req.body.dateOfBirth && typeof req.body.dateOfBirth === 'string' && req.body.dateOfBirth.trim()
+        ? req.body.dateOfBirth.trim()
+        : null;
     }
 
     if ('loyaltyPoints' in req.body) {
